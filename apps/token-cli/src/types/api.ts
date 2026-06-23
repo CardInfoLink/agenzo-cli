@@ -1,0 +1,64 @@
+// ============================================================
+// token-cli business response types
+// ============================================================
+//
+// Response shapes owned by token-cli. They live here (not in @agenzo/cli-core)
+// because only token-cli consumes them — per the monorepo convention, cross-CLI
+// types go in cli-core, single-app business types stay in their owning app.
+
+// ---- Payment Method ----
+
+export interface PaymentMethod {
+  id: string;
+  type: string;
+  brand?: string;
+  first6?: string;
+  last4?: string;
+  status: string;
+  magic_link_token?: string;
+  expires_at?: string;
+  created_at: string;
+}
+
+// ---- Revoke result ----
+
+export interface RevokeResult {
+  id: string;
+  status: string;
+  revoked_at?: string;
+  expires_at?: string;
+  message?: string;
+}
+
+// ---- Payment Tokens (logical display models; commands read via Record) ----
+
+export interface VcnToken {
+  id: string;
+  type: 'vcn';
+  card_number: string;
+  expiry: string;
+  cvc: string;
+  last_four: string;
+  amount_limit: number;
+  currency: string;
+  status: string;
+}
+
+export interface NetworkToken {
+  id: string;
+  type: 'network_token';
+  brand: string;
+  eci: string;
+  cryptogram: string;
+  expiry: string;
+  value: string;
+}
+
+export interface X402Token {
+  id: string;
+  type: 'x402';
+  status: string;
+  signature_value: string;
+}
+
+export type PaymentToken = VcnToken | NetworkToken | X402Token;

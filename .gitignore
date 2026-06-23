@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test coverage
+coverage/
+
+# npm
+*.tgz
+
+# Temp
+.kiro_tmp/
+
+# Kiro specs (development only)
+.kiro/
+
+# Local E2E test script (contains personal email / card details)
+scripts/test-commands.sh
+
+
+# CodeGraph
+.codegraph/

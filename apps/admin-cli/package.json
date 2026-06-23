@@ -1,0 +1,24 @@
+{
+  "name": "@agenzo/admin-cli",
+  "version": "0.2.1",
+  "description": "Admin CLI for the Agenzo platform",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "agenzo-admin-cli": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.4.2",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@agenzo/cli-core": "*"
+  }
+}

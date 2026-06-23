@@ -1,0 +1,117 @@
+/**
+ * Unified outward-facing CLI error-code catalog (cli-design §8, single source of truth).
+ *
+ * Every outward code has both a string code (the preferred routing key) and a
+ * numeric code (compact, convenient for log aggregation). The two map 1:1, bound
+ * by {@link CODE_NUM}. String codes are grouped by domain prefix; numeric codes
+ * are segmented by the same domains (§8.3).
+ *
+ * Note: `UPGRADE_REQUIRED` (CLI too old) and `CLIENT_ABORTED` (user-initiated
+ * cancel) are non-business codes detected locally by the CLI. They are not part
+ * of the §8.4 business dictionary and are allocated at the tail of the CLIENT range.
+ */
+export type ErrorCode =
+  // AUTH_* (1000-1099)
+  | 'AUTH_SESSION_EXPIRED'
+  | 'AUTH_MAGIC_LINK_EXPIRED'
+  | 'AUTH_INVITE_CODE_REQUIRED'
+  | 'AUTH_INVITE_CODE_INVALID'
+  // KEY_* (1100-1199)
+  | 'KEY_INVALID'
+  | 'KEY_SCOPE_DENIED'
+  // RESOURCE_* (2000-2099)
+  | 'RESOURCE_NOT_FOUND'
+  | 'RESOURCE_CONFLICT'
+  | 'RESOURCE_STATE_INVALID'
+  // PARAM_* (2100-2199)
+  | 'PARAM_INVALID'
+  | 'PARAM_IDEMPOTENCY_KEY_REQUIRED'
+  | 'PARAM_IDEMPOTENCY_KEY_CONFLICT'
+  // BILLING_* (3000-3099)
+  | 'BILLING_MODE_MISMATCH'
+  // ACCOUNT_* (3100-3199)
+  | 'ACCOUNT_NOT_FOUND'
+  | 'ACCOUNT_SUSPENDED'
+  | 'ACCOUNT_INSUFFICIENT_BALANCE'
+  // PAYMENT_ORDER_* (3200-3299)
+  | 'PAYMENT_ORDER_NOT_FOUND'
+  | 'PAYMENT_ORDER_NOT_PAID'
+  | 'PAYMENT_ORDER_MISMATCH'
+  | 'PAYMENT_ORDER_ALREADY_CONSUMED'
+  // TOKEN_* (4000-4099)
+  | 'TOKEN_FEATURE_DISABLED'
+  // SERVICE_* (4100-4199)
+  | 'SERVICE_NOT_FOUND'
+  // ride business codes (4200-4299)
+  | 'VEHICLE_UNAVAILABLE'
+  | 'QUOTE_EXPIRED'
+  | 'BOOKING_FAILED'
+  | 'CANCELLATION_NOT_ALLOWED'
+  // RATE_* (5000-5099)
+  | 'RATE_LIMITED'
+  // UPSTREAM_* (5100-5199)
+  | 'UPSTREAM_ERROR'
+  // INTERNAL_* (5200-5299)
+  | 'INTERNAL_ERROR'
+  // NOT_IMPLEMENTED (5300)
+  | 'NOT_IMPLEMENTED'
+  // CLIENT_* (9000-9099) — produced locally by the CLI
+  | 'CLIENT_NOT_SIGNED_IN'
+  | 'CLIENT_LOGIN_TIMEOUT'
+  | 'CLIENT_ORG_NOT_LOCAL'
+  | 'CLIENT_ORG_WRONG_ENV'
+  | 'CLIENT_NO_PAYMENT_METHOD'
+  | 'CLIENT_CARD_NOT_MATCHED'
+  | 'CLIENT_ABORTED'
+  // Non-business code (detected locally by the CLI)
+  | 'UPGRADE_REQUIRED';
+
+/**
+ * String code → numeric code (§8.4). Each outward code's numeric value is
+ * uniquely bound by this table; once published it is append-only (never changed).
+ */
+export const CODE_NUM: Record<ErrorCode, number> = {
+  AUTH_SESSION_EXPIRED: 1001,
+  AUTH_MAGIC_LINK_EXPIRED: 1002,
+  AUTH_INVITE_CODE_REQUIRED: 1003,
+  AUTH_INVITE_CODE_INVALID: 1004,
+  KEY_INVALID: 1101,
+  KEY_SCOPE_DENIED: 1102,
+  RESOURCE_NOT_FOUND: 2001,
+  RESOURCE_CONFLICT: 2002,
+  RESOURCE_STATE_INVALID: 2003,
+  PARAM_INVALID: 2101,
+  PARAM_IDEMPOTENCY_KEY_REQUIRED: 2102,
+  PARAM_IDEMPOTENCY_KEY_CONFLICT: 2103,
+  BILLING_MODE_MISMATCH: 3001,
+  ACCOUNT_NOT_FOUND: 3101,
+  ACCOUNT_SUSPENDED: 3102,
+  ACCOUNT_INSUFFICIENT_BALANCE: 3103,
+  PAYMENT_ORDER_NOT_FOUND: 3201,
+  PAYMENT_ORDER_NOT_PAID: 3202,
+  PAYMENT_ORDER_MISMATCH: 3203,
+  PAYMENT_ORDER_ALREADY_CONSUMED: 3204,
+  TOKEN_FEATURE_DISABLED: 4001,
+  SERVICE_NOT_FOUND: 4101,
+  VEHICLE_UNAVAILABLE: 4201,
+  QUOTE_EXPIRED: 4202,
+  BOOKING_FAILED: 4203,
+  CANCELLATION_NOT_ALLOWED: 4204,
+  RATE_LIMITED: 5001,
+  UPSTREAM_ERROR: 5101,
+  INTERNAL_ERROR: 5201,
+  NOT_IMPLEMENTED: 5300,
+  CLIENT_NOT_SIGNED_IN: 9001,
+  CLIENT_LOGIN_TIMEOUT: 9002,
+  CLIENT_ORG_NOT_LOCAL: 9003,
+  CLIENT_ORG_WRONG_ENV: 9004,
+  CLIENT_NO_PAYMENT_METHOD: 9005,
+  CLIENT_CARD_NOT_MATCHED: 9006,
+  CLIENT_ABORTED: 9007,
+  UPGRADE_REQUIRED: 9008,
+};
+
+/** Look up the numeric code for a string error code. */
+export function codeNum(code: ErrorCode): number {
+  return CODE_NUM[code];
+}

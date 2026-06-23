@@ -1,0 +1,416 @@
+{
+  "schema_version": 1,
+  "total_members": 58,
+  "total_unique_codes": 58,
+  "members": [
+    {
+      "name": "ACCESS_DENIED",
+      "code": "1003",
+      "http_status": 403,
+      "default_message": "You do not have permission to access this resource."
+    },
+    {
+      "name": "ACCOUNT_INSUFFICIENT_BALANCE",
+      "code": "1909",
+      "http_status": 402,
+      "default_message": "Insufficient settlement account balance for this booking."
+    },
+    {
+      "name": "ACCOUNT_NOT_FOUND",
+      "code": "1907",
+      "http_status": 404,
+      "default_message": "No settlement account found for this developer."
+    },
+    {
+      "name": "ACCOUNT_SUSPENDED",
+      "code": "1908",
+      "http_status": 403,
+      "default_message": "The settlement account is suspended."
+    },
+    {
+      "name": "API_KEY_DISABLED",
+      "code": "1202",
+      "http_status": 409,
+      "default_message": "This API Key has been disabled."
+    },
+    {
+      "name": "API_KEY_NOT_FOUND",
+      "code": "1301",
+      "http_status": 404,
+      "default_message": "API Key not found."
+    },
+    {
+      "name": "AUDIT_WRITE_FAILED",
+      "code": "1750",
+      "http_status": 500,
+      "default_message": "Audit record write failed. The operation has been rolled back."
+    },
+    {
+      "name": "BILLING_MODE_MISMATCH",
+      "code": "1906",
+      "http_status": 400,
+      "default_message": "The billing mode of this developer does not match the request."
+    },
+    {
+      "name": "BOOKING_FAILED",
+      "code": "1903",
+      "http_status": 502,
+      "default_message": "The ride booking could not be completed. Please try again later."
+    },
+    {
+      "name": "CANCELLATION_NOT_ALLOWED",
+      "code": "1904",
+      "http_status": 409,
+      "default_message": "This ride cannot be cancelled in its current status."
+    },
+    {
+      "name": "CHAIN_ERROR",
+      "code": "1701",
+      "http_status": 502,
+      "default_message": "Blockchain operation failed. Please try again later."
+    },
+    {
+      "name": "DEVELOPER_NOT_FOUND",
+      "code": "1201",
+      "http_status": 404,
+      "default_message": "Developer not found."
+    },
+    {
+      "name": "DUAL_APPROVAL_VIOLATED",
+      "code": "1853",
+      "http_status": 403,
+      "default_message": "Approver must differ from the creator and the first approver."
+    },
+    {
+      "name": "EMAIL_ALREADY_REGISTERED",
+      "code": "1006",
+      "http_status": 409,
+      "default_message": "This email is already registered. Please log in instead."
+    },
+    {
+      "name": "EMAIL_NOT_REGISTERED",
+      "code": "1007",
+      "http_status": 404,
+      "default_message": "This email is not registered. Please register first."
+    },
+    {
+      "name": "EMAIL_SEND_FAILED",
+      "code": "1102",
+      "http_status": 502,
+      "default_message": "Failed to send verification email. Please try again later."
+    },
+    {
+      "name": "FEE_RULE_INVALID_STATE",
+      "code": "1803",
+      "http_status": 409,
+      "default_message": "Fee rule is in a state that does not permit this operation."
+    },
+    {
+      "name": "FEE_RULE_NOT_FOUND",
+      "code": "1802",
+      "http_status": 404,
+      "default_message": "Fee rule not found."
+    },
+    {
+      "name": "FEE_RULE_SELF_APPROVAL",
+      "code": "1804",
+      "http_status": 403,
+      "default_message": "Approver must be different from the creator (no self-approval)."
+    },
+    {
+      "name": "FEE_RULE_VALIDATION",
+      "code": "1801",
+      "http_status": 400,
+      "default_message": "Fee rule validation failed."
+    },
+    {
+      "name": "IDEMPOTENCY_CONFLICT",
+      "code": "1601",
+      "http_status": 409,
+      "default_message": "A request with this idempotency key has already been processed with different parameters."
+    },
+    {
+      "name": "ILLEGAL_STATE_TRANSITION",
+      "code": "1852",
+      "http_status": 409,
+      "default_message": "Operation is in a state that does not permit this action."
+    },
+    {
+      "name": "INSUFFICIENT_BALANCE",
+      "code": "1504",
+      "http_status": 400,
+      "default_message": "Insufficient platform balance for this operation."
+    },
+    {
+      "name": "INSUFFICIENT_FUNDS",
+      "code": "1510",
+      "http_status": 400,
+      "default_message": "Card pre-authorization failed. Please check your card or try a different one."
+    },
+    {
+      "name": "INTERNAL_ERROR",
+      "code": "1999",
+      "http_status": 500,
+      "default_message": "An unexpected error occurred. Please try again later."
+    },
+    {
+      "name": "INVALID_OPERATION_PAYLOAD",
+      "code": "1855",
+      "http_status": 400,
+      "default_message": "Operation payload is invalid."
+    },
+    {
+      "name": "INVALID_PAYMENT_METHOD",
+      "code": "1403",
+      "http_status": 400,
+      "default_message": "The payment method is not available for this operation."
+    },
+    {
+      "name": "INVALID_REQUEST",
+      "code": "1001",
+      "http_status": 400,
+      "default_message": "Invalid request parameters."
+    },
+    {
+      "name": "INVITE_CODE_INVALID",
+      "code": "1104",
+      "http_status": 400,
+      "default_message": "The invitation code is invalid."
+    },
+    {
+      "name": "INVITE_CODE_REQUIRED",
+      "code": "1103",
+      "http_status": 400,
+      "default_message": "An invitation code is required to register."
+    },
+    {
+      "name": "MAGIC_LINK_INVALID",
+      "code": "1101",
+      "http_status": 401,
+      "default_message": "Verification link is invalid or has expired. Please request a new one."
+    },
+    {
+      "name": "NETWORK_MISMATCH",
+      "code": "1507",
+      "http_status": 400,
+      "default_message": "The blockchain network does not match."
+    },
+    {
+      "name": "OPERATION_NOT_FOUND",
+      "code": "1851",
+      "http_status": 404,
+      "default_message": "Operation not found."
+    },
+    {
+      "name": "OPERATOR_ID_REQUIRED",
+      "code": "1854",
+      "http_status": 422,
+      "default_message": "operator_id is required for this operation."
+    },
+    {
+      "name": "PAYMENT_METHOD_DISABLED",
+      "code": "1402",
+      "http_status": 409,
+      "default_message": "This payment method has been disabled."
+    },
+    {
+      "name": "PAYMENT_METHOD_NOT_FOUND",
+      "code": "1401",
+      "http_status": 404,
+      "default_message": "Payment method not found."
+    },
+    {
+      "name": "PAYMENT_REQUEST_EXPIRED",
+      "code": "1508",
+      "http_status": 400,
+      "default_message": "The payment request has expired."
+    },
+    {
+      "name": "PAY_PER_CALL_NOT_AVAILABLE",
+      "code": "1910",
+      "http_status": 501,
+      "default_message": "Pay-per-call billing is not available yet. Use a monthly_settlement developer."
+    },
+    {
+      "name": "PRICE_MISMATCH",
+      "code": "1911",
+      "http_status": 400,
+      "default_message": "The price_amount does not match the quoted price. Please use the amount from the quote response."
+    },
+    {
+      "name": "QUOTE_EXPIRED",
+      "code": "1902",
+      "http_status": 410,
+      "default_message": "The quote has expired. Please request a new one."
+    },
+    {
+      "name": "RATE_LIMIT",
+      "code": "1900",
+      "http_status": 429,
+      "default_message": "Too many requests. Please slow down and try again."
+    },
+    {
+      "name": "RESOURCE_CONFLICT",
+      "code": "1004",
+      "http_status": 409,
+      "default_message": "The request conflicts with the current state."
+    },
+    {
+      "name": "RIDE_NOT_FOUND",
+      "code": "1905",
+      "http_status": 404,
+      "default_message": "Ride order not found."
+    },
+    {
+      "name": "SIGNATURE_STILL_ACTIVE",
+      "code": "1505",
+      "http_status": 409,
+      "default_message": "Cannot revoke: X402 signature is still valid on-chain."
+    },
+    {
+      "name": "SIGNING_ERROR",
+      "code": "1514",
+      "http_status": 500,
+      "default_message": "Payment signing failed. Please try again later."
+    },
+    {
+      "name": "STAFF_DISABLED",
+      "code": "1862",
+      "http_status": 403,
+      "default_message": "Staff is disabled."
+    },
+    {
+      "name": "STAFF_NOT_FOUND",
+      "code": "1861",
+      "http_status": 404,
+      "default_message": "Staff not found."
+    },
+    {
+      "name": "STAFF_ROLE_REQUIRED",
+      "code": "1863",
+      "http_status": 403,
+      "default_message": "Required staff role is not available."
+    },
+    {
+      "name": "STAFF_TOKEN_INVALID",
+      "code": "1864",
+      "http_status": 401,
+      "default_message": "Staff token is invalid."
+    },
+    {
+      "name": "TOKEN_ALREADY_REVOKED",
+      "code": "1502",
+      "http_status": 409,
+      "default_message": "This payment token is in a terminal state and cannot be modified."
+    },
+    {
+      "name": "TOKEN_EXPIRED",
+      "code": "1503",
+      "http_status": 400,
+      "default_message": "This payment token has expired."
+    },
+    {
+      "name": "TOKEN_INVALID",
+      "code": "1002",
+      "http_status": 401,
+      "default_message": "Authentication failed. Please check your credentials."
+    },
+    {
+      "name": "TOKEN_NOT_FOUND",
+      "code": "1501",
+      "http_status": 404,
+      "default_message": "Payment token not found."
+    },
+    {
+      "name": "UNSUPPORTED_CHAIN",
+      "code": "1509",
+      "http_status": 400,
+      "default_message": "The specified blockchain network is not supported."
+    },
+    {
+      "name": "UPSTREAM_ERROR",
+      "code": "1005",
+      "http_status": 502,
+      "default_message": "A third-party service is temporarily unavailable. Please try again later."
+    },
+    {
+      "name": "VCN_FEATURE_DISABLED",
+      "code": "1515",
+      "http_status": 409,
+      "default_message": "VCN is currently unavailable."
+    },
+    {
+      "name": "VEHICLE_CLASS_MISMATCH",
+      "code": "1912",
+      "http_status": 400,
+      "default_message": "The vehicle_class does not match the quoted vehicle. Please use the vehicle_class from the quote response."
+    },
+    {
+      "name": "VEHICLE_UNAVAILABLE",
+      "code": "1901",
+      "http_status": 404,
+      "default_message": "No vehicles are available for this trip."
+    }
+  ],
+  "codes": [
+    "1001",
+    "1002",
+    "1003",
+    "1004",
+    "1005",
+    "1006",
+    "1007",
+    "1101",
+    "1102",
+    "1103",
+    "1104",
+    "1201",
+    "1202",
+    "1301",
+    "1401",
+    "1402",
+    "1403",
+    "1501",
+    "1502",
+    "1503",
+    "1504",
+    "1505",
+    "1507",
+    "1508",
+    "1509",
+    "1510",
+    "1514",
+    "1515",
+    "1601",
+    "1701",
+    "1750",
+    "1801",
+    "1802",
+    "1803",
+    "1804",
+    "1851",
+    "1852",
+    "1853",
+    "1854",
+    "1855",
+    "1861",
+    "1862",
+    "1863",
+    "1864",
+    "1900",
+    "1901",
+    "1902",
+    "1903",
+    "1904",
+    "1905",
+    "1906",
+    "1907",
+    "1908",
+    "1909",
+    "1910",
+    "1911",
+    "1912",
+    "1999"
+  ],
+  "duplicate_codes": {}
+}

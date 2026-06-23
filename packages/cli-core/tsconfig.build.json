@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "include": [
+    "index.ts",
+    "api-client/**/*.ts",
+    "config/**/*.ts",
+    "credential-store/**/*.ts",
+    "key-store/**/*.ts",
+    "errors/**/*.ts",
+    "exit/**/*.ts",
+    "formatter/**/*.ts",
+    "prompt-engine/**/*.ts",
+    "types/**/*.ts",
+    "version/**/*.ts"
+  ],
+  "exclude": ["dist", "tests", "node_modules"]
+}
