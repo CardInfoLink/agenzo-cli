@@ -5,7 +5,7 @@ import {
   PromptEngine,
   Formatter,
   resolveFormat,
-  notify,
+  createSpinner,
   CliError,
   renderWithContext,
 } from '@agenzo/cli-core';
@@ -159,14 +159,16 @@ export function registerQuoteCommand(parent: Command, deps: { apiClient: ApiClie
       body.passenger_email = opts.passengerEmail as string;
     }
 
-    // Progress line: stderr in table mode, silent in json mode.
-    notify(format, 'loading', 'Fetching quotes...');
+    // Animated spinner: visible in table mode, silent in json mode.
+    const spinner = format === 'json' ? null : createSpinner('Fetching quotes...');
 
     const result = await deps.apiClient.post<QuoteResponse>(
       '/ride/quote',
       { type: 'api-key', key: apiKey },
       body,
     );
+
+    spinner?.stop();
 
     if (!result.success) {
       throw CliError.fromApi(result, { auth: 'api-key' });

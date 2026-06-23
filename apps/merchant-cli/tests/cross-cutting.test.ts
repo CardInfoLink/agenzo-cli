@@ -138,15 +138,15 @@ describe('§6.1 output-channel purity', () => {
     expect(stderrText).not.toContain('Fetching quotes');
   });
 
-  it('TC-CHAN-04: the same command in --format table puts the status line on stderr', async () => {
+  it('TC-CHAN-04: the same command in --format table puts the spinner on stdout', async () => {
     const api = mockApiClient({ '/ride/quote': QUOTE_RESP });
     const program = rideProgram(api);
-    captureStdout();
-    const err = captureStderr();
+    const out = captureStdout();
+    captureStderr();
 
     await program.parseAsync(quoteArgs(['--format', 'table']));
 
-    expect(err.text()).toContain('Fetching quotes');
+    expect(out.text()).toContain('Fetching quotes');
   });
 
   it('TC-CHAN-05: the watch line stream is NDJSON-only — no profile/endpoint envelope, one compact line per record', async () => {

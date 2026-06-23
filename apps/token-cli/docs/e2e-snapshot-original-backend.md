@@ -1,19 +1,11 @@
 # Token-CLI E2E Snapshot — Original Backend (PycharmProjects/agenzo)
 
-> 生成时间: 2026-06-11T17:30+08:00
-> 后端: http://localhost:8000 (PycharmProjects/agenzo, FastAPI + MongoDB)
+> Generated: 2026-06-11T17:30+08:00
+> Backend: http://localhost:8000 (PycharmProjects/agenzo, FastAPI + MongoDB)
 > CLI: agenzo-cli/apps/token-cli/dist/index.js (v0.1.0)
 > API Key: sk_test_REDACTED
 > Developer: dev_01KTTY4RB8GTYM89XGVNF40S1P (e2e-test-dev-renamed)
-> 用途: 切换到 agenzo-platform 后端后, 对比输出是否一致
-
----
-
-## 已知问题
-
-- token-cli 在 `--format json` 模式下, 部分命令(list/get)输出为空 (CLI 侧 renderWithContext bug, 非后端问题)
-- 需要 `--yes` flag 避免挂起在交互式 prompt
-- payment-tokens 操作需要 ACTIVE 状态的 payment-method (需完成 3DS 验证)
+> Purpose: Compare output consistency after switching to the agenzo-platform backend
 
 ---
 
@@ -35,7 +27,7 @@
 ```
 Exit: 0
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "0000",
@@ -65,7 +57,7 @@ pm_01KTV00YBJQ4QSQ65Z8YZQ7CHV  card  -      -        -       PENDING
 ```
 Exit: 0
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "0000",
@@ -73,17 +65,13 @@ Exit: 0
   "data": []
 }
 ```
-(注: data=[] 因为这是用另一个 developer 的视角; 同 developer 有数据时 data 是 array of PM objects)
+(Note: data=[] because this is from a different developer's perspective; when the same developer has data, data is an array of PM objects)
 
 ---
 
 ## 3. payment-methods get
 
-### Table (PENDING pm)
-无输出 (CLI json 模式 bug)
-Exit: 0
-
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "0000",
@@ -105,7 +93,7 @@ Exit: 0
 }
 ```
 
-### 错误: not found (table)
+### Error: not found (table)
 ```
 ✗ [2001] The resource was not found or does not belong to the current organization.
 ```
@@ -128,7 +116,7 @@ Exit: 1
 ```
 Exit: 0
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "0000",
@@ -152,7 +140,7 @@ Exit: 0
 ```
 Exit: 0
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "0000",
@@ -165,7 +153,7 @@ Exit: 0
 
 ## 6. payment-tokens create (network_token)
 
-### 后端响应
+### Backend response
 ```json
 {
   "code": "0000",
@@ -200,7 +188,7 @@ Exit: 0
 
 ## 7. payment-tokens list
 
-### 后端响应
+### Backend response
 ```json
 {
   "code": "0000",
@@ -237,7 +225,7 @@ Exit: 0
 
 ## 8. payment-tokens get
 
-### 后端响应
+### Backend response
 ```json
 {
   "code": "0000",
@@ -268,7 +256,7 @@ Exit: 0
 }
 ```
 
-### 错误: not found
+### Error: not found
 ```json
 {
   "code": "1501",
@@ -281,7 +269,7 @@ Exit: 0
 
 ## 9. payment-tokens revoke
 
-### 后端响应
+### Backend response
 ```json
 {
   "code": "0000",
@@ -299,7 +287,7 @@ Exit: 0
 
 ## 10. payment-methods get (ACTIVE, 3DS verified)
 
-### 后端响应
+### Backend response
 ```json
 {
   "code": "0000",
@@ -322,15 +310,15 @@ Exit: 0
 
 ---
 
-## 关键对比维度 (切 platform 后检查)
+## Key Comparison Dimensions (check after switching to platform)
 
-1. **后端信封格式**: `{code:"0000", message:..., data:...}` — platform 必须保持一致
-2. **字段名**: snake_case 一致
-3. **payment-methods add 返回**: id + type + developer_id + member_id + status + verification_url + created_at
+1. **Backend envelope format**: `{code:"0000", message:..., data:...}` — platform must maintain consistency
+2. **Field names**: snake_case consistent
+3. **payment-methods add response**: id + type + developer_id + member_id + status + verification_url + created_at
 4. **payment-methods get (ACTIVE)**: id + type + developer_id + member_id + status + created_at + brand + last4 + first6 + exp_month + exp_year
-5. **payment-methods disable 返回**: id + status + disabled_at + revoked_payment_tokens_count
+5. **payment-methods disable response**: id + status + disabled_at + revoked_payment_tokens_count
 6. **payment-tokens create (network_token)**: id + type + payment_method_id + status + network_token{payment_brand, eci, token_cryptogram, expiry_date, value, created_at}
-7. **payment-tokens list**: data 是数组, 每项含完整 token 数据含嵌套 network_token/vcn
-8. **错误码映射**: 后端 `1501` (token not found) / `1201` (pm not found) → 对应 HTTP 4xx
-9. **X-Api-Key 认证**: header 名 `X-Api-Key`, key 做 SHA256 hash 后与 DB 中 key_hash 比对
-10. **network_token 字段**: payment_brand/eci/token_cryptogram/expiry_date/value/created_at
+7. **payment-tokens list**: data is an array, each item contains full token data including nested network_token/vcn
+8. **Error code mapping**: backend `1501` (token not found) / `1201` (pm not found) maps to corresponding HTTP 4xx
+9. **X-Api-Key auth**: header name `X-Api-Key`, key is SHA256 hashed and compared with key_hash in DB
+10. **network_token fields**: payment_brand/eci/token_cryptogram/expiry_date/value/created_at

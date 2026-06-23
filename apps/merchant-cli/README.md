@@ -135,7 +135,7 @@ The write commands `ride-elife book` / `cancel` accept `--idempotency-key`:
 `ride-elife book` **does not accept** `--payment-method-id` or any card information — the merchant domain holds no payment handle. Funding is decided by the backend according to the Developer's `billing_mode`:
 
 - **monthly_settlement**: deducted from the monthly-settlement account, no payment handle; the response has `payment_status=ON_ACCOUNT` and includes `billing_entry_id`.
-- **pay_per_call**: optionally pass through `--payment-order-id` (a PAID order number already charged by payment-cli); the response echoes `payment_order_id`.
+- **pay_per_call**: optionally pass through `--payment-order-id` (a PAID order number charged separately, out-of-band); the response echoes `payment_order_id`.
 
 The request body contains at most an optional `payment_order_id`.
 

@@ -6,7 +6,7 @@ import {
   PromptEngine,
   Formatter,
   resolveFormat,
-  notify,
+  createSpinner,
   CliError,
   renderWithContext,
 } from '@agenzo/cli-core';
@@ -244,8 +244,8 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       commandPath: 'ride-elife book',
     });
 
-    // Progress line: stderr in table mode, silent in json mode.
-    notify(format, 'loading', 'Booking ride...');
+    // Animated spinner: visible in table mode, silent in json mode.
+    const spinner = format === 'json' ? null : createSpinner('Booking ride...');
 
     const result = await deps.apiClient.post<BookResponse>(
       '/ride/book',
@@ -253,6 +253,8 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       body,
       { 'Idempotency-Key': idempotencyKey },
     );
+
+    spinner?.stop();
 
     if (!result.success) {
       throw CliError.fromApi(result, { auth: 'api-key' });

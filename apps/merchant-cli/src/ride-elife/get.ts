@@ -5,7 +5,7 @@ import {
   PromptEngine,
   Formatter,
   resolveFormat,
-  notify,
+  createSpinner,
   CliError,
   renderWithContext,
 } from '@agenzo/cli-core';
@@ -148,13 +148,15 @@ export function registerRideGetCommand(parent: Command, deps: { apiClient: ApiCl
       return;
     }
 
-    // Single-shot: progress line on stderr (silent in json mode).
-    notify(format, 'loading', 'Fetching ride status...');
+    // Animated spinner: visible in table mode, silent in json mode.
+    const spinner = format === 'json' ? null : createSpinner('Fetching ride status...');
 
     const result = await deps.apiClient.get<GetOrderResponse>(
       `/ride/${encodeURIComponent(orderId)}/status`,
       { type: 'api-key', key: apiKey },
     );
+
+    spinner?.stop();
 
     if (!result.success) {
       throw CliError.fromApi(result, { auth: 'api-key' });

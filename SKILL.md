@@ -15,7 +15,7 @@ This project migrated from a monolithic CLI to a monorepo (`agenzo-cli/`), split
 | `merchant-cli` | `@agenzo/merchant-cli` | `agenzo-merchant-cli` | API Key | [doc/merchant-cli.md](doc/merchant-cli.md) |
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
-- **token-cli** — payment-methods (card binding + 3DS) and payment-tokens (VCN / Network Token / X402).
+- **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
 - **merchant-cli** — ride-elife ride fulfillment (quote / book / get / cancel / list-orders).
 
 ## Behavior Rules (all CLIs)
@@ -50,7 +50,7 @@ Follow this order across CLIs — each step depends on the previous one:
 ```
 
 - Steps 1–3 (login / create developer / create API key) → [admin-cli guide](doc/admin-cli.md)
-- Steps 4–5 (card binding + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
+- Steps 4–5 (add payment method + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
 - Ride fulfillment (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md)
 
 ## Shared Conventions

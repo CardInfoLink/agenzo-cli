@@ -6,7 +6,7 @@ import {
   PromptEngine,
   Formatter,
   resolveFormat,
-  notify,
+  createSpinner,
   CliError,
   renderWithContext,
 } from '@agenzo/cli-core';
@@ -125,8 +125,8 @@ export function registerCancelCommand(parent: Command, deps: { apiClient: ApiCli
       commandPath: 'ride-elife cancel',
     });
 
-    // Progress line: stderr in table mode, silent in json mode.
-    notify(format, 'loading', 'Cancelling ride...');
+    // Animated spinner: visible in table mode, silent in json mode.
+    const spinner = format === 'json' ? null : createSpinner('Cancelling ride...');
 
     // POST /ride/<id>/cancel carries NO body — only the Idempotency-Key header.
     const result = await deps.apiClient.post<CancelResponse>(
@@ -135,6 +135,8 @@ export function registerCancelCommand(parent: Command, deps: { apiClient: ApiCli
       undefined,
       { 'Idempotency-Key': idempotencyKey },
     );
+
+    spinner?.stop();
 
     if (!result.success) {
       throw CliError.fromApi(result, { auth: 'api-key' });

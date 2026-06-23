@@ -1,15 +1,15 @@
 # Admin-CLI E2E Snapshot — Original Backend (PycharmProjects/agenzo)
 
-> 生成时间: 2026-06-11T16:50+08:00
-> 后端: http://localhost:8000 (PycharmProjects/agenzo, FastAPI + MongoDB)
+> Generated: 2026-06-11T16:50+08:00
+> Backend: http://localhost:8000 (PycharmProjects/agenzo, FastAPI + MongoDB)
 > CLI: agenzo-cli/apps/admin-cli/dist/index.js (v0.1.1)
-> 用途: 切换到 agenzo-platform 后端后, 对比输出是否一致
+> Purpose: Compare output consistency after switching to the agenzo-platform backend
 
 ---
 
-## 测试数据
+## Test Data
 
-| 实体 | ID | 备注 |
+| Entity | ID | Notes |
 |---|---|---|
 | Organization | org_01KT35C83PGV2HG554WFC0VR2G | Acme Inc. / henry.li@cardinfolink.com |
 | Developer (pay_per_call) | dev_01KTTY4RB8GTYM89XGVNF40S1P | e2e-test-dev-renamed / e2e-updated@test.com |
@@ -43,7 +43,7 @@ Exit: 0
 
 ---
 
-## 2. config set-host (命中凭证)
+## 2. config set-host (credential match)
 
 ### Table
 ```
@@ -66,7 +66,7 @@ Exit: 0
 
 ---
 
-## 2b. config set-host (无匹配凭证)
+## 2b. config set-host (no credential match)
 
 ### Table
 ```
@@ -222,7 +222,7 @@ Exit: 0
 
 ## 8. orgs switch
 
-### 成功 (JSON)
+### Success (JSON)
 ```json
 {
   "profile": "custom",
@@ -232,7 +232,7 @@ Exit: 0
 ```
 Exit: 0
 
-### 失败: org not found (JSON)
+### Failure: org not found (JSON)
 ```json
 {"error":{"code":"CLIENT_NOT_SIGNED_IN","code_num":9001,"message":"Organization org_NOTEXIST not signed in locally"}}
 ```
@@ -339,7 +339,7 @@ Updated       2026-06-02 11:22:07 (UTC+08:00)
 ```
 Exit: 0
 
-### 错误: not found
+### Error: not found
 ```json
 {"error":{"code":"RESOURCE_NOT_FOUND","code_num":2001,"message":"The resource was not found or does not belong to the current organization."}}
 ```
@@ -394,7 +394,7 @@ Exit: 0
 ```
 Exit: 0
 
-### 错误: invalid billing-mode
+### Error: invalid billing-mode
 ```json
 {"error":{"code":"PARAM_INVALID","code_num":2101,"message":"Invalid --billing-mode: weekly. Allowed: pay_per_call, monthly_settlement."}}
 ```
@@ -430,7 +430,7 @@ Status  ACTIVE
 ```
 Exit: 0
 
-### 错误: not found
+### Error: not found
 ```json
 {"error":{"code":"RESOURCE_NOT_FOUND","code_num":2001,"message":"The resource was not found or does not belong to the current organization."}}
 ```
@@ -549,7 +549,7 @@ Created       2026-06-11 16:53:16 (UTC+08:00)
 ```
 Exit: 0
 
-### 错误: not found
+### Error: not found
 ```json
 {"error":{"code":"RESOURCE_NOT_FOUND","code_num":2001,"message":"The resource was not found or does not belong to the current organization."}}
 ```
@@ -613,7 +613,7 @@ Exit: 0
 
 ---
 
-## 18. accounts get (monthly_settlement developer, 有余额)
+## 18. accounts get (monthly_settlement developer, has balance)
 
 ### Table
 ```
@@ -645,7 +645,7 @@ Exit: 0
 
 ---
 
-## 18b. accounts get (pay_per_call developer, 无账户)
+## 18b. accounts get (pay_per_call developer, no account)
 
 ### Table
 ```
@@ -689,8 +689,8 @@ Exit: 0
 ```
 Exit: 0
 
-### 错误: not signed in (已退出后再退出)
-原后端行为: 返回 signed_out:true (不报错, 直接成功)
+### Error: not signed in (already logged out)
+Backend behavior: returns signed_out:true (no error, succeeds directly)
 ```json
 {
   "profile": "custom",
@@ -702,9 +702,9 @@ Exit: 0
 
 ---
 
-## 20. 未登录状态下调用需认证命令
+## 20. Unauthenticated state — calling commands that require auth
 
-### orgs get (未登录)
+### orgs get (not signed in)
 ```json
 {"error":{"code":"CLIENT_NOT_SIGNED_IN","code_num":9001,"message":"Not signed in"}}
 ```
@@ -712,9 +712,9 @@ Exit: 1
 
 ---
 
-## 错误场景汇总
+## Error Scenarios Summary
 
-### 缺少 idempotency-key
+### Missing idempotency-key
 ```json
 {"error":{"code":"PARAM_IDEMPOTENCY_KEY_REQUIRED","code_num":2102,"message":"`orgs update` requires --idempotency-key <key>. Supply a unique key so the write can be safely retried."}}
 ```
@@ -726,7 +726,7 @@ Exit: 1
 ```
 Exit: 1
 
-### 无效 billing-mode
+### Invalid billing-mode
 ```json
 {"error":{"code":"PARAM_INVALID","code_num":2101,"message":"Invalid --billing-mode: weekly. Allowed: pay_per_call, monthly_settlement."}}
 ```
@@ -740,15 +740,15 @@ Exit: 1
 
 ---
 
-## 关键对比维度 (切 platform 后检查)
+## Key Comparison Dimensions (check after switching to platform)
 
-1. **JSON 字段名完全一致** — snake_case, 字段集合相同
-2. **信封结构** — `profile`/`endpoint` 前置 + 业务字段
-3. **list 命令** — 包含 `page` 分页对象
-4. **错误信封** — `{"error":{"code","code_num","message"}}`
-5. **退出码** — 0/1/3 映射正确
-6. **accounts get** — 有账户返回实体, 无账户返回 `{code:"0000", message:..., data:null}`
-7. **billing_mode** — 创建时传入, 响应回显
-8. **scope** — 数组形态, create/list/get/rotate 都返回
-9. **时间格式** — ISO-8601 UTC offset `+00:00`
-10. **balance** — 字符串类型 (非数字)
+1. **JSON field names fully consistent** — snake_case, same field set
+2. **Envelope structure** — `profile`/`endpoint` prefix + business fields
+3. **list commands** — include `page` pagination object
+4. **Error envelope** — `{"error":{"code","code_num","message"}}`
+5. **Exit codes** — 0/1/3 mapping correct
+6. **accounts get** — has account returns entity, no account returns `{code:"0000", message:..., data:null}`
+7. **billing_mode** — passed at creation, echoed in response
+8. **scope** — array format, returned in create/list/get/rotate
+9. **Time format** — ISO-8601 UTC offset `+00:00`
+10. **balance** — string type (not number)

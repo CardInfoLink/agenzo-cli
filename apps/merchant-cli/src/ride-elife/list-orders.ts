@@ -5,7 +5,7 @@ import {
   PromptEngine,
   Formatter,
   resolveFormat,
-  notify,
+  createSpinner,
   CliError,
   renderWithContext,
 } from '@agenzo/cli-core';
@@ -115,14 +115,16 @@ export function registerListOrdersCommand(parent: Command, deps: { apiClient: Ap
     if (opts.status !== undefined) params.status = opts.status as string;
     if (opts.orderType !== undefined) params.order_type = opts.orderType as string;
 
-    // Progress line: stderr in table mode, silent in json mode.
-    notify(format, 'loading', 'Fetching orders...');
+    // Animated spinner: visible in table mode, silent in json mode.
+    const spinner = format === 'json' ? null : createSpinner('Fetching orders...');
 
     const result = await deps.apiClient.get<ListOrdersResponse>(
       '/ride/orders',
       { type: 'api-key', key: apiKey },
       params,
     );
+
+    spinner?.stop();
 
     if (!result.success) {
       throw CliError.fromApi(result, { auth: 'api-key' });

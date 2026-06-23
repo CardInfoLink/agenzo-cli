@@ -277,11 +277,11 @@ describe('ride-elife quote', () => {
     expect(err.text()).not.toContain('Fetching quotes');
   });
 
-  it('TC-QUOTE-10: table mode emits the progress line on stderr', async () => {
+  it('TC-QUOTE-10: table mode emits the progress spinner on stdout', async () => {
     const api = mockApiClient({ '/ride/quote': QUOTE_RESP });
     const program = rideProgram(api);
-    captureStdout();
-    const err = captureStderr();
+    const out = captureStdout();
+    captureStderr();
 
     await program.parseAsync([
       ...BASE, 'quote', '--api-key', 'k',
@@ -290,7 +290,7 @@ describe('ride-elife quote', () => {
       '--pickup-time', 'now', '--format', 'table',
     ]);
 
-    expect(err.text()).toContain('Fetching quotes');
+    expect(out.text()).toContain('Fetching quotes');
   });
 });
 

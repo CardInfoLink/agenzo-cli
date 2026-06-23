@@ -1,218 +1,218 @@
-# agenzo-merchant-cli 测试设计文档（Test Design）
+# agenzo-merchant-cli Test Design Document
 
-> 本文档为 `agenzo-merchant-cli` 的测试设计，对齐 spec（`requirements.md` / `design.md` / `tasks.md`）与 `doc/architecture-upgrade/v1/cli-design.md` §4（命令字段级规范）+ §8（错误码字典）。
-> 范围 = **7 条命令矩阵**（`services` 2 条 + `ride-elife` 5 条）+ 5 项横切一致性约束（输出契约 / 错误映射 / 幂等键 / NDJSON watch / 逐字对齐）。
-> 权威顺序：cli-standard.md > cli-design.md §4 > design.md。
-> 仓库：`agenzo-cli/apps/merchant-cli`（binary `agenzo-merchant-cli`，package `@agenzo/merchant-cli`），TypeScript + commander@14 + vitest + tsup；通用件全部 import 自 `@agenzo/cli-core`。
-> 本文档是 UT 模块（tasks 6.2–6.5）的实现蓝图与覆盖核对清单：每个用例标注用例编号 + 对应需求 / design Property，§8 给出命令 × 需求/属性覆盖矩阵，§9 给出已规划自动化测试文件映射。
-
----
-
-## 1. 测试目标与范围
-
-### 1.1 目标
-
-1. 验证 7 条命令的输入/输出/HTTP 行为与 cli-design §4.4 字段级规范 + 现有 `merchant-cli/src/` 实现**逐字一致**（noun `ride-elife`、子路径 `/ride/quote`、`/ride/book`、`/ride/<id>/status`、`/ride/<id>/cancel`、`/ride/orders`、decimal 金额单位）（Req 7.1 / Property 7）。
-2. 验证 API Key 鉴权（`--api-key` → `X-Api-Key` 头）在全部 7 条联网命令上正确携带；缺省时交互索取（password prompt）。
-3. 验证 `--format` 默认 `json`（D2，agent-first，刻意偏离 cli-core 的 `table` 默认）；json 模式 stdout 仅含单一合法 JSON（业务 payload + `profile`/`endpoint` 信封），stderr 完全静默；table 模式状态行/spinner 走 stderr（Req 5.1 / Property 1）。
-4. 验证 `--idempotency-key` 在 2 条写命令（`ride-elife book` / `cancel`）上：`--yes` 缺键 → `PARAM_IDEMPOTENCY_KEY_REQUIRED`（exit 1）且**不发请求**；非 `--yes` 缺键 → 交互索取；键格式 `[A-Za-z0-9_-]{1,128}`，作为 `Idempotency-Key` 头发送、**不进 body**；CLI 永不自动生成（Req 5.3 / Property 3）。
-5. 验证错误码归并（对外码 ∈ §8 catalog）与退出码映射（ride/`SERVICE_*`/`BILLING_*`/`ACCOUNT_*`/`PAYMENT_ORDER_*`/`PARAM_*`→1、`KEY_*`→3、`UPSTREAM_/INTERNAL_/RATE_LIMITED`→4、`CLIENT_ABORTED`→5、`UPGRADE_REQUIRED`→2）；api-key 401→`KEY_INVALID`、403→`KEY_SCOPE_DENIED`；ride 后端字符串码保真（`QUOTE_EXPIRED`/`VEHICLE_UNAVAILABLE`/`BILLING_MODE_MISMATCH`/`PAYMENT_ORDER_*`，D3）（Req 5.2/5.4 / Property 4）。
-6. 验证 `ride-elife book` 的请求 body **恒不含** `payment_method_id`/卡信息，至多含可选 `payment_order_id`（pay_per_call）；funding 由后端按 `billing_mode` 决定（Req 2.2 / Property 5）。
-7. 验证 `ride-elife get --watch` 的 NDJSON 轮询：每行独立合法 JSON、命中终态集合或超时即停、超时末行 `{ watch_status:'timeout', ... }`、watch 流**不套** profile/endpoint 信封（Req 3.2 / Property 2）。
-8. 验证 merchant-cli 不存在本地 `api-client`/`config-manager`/`errors`/`formatter`/`output`/`prompt-engine`/`version` 副本，全部 import 自 `@agenzo/cli-core`，且不 import 任何其它 app（Req 4.1/4.3 / Property 6）。
-
-### 1.2 范围内（In Scope）
-
-- 7 条命令：`services list/get` + `ride-elife quote/book/get(+--watch)/cancel/list-orders`。
-- 全局 flag：`--format`（json/table，**默认 json**）、`--yes`、`--verbose`、`--api-key`（program 级 + 每命令级均声明）。
-- API Key 鉴权模型（`--api-key` → `X-Api-Key` header；缺省 `PromptEngine.resolveInput` password 索取）。
-- 应用域逻辑（留 app 内，Req 4.4）：ride body 组装（坐标 number 化、必填校验、座椅 0–5）、NDJSON watch（`watch.ts`）、`--help --format json` verb-schema（`verb-schema.ts`）、services 内置注册表（`registry.ts`）、幂等键 resolve/normalize（`idempotency.ts`）。
-- `CliError.fromApi(result, { auth:'api-key' })` 的 api-key 参数化（401→`KEY_INVALID`、403→`KEY_SCOPE_DENIED`）+ §8 字符串码保真（D3）。
-- `renderWithContext`（profile/endpoint 信封，BACK-011）。
-
-### 1.3 范围外（Out of Scope）
-
-- admin-cli 的 auth/config/orgs/developers/keys/accounts 命令；token-cli 的 payment-methods/payment-tokens 命令；payment-cli。
-- 任何 host 配置命令（无 `config` noun）：环境治理归 admin-cli（admin 的 `config set-host` 统一设定），merchant-cli 共享其配置、不治理环境。
-- `ride-elife track`（D5，pending impl，后端无位置流接口）——`get --watch` 的订单状态轮询保留。
-- 后端 `/services` discovery endpoint（BACK-063）/ 顶层 `billing` 块 / `page` 游标（D4，pending impl）——本期 `services list/get` 读内置 `registry.ts`。
-- 后端 v3 的实际幂等去重落地（仅验证 CLI 侧 `Idempotency-Key` 头透传）。
-- 后端 ride 第二阶段（payment-order-id 反查 / 月结账户扣减）的服务端逻辑（CLI 仅透传可选 `--payment-order-id`）。
-- cli-core 内部实现（`ApiClient`/`exitCodeFor`/`error-catalog` 等）的单测——属 cli-core 自身测试套件。
+> This document is the test design for `agenzo-merchant-cli`, aligned with the spec (`requirements.md` / `design.md` / `tasks.md`) and `doc/architecture-upgrade/v1/cli-design.md` §4 (command field-level specification) + §8 (error code dictionary).
+> Scope = **7-command matrix** (`services` 2 commands + `ride-elife` 5 commands) + 5 cross-cutting consistency constraints (output contract / error mapping / idempotency key / NDJSON watch / verbatim alignment).
+> Authoritative order: cli-standard.md > cli-design.md §4 > design.md.
+> Repository: `agenzo-cli/apps/merchant-cli` (binary `agenzo-merchant-cli`, package `@agenzo/merchant-cli`), TypeScript + commander@14 + vitest + tsup; all shared utilities imported from `@agenzo/cli-core`.
+> This document is the implementation blueprint and coverage checklist for the UT module (tasks 6.2–6.5): each case is annotated with a case number + corresponding requirement / design Property. §8 provides the command × requirement/property coverage matrix, §9 provides the planned automated test file mapping.
 
 ---
 
-## 2. 测试分层策略
+## 1. Test Objectives and Scope
 
-| 层级 | 工具 | 是否需网络 | 覆盖对象 | 优先级 |
+### 1.1 Objectives
+
+1. Verify that 7 commands' input/output/HTTP behavior is **verbatim consistent** with cli-design §4.4 field-level specification + existing `merchant-cli/src/` implementation (noun `ride-elife`, sub-paths `/ride/quote`, `/ride/book`, `/ride/<id>/status`, `/ride/<id>/cancel`, `/ride/orders`, decimal monetary amounts) (Req 7.1 / Property 7).
+2. Verify API Key authentication (`--api-key` → `X-Api-Key` header) is correctly included on all 7 network-connected commands; when omitted, interactively prompted (password prompt).
+3. Verify `--format` defaults to `json` (D2, agent-first, intentionally deviating from cli-core's `table` default); in json mode stdout contains only a single valid JSON (business payload + `profile`/`endpoint` envelope), stderr is completely silent; in table mode status lines/spinner go to stderr (Req 5.1 / Property 1).
+4. Verify `--idempotency-key` on 2 write commands (`ride-elife book` / `cancel`): `--yes` with missing key → `PARAM_IDEMPOTENCY_KEY_REQUIRED` (exit 1) and **no request sent**; without `--yes` and missing key → interactive prompt; key format `[A-Za-z0-9_-]{1,128}`, sent as `Idempotency-Key` header, **not in body**; CLI never auto-generates (Req 5.3 / Property 3).
+5. Verify error code consolidation (external codes ∈ §8 catalog) and exit code mapping (ride/`SERVICE_*`/`BILLING_*`/`ACCOUNT_*`/`PAYMENT_ORDER_*`/`PARAM_*`→1, `KEY_*`→3, `UPSTREAM_/INTERNAL_/RATE_LIMITED`→4, `CLIENT_ABORTED`→5, `UPGRADE_REQUIRED`→2); api-key 401→`KEY_INVALID`, 403→`KEY_SCOPE_DENIED`; ride backend string codes preserved verbatim (`QUOTE_EXPIRED`/`VEHICLE_UNAVAILABLE`/`BILLING_MODE_MISMATCH`/`PAYMENT_ORDER_*`, D3) (Req 5.2/5.4 / Property 4).
+6. Verify `ride-elife book` request body **never contains** `payment_method_id`/card info, at most contains optional `payment_order_id` (pay_per_call); funding is determined by the backend based on `billing_mode` (Req 2.2 / Property 5).
+7. Verify `ride-elife get --watch` NDJSON polling: each line is independently valid JSON, stops on terminal status set match or timeout, timeout final line `{ watch_status:'timeout', ... }`, watch stream **does not wrap** in profile/endpoint envelope (Req 3.2 / Property 2).
+8. Verify merchant-cli has no local `api-client`/`config-manager`/`errors`/`formatter`/`output`/`prompt-engine`/`version` copies; all imported from `@agenzo/cli-core`, and does not import any other app (Req 4.1/4.3 / Property 6).
+
+### 1.2 In Scope
+
+- 7 commands: `services list/get` + `ride-elife quote/book/get(+--watch)/cancel/list-orders`.
+- Global flags: `--format` (json/table, **default json**), `--yes`, `--verbose`, `--api-key` (declared at both program level and per-command level).
+- API Key authentication model (`--api-key` → `X-Api-Key` header; when omitted `PromptEngine.resolveInput` password prompt).
+- Application domain logic (kept in-app, Req 4.4): ride body assembly (coordinate numericization, required field validation, seat count 0–5), NDJSON watch (`watch.ts`), `--help --format json` verb-schema (`verb-schema.ts`), services built-in registry (`registry.ts`), idempotency key resolve/normalization (`idempotency.ts`).
+- `CliError.fromApi(result, { auth:'api-key' })` with api-key parameterization (401→`KEY_INVALID`, 403→`KEY_SCOPE_DENIED`) + §8 string code preservation (D3).
+- `renderWithContext` (profile/endpoint envelope, BACK-011).
+
+### 1.3 Out of Scope
+
+- admin-cli's auth/config/orgs/developers/keys/accounts commands; token-cli's payment-methods/payment-tokens commands; payment-cli.
+- Any host configuration commands (no `config` noun): environment governance belongs to admin-cli (admin's `config set-host` sets it uniformly), merchant-cli shares its config and does not govern the environment.
+- `ride-elife track` (D5, pending impl, backend has no location stream endpoint) — `get --watch` for order status polling is retained.
+- Backend `/services` discovery endpoint (BACK-063) / top-level `billing` block / `page` cursor (D4, pending impl) — this iteration's `services list/get` reads the built-in `registry.ts`.
+- Backend v3 actual idempotency deduplication implementation (only verifies CLI-side `Idempotency-Key` header forwarding).
+- Backend ride second phase (payment-order-id reverse lookup / monthly settlement deduction) server-side logic (CLI only forwards optional `--payment-order-id`).
+- cli-core internal implementation (`ApiClient`/`exitCodeFor`/`error-catalog` etc.) unit tests — those belong to cli-core's own test suite.
+
+---
+
+## 2. Test Layering Strategy
+
+| Layer | Tool | Network Required | Coverage Target | Priority |
 |---|---|---|---|---|
-| L1 单元测试（Unit，纯函数） | vitest | 否 | `normalizeIdempotencyKey`/`resolveIdempotencyKey`、watch 引擎 `isTerminalStatus`/`statusOf`/`resolveSeconds`/`runWatch`、`need`/`num`/`seatCount`/`positiveInt` body 校验、`wantsJsonSchema`/`emitSchema`、registry `findService` | P0（必做） |
-| L2 属性测试（PBT） | vitest + fast-check | 否 | 幂等键格式 `[A-Za-z0-9_-]{1,128}` 接受/拒绝；watch 对任意状态序列的终止性 + 超时末行不变量 | P0（必做） |
-| L3 命令集成测试（CLI mock） | vitest + mock `ApiClient` | 否 | 7 条命令 happy path + 关键分支 + 横切（输出通道纯净 / 幂等必传 / 错误映射），亦给出手动可执行执行步骤 | P0（必做） |
-| L4 命令级冒烟 + 逐字对齐核对（E2E + Diff Review） | 编译产物 `agenzo-merchant-cli` + 真实 v3 host；代码走查 + git diff | 是（E2E）/ 否（Diff） | 7 条命令端到端输入/输出/退出码；命令 noun/verb/flags/path/字段与 cli-design §4.4 逐字一致 | P1（手动，README 记录） |
+| L1 Unit Tests (pure functions) | vitest | No | `normalizeIdempotencyKey`/`resolveIdempotencyKey`, watch engine `isTerminalStatus`/`statusOf`/`resolveSeconds`/`runWatch`, `need`/`num`/`seatCount`/`positiveInt` body validation, `wantsJsonSchema`/`emitSchema`, registry `findService` | P0 (required) |
+| L2 Property-Based Tests (PBT) | vitest + fast-check | No | Idempotency key format `[A-Za-z0-9_-]{1,128}` accept/reject; watch termination invariant + timeout final line invariant for arbitrary status sequences | P0 (required) |
+| L3 Command Integration Tests (CLI mock) | vitest + mock `ApiClient` | No | 7 commands happy path + key branches + cross-cutting (output channel purity / idempotency enforcement / error mapping), also provides manually executable steps | P0 (required) |
+| L4 Command-Level Smoke + Verbatim Alignment Review (E2E + Diff Review) | Compiled binary `agenzo-merchant-cli` + real v3 host; code review + git diff | Yes (E2E) / No (Diff) | 7 commands end-to-end input/output/exit codes; command noun/verb/flags/path/fields verbatim consistent with cli-design §4.4 | P1 (manual, documented in README) |
 
-> 说明：L1/L2 是本迭代必做的自动化测试（tasks 6.5 PBT + 6.2–6.4 内含的纯函数单测）。L3 命令集成（tasks 6.2–6.4）mock `ApiClient`、不 mock commander（真实 `parseAsync`）。L4 命令级冒烟以**手动可执行步骤**给出（§6），需真实 merchant-scope key；逐字对齐核对（§7）以代码走查形式对比 cli-design §4.4。
+> Notes: L1/L2 are the required automated tests for this iteration (tasks 6.5 PBT + 6.2–6.4 contained pure function unit tests). L3 command integration (tasks 6.2–6.4) mocks `ApiClient`, does not mock commander (real `parseAsync`). L4 command-level smoke provided as **manually executable steps** (§6), requires a real merchant-scope key; verbatim alignment review (§7) is a code review comparing against cli-design §4.4.
 
 ---
 
-## 3. 测试环境与前置准备
+## 3. Test Environment and Prerequisites
 
-### 3.1 构建
+### 3.1 Build
 
 ```bash
 npm install
-npm run build -w @agenzo/cli-core      # 必须先 build cli-core（1.1 类型 / 1.2 错误码改动）
-npm run build -w @agenzo/merchant-cli  # tsup 产出 dist/index.js，bin = agenzo-merchant-cli
-npm run test -w @agenzo/merchant-cli   # vitest run（全量；含 PBT，注意 LongRunningPBT）
+npm run build -w @agenzo/cli-core      # Must build cli-core first (1.1 types / 1.2 error code changes)
+npm run build -w @agenzo/merchant-cli  # tsup outputs dist/index.js, bin = agenzo-merchant-cli
+npm run test -w @agenzo/merchant-cli   # vitest run (full; includes PBT, note LongRunningPBT)
 agenzo-merchant-cli --version
 ```
 
-> 关键约束（cli-monorepo-checklist）：改了 cli-core 导出后，**先 build cli-core 再** typecheck/test merchant-cli，否则 `@agenzo/cli-core` 解析旧 dist 报 TS2305。
+> Key constraint (cli-monorepo-checklist): After modifying cli-core exports, **build cli-core first before** typechecking/testing merchant-cli, otherwise `@agenzo/cli-core` resolves to old dist and throws TS2305.
 
-### 3.2 后端环境（L4 手动测试用）
+### 3.2 Backend Environment (for L4 manual testing)
 
-- testing host：`https://agent-test.everonet.com`（host 由 admin-cli `config set-host` 统一设定；merchant-cli 共享 `~/.agenzo-admin-cli/` 默认配置）。
-- API path：`/api/v3/agent-pay`（v3 信封 `{ code, message, data }`，cli-core `ApiClient` 自动解包）。
-- 需要一个有效的 **merchant scope** API Key（由 `agenzo-admin-cli keys create --scope merchant` 签发）。
+- Testing host: `https://agent-test.everonet.com` (host is set uniformly by admin-cli `config set-host`; merchant-cli shares `~/.agenzo-admin-cli/` default config).
+- API path: `/api/v3/agent-pay` (v3 envelope `{ code, message, data }`, cli-core `ApiClient` auto-unwraps).
+- Requires a valid **merchant scope** API Key (issued by `agenzo-admin-cli keys create --scope merchant`).
 
-### 3.3 通用断言工具
+### 3.3 Common Assertion Utilities
 
-- JSON 校验：`agenzo-merchant-cli <cmd> --format json | jq .` 必须成功解析（stdout 是单一合法 JSON）。
-- 退出码校验：命令后立即 `echo $?`。
-- stdout/stderr 分离：`agenzo-merchant-cli <cmd> --format json 1>out.txt 2>err.txt`，断言 `out.txt` 仅含 payload + `profile`/`endpoint`，状态行/spinner 全在 `err.txt`。
-- json 模式 stderr 静默：`err.txt` 不含任何状态图标（`✓`/`ℹ`/`⚠`/`✗`）或人读状态文案。
-- watch NDJSON 校验：`agenzo-merchant-cli ride-elife get --order-id <id> --watch | while read line; do echo "$line" | jq -e . >/dev/null; done`（每行可单独 `jq` 解析）。
+- JSON validation: `agenzo-merchant-cli <cmd> --format json | jq .` must parse successfully (stdout is a single valid JSON).
+- Exit code validation: `echo $?` immediately after command.
+- stdout/stderr separation: `agenzo-merchant-cli <cmd> --format json 1>out.txt 2>err.txt`, assert `out.txt` contains only payload + `profile`/`endpoint`, status lines/spinner all in `err.txt`.
+- json mode stderr silence: `err.txt` does not contain any status icons (`✓`/`ℹ`/`⚠`/`✗`) or human-readable status text.
+- watch NDJSON validation: `agenzo-merchant-cli ride-elife get --order-id <id> --watch | while read line; do echo "$line" | jq -e . >/dev/null; done` (each line can be independently parsed by `jq`).
 
-### 3.4 全局 flag 约定
+### 3.4 Global Flag Conventions
 
-- `--format <json|table>`：**默认 json**（D2）；亦读 `AGENZO_FORMAT`（`preAction` 钩子镜像 resolved format）。
-- `--api-key <key>`：→ `X-Api-Key` 头；缺省时交互 password 索取。
-- `--yes`：关闭交互式 confirm/prompt（供 CI / Agent）；写命令在 `--yes` 缺幂等键时 hard error。
-- `--verbose`：详细日志（→ stderr；未知错误在 table 模式追加 raw dump）。
+- `--format <json|table>`: **default json** (D2); also reads `AGENZO_FORMAT` (`preAction` hook mirrors resolved format).
+- `--api-key <key>`: → `X-Api-Key` header; when omitted, interactive password prompt.
+- `--yes`: Disables interactive confirm/prompt (for CI / Agent); write commands with `--yes` and missing idempotency key produce hard error.
+- `--verbose`: Verbose logging (→ stderr; unknown errors in table mode append raw dump).
 
-### 3.5 退出码语义
+### 3.5 Exit Code Semantics
 
-`0` 成功 · `1` 业务/参数（ride/`SERVICE_*`/`BILLING_*`/`ACCOUNT_*`/`PAYMENT_ORDER_*`/`PARAM_*`）· `2` 需升级（`UPGRADE_REQUIRED`）· `3` 认证失败/无效 key（`KEY_*`）· `4` 网络/5xx（`UPSTREAM_*`/`INTERNAL_*`/`RATE_LIMITED`）· `5` 用户取消（`CLIENT_ABORTED` / SIGINT）。
+`0` success · `1` business/parameter (ride/`SERVICE_*`/`BILLING_*`/`ACCOUNT_*`/`PAYMENT_ORDER_*`/`PARAM_*`) · `2` upgrade required (`UPGRADE_REQUIRED`) · `3` auth failure/invalid key (`KEY_*`) · `4` network/5xx (`UPSTREAM_*`/`INTERNAL_*`/`RATE_LIMITED`) · `5` user cancelled (`CLIENT_ABORTED` / SIGINT).
 
 ---
 
-## 4. L1 / L2 单元测试与属性测试（自动化 / vitest）
+## 4. L1 / L2 Unit Tests and Property-Based Tests (Automated / vitest)
 
-> 这些是本迭代必做的自动化测试。每个用例标注：用例编号、对应需求/属性、输入、预期。纯函数直接 import 被测函数，无需 mock。
+> These are the required automated tests for this iteration. Each case is annotated with: case number, corresponding requirement/property, input, expected result. Pure functions are directly imported; no mocks needed.
 
-### 4.1 `normalizeIdempotencyKey` —— 幂等键格式校验（Property 3 / Req 5.3）
+### 4.1 `normalizeIdempotencyKey` — Idempotency Key Format Validation (Property 3 / Req 5.3)
 
-文件：`tests/idempotency.test.ts`（源：`src/idempotency.ts`）
+File: `tests/idempotency.test.ts` (source: `src/idempotency.ts`)
 
-| 用例 | 输入 | 预期 |
+| Case | Input | Expected |
 |---|---|---|
-| UT-IDEM-01 | `"book-123"` | 返回 `"book-123"`（合法，原样） |
-| UT-IDEM-02 | `"  book-123  "`（首尾空白） | trim 后返回 `"book-123"` |
-| UT-IDEM-03 | `"A_b-9"`（全字符类） | 返回 `"A_b-9"` |
-| UT-IDEM-04 | `""`（空串） | 抛 `CliError('PARAM_INVALID')`（不匹配 `{1,128}`） |
-| UT-IDEM-05 | `"has space"` | 抛 `CliError('PARAM_INVALID')` |
-| UT-IDEM-06 | `"bad!char"` / `"a@b"` | 抛 `CliError('PARAM_INVALID')` |
-| UT-IDEM-07 | `"a".repeat(129)`（>128） | 抛 `CliError('PARAM_INVALID')` |
-| UT-IDEM-08 | `"a".repeat(128)`（边界） | 返回该串（128 合法） |
-| UT-IDEM-09 | 错误 message | 含原值 + `IDEMPOTENCY_KEY_RULE`（`Use 1-128 characters from [A-Za-z0-9_-].`）；`code==='PARAM_INVALID'` |
+| UT-IDEM-01 | `"book-123"` | Returns `"book-123"` (valid, unchanged) |
+| UT-IDEM-02 | `"  book-123  "` (leading/trailing whitespace) | Trimmed, returns `"book-123"` |
+| UT-IDEM-03 | `"A_b-9"` (all character classes) | Returns `"A_b-9"` |
+| UT-IDEM-04 | `""` (empty string) | Throws `CliError('PARAM_INVALID')` (does not match `{1,128}`) |
+| UT-IDEM-05 | `"has space"` | Throws `CliError('PARAM_INVALID')` |
+| UT-IDEM-06 | `"bad!char"` / `"a@b"` | Throws `CliError('PARAM_INVALID')` |
+| UT-IDEM-07 | `"a".repeat(129)` (>128) | Throws `CliError('PARAM_INVALID')` |
+| UT-IDEM-08 | `"a".repeat(128)` (boundary) | Returns that string (128 is valid) |
+| UT-IDEM-09 | Error message | Contains original value + `IDEMPOTENCY_KEY_RULE` (`Use 1-128 characters from [A-Za-z0-9_-].`); `code==='PARAM_INVALID'` |
 
-### 4.2 `resolveIdempotencyKey` —— 写命令幂等键解析分支（Property 3 / Req 5.3）
+### 4.2 `resolveIdempotencyKey` — Write Command Idempotency Key Resolution Branches (Property 3 / Req 5.3)
 
-文件：`tests/idempotency.test.ts`
+File: `tests/idempotency.test.ts`
 
-| 用例 | 输入（flagValue, opts） | 预期 |
+| Case | Input (flagValue, opts) | Expected |
 |---|---|---|
-| UT-IDEM-10 | flag=`"k1"`, yes=true | 返回 `"k1"`（已传则校验+归一，不论 yes） |
-| UT-IDEM-11 | flag=`"  k1 "`, yes=false | 返回 `"k1"`（归一） |
-| UT-IDEM-12 | flag=`"bad!"`, yes=true | 抛 `CliError('PARAM_INVALID')`（归一阶段拦截） |
-| UT-IDEM-13 | flag=undefined, yes=true, commandPath=`'ride-elife book'` | 抛 `IdempotencyKeyRequiredError`（→`PARAM_IDEMPOTENCY_KEY_REQUIRED`）；message 含命令名 + `--idempotency-key`；**不调用** PromptEngine |
-| UT-IDEM-14 | flag=undefined, yes=false（mock `PromptEngine.resolveInput` 返回 `"k2"`） | prompt 文案 `Idempotency key (unique per write, for safe retry):`；返回 `"k2"`；validate 对空/非法返回 `IDEMPOTENCY_KEY_RULE` |
-| UT-IDEM-15 | flag=undefined, yes=false, prompt 返回非法值 | 经 `normalizeIdempotencyKey` 二次校验后抛 `PARAM_INVALID`（兜底） |
+| UT-IDEM-10 | flag=`"k1"`, yes=true | Returns `"k1"` (if provided, validates+normalizes regardless of yes) |
+| UT-IDEM-11 | flag=`"  k1 "`, yes=false | Returns `"k1"` (normalized) |
+| UT-IDEM-12 | flag=`"bad!"`, yes=true | Throws `CliError('PARAM_INVALID')` (intercepted at normalization stage) |
+| UT-IDEM-13 | flag=undefined, yes=true, commandPath=`'ride-elife book'` | Throws `IdempotencyKeyRequiredError` (→`PARAM_IDEMPOTENCY_KEY_REQUIRED`); message contains command name + `--idempotency-key`; **does not call** PromptEngine |
+| UT-IDEM-14 | flag=undefined, yes=false (mock `PromptEngine.resolveInput` returns `"k2"`) | Prompt text `Idempotency key (unique per write, for safe retry):`; returns `"k2"`; validate returns `IDEMPOTENCY_KEY_RULE` for empty/invalid |
+| UT-IDEM-15 | flag=undefined, yes=false, prompt returns invalid value | After secondary validation via `normalizeIdempotencyKey` throws `PARAM_INVALID` (fallback) |
 
-### 4.3 watch 引擎纯函数（Property 2 / Req 3.2）
+### 4.3 Watch Engine Pure Functions (Property 2 / Req 3.2)
 
-文件：`tests/watch.test.ts`（源：`src/ride-elife/watch.ts`）
+File: `tests/watch.test.ts` (source: `src/ride-elife/watch.ts`)
 
-| 用例 | 输入 | 预期 |
+| Case | Input | Expected |
 |---|---|---|
-| UT-WATCH-01 | `isTerminalStatus('At destination')` | `true`（终态集合成员） |
-| UT-WATCH-02 | `isTerminalStatus('Cancelled')`/`'Rejected'`/`'Customer no show'`/`'Driver no show'` | 全 `true` |
-| UT-WATCH-03 | `isTerminalStatus('On board')`/`'Pending'`/`'Accepted'` | 全 `false`（进行中态） |
-| UT-WATCH-04 | `isTerminalStatus('at destination')`（小写） | `false`（**大小写敏感**，必须逐字匹配服务端 casing） |
-| UT-WATCH-05 | `isTerminalStatus(undefined)`/`null` | `false`（缺失态永不终止，继续轮询） |
-| UT-WATCH-06 | `statusOf({status:'Pending'})` | `'Pending'`；`statusOf({status:123})` → `undefined`（仅 string） |
-| UT-WATCH-07 | `resolveSeconds(undefined, 5)` | `5`（默认回退） |
+| UT-WATCH-01 | `isTerminalStatus('At destination')` | `true` (terminal status set member) |
+| UT-WATCH-02 | `isTerminalStatus('Cancelled')`/`'Rejected'`/`'Customer no show'`/`'Driver no show'` | All `true` |
+| UT-WATCH-03 | `isTerminalStatus('On board')`/`'Pending'`/`'Accepted'` | All `false` (in-progress states) |
+| UT-WATCH-04 | `isTerminalStatus('at destination')` (lowercase) | `false` (**case-sensitive**, must match server casing verbatim) |
+| UT-WATCH-05 | `isTerminalStatus(undefined)`/`null` | `false` (missing status never terminates, continue polling) |
+| UT-WATCH-06 | `statusOf({status:'Pending'})` | `'Pending'`; `statusOf({status:123})` → `undefined` (string only) |
+| UT-WATCH-07 | `resolveSeconds(undefined, 5)` | `5` (default fallback) |
 | UT-WATCH-08 | `resolveSeconds('10', 5)` | `10` |
-| UT-WATCH-09 | `resolveSeconds('0', 5)`/`'-3'`/`'abc'` | `5`（非正/非有限回退默认） |
-| UT-WATCH-10 | `TERMINAL_STATUSES` / `DEFAULT_WATCH_INTERVAL_SECONDS` / `DEFAULT_WATCH_TIMEOUT_SECONDS` | 集合恰为 5 个终态；常量分别为 `5` / `600` |
+| UT-WATCH-09 | `resolveSeconds('0', 5)`/`'-3'`/`'abc'` | `5` (non-positive/non-finite falls back to default) |
+| UT-WATCH-10 | `TERMINAL_STATUSES` / `DEFAULT_WATCH_INTERVAL_SECONDS` / `DEFAULT_WATCH_TIMEOUT_SECONDS` | Set contains exactly 5 terminal statuses; constants are `5` / `600` respectively |
 
-### 4.4 `runWatch` —— NDJSON 轮询引擎（假时钟，Property 2 / Req 3.2）
+### 4.4 `runWatch` — NDJSON Polling Engine (fake clock, Property 2 / Req 3.2)
 
-文件：`tests/watch.test.ts`（注入 `fetchStatus`/`writeLine`/`sleep`/`now`，假时钟）
+File: `tests/watch.test.ts` (injected `fetchStatus`/`writeLine`/`sleep`/`now`, fake clock)
 
-| 用例 | 场景（注入序列） | 预期 |
+| Case | Scenario (injected sequence) | Expected |
 |---|---|---|
-| UT-WATCH-11 | 首次即终态 `['At destination']` | `writeLine` 调 1 次（该状态行）；不写 timeout 行；返回 |
-| UT-WATCH-12 | `['Pending','Accepted','At destination']`，interval<timeout | `writeLine` 调 3 次（逐行）；末次为终态；无 timeout 行 |
-| UT-WATCH-13 | 永不终态 `['Pending','Pending',...]`，假时钟使 `now()+interval>=deadline` | 末行恰为 `{ watch_status:'timeout', message, last_status:'Pending' }`；之前每次结果各一行 |
-| UT-WATCH-14 | 永不终态且首轮即超时预算 | 至少写 1 次状态行 + timeout 末行；`last_status` 取最后一次状态 |
-| UT-WATCH-15 | `fetchStatus` 抛 `CliError` | 异常向上传播（中止整个流），不吞错；已写行不回滚 |
-| UT-WATCH-16 | 每条 `writeLine` 记录 | 经 `ndjsonWriteLine` 序列化为**单行紧凑 JSON** + 换行（断言无多行缩进、行尾 `\n`） |
-| UT-WATCH-17 | timeout 行 `message` | 含 `${timeoutMs/1000}s` 文案；`watch_status==='timeout'` 字面量 |
+| UT-WATCH-11 | First poll is terminal `['At destination']` | `writeLine` called 1 time (that status line); no timeout line written; returns |
+| UT-WATCH-12 | `['Pending','Accepted','At destination']`, interval<timeout | `writeLine` called 3 times (one per line); last is terminal status; no timeout line |
+| UT-WATCH-13 | Never terminal `['Pending','Pending',...]`, fake clock makes `now()+interval>=deadline` | Final line is exactly `{ watch_status:'timeout', message, last_status:'Pending' }`; each prior result gets one line |
+| UT-WATCH-14 | Never terminal and first poll already exceeds timeout budget | At least 1 status line + timeout final line written; `last_status` takes the last polled status |
+| UT-WATCH-15 | `fetchStatus` throws `CliError` | Exception propagates upward (aborts entire stream), not swallowed; already-written lines are not rolled back |
+| UT-WATCH-16 | Each `writeLine` record | Serialized via `ndjsonWriteLine` as **single-line compact JSON** + newline (assert no multi-line indentation, line ends with `\n`) |
+| UT-WATCH-17 | Timeout line `message` | Contains `${timeoutMs/1000}s` text; `watch_status==='timeout'` literal |
 
-### 4.5 ride body 校验助手（Req 2.1/2.2/3.1/3.4 / Property 7）
+### 4.5 Ride Body Validation Helpers (Req 2.1/2.2/3.1/3.4 / Property 7)
 
-文件：`tests/ride-helpers.test.ts`（源：各命令的 `need`/`num`/`seatCount`/`positiveInt`；建议导出或经命令级断言）
+File: `tests/ride-helpers.test.ts` (source: each command's `need`/`num`/`seatCount`/`positiveInt`; recommend exporting or asserting via command-level tests)
 
-| 用例 | 输入 | 预期 |
+| Case | Input | Expected |
 |---|---|---|
-| UT-BODY-01 | `need(undefined,'pickup-lat')` | 抛 `CliError('PARAM_INVALID')`，message `Missing required --pickup-lat.` |
-| UT-BODY-02 | `need('v','x')` | 返回 `'v'` |
-| UT-BODY-03 | `num('37.79','pickup-lat')` | 返回 `37.79`（number 化） |
-| UT-BODY-04 | `num('abc','pickup-lat')` | 抛 `PARAM_INVALID`（`must be a number`） |
-| UT-BODY-05 | `num(undefined,'price-amount')` | 抛 `PARAM_INVALID`（缺失先于非数） |
-| UT-BODY-06 | `seatCount('3','child-seat-count')` | 返回 `3` |
-| UT-BODY-07 | `seatCount('6',...)`/`'-1'`/`'2.5'` | 抛 `PARAM_INVALID`（整数 0–5 越界） |
-| UT-BODY-08 | `positiveInt('1','page')` | 返回 `'1'`（canonical 串） |
-| UT-BODY-09 | `positiveInt('0',...)`/`'-2'`/`'1.5'`/`'x'` | 抛 `PARAM_INVALID`（正整数约束） |
+| UT-BODY-01 | `need(undefined,'pickup-lat')` | Throws `CliError('PARAM_INVALID')`, message `Missing required --pickup-lat.` |
+| UT-BODY-02 | `need('v','x')` | Returns `'v'` |
+| UT-BODY-03 | `num('37.79','pickup-lat')` | Returns `37.79` (numericized) |
+| UT-BODY-04 | `num('abc','pickup-lat')` | Throws `PARAM_INVALID` (`must be a number`) |
+| UT-BODY-05 | `num(undefined,'price-amount')` | Throws `PARAM_INVALID` (missing takes precedence over non-numeric) |
+| UT-BODY-06 | `seatCount('3','child-seat-count')` | Returns `3` |
+| UT-BODY-07 | `seatCount('6',...)`/`'-1'`/`'2.5'` | Throws `PARAM_INVALID` (integer 0–5 out of bounds) |
+| UT-BODY-08 | `positiveInt('1','page')` | Returns `'1'` (canonical string) |
+| UT-BODY-09 | `positiveInt('0',...)`/`'-2'`/`'1.5'`/`'x'` | Throws `PARAM_INVALID` (positive integer constraint) |
 
-### 4.6 verb-schema `--help --format json`（Req 7.1 / Property 7）
+### 4.6 verb-schema `--help --format json` (Req 7.1 / Property 7)
 
-文件：`tests/verb-schema.test.ts`（源：`src/verb-schema.ts`）
+File: `tests/verb-schema.test.ts` (source: `src/verb-schema.ts`)
 
-| 用例 | 输入 | 预期 |
+| Case | Input | Expected |
 |---|---|---|
 | UT-SCHEMA-01 | `wantsJsonSchema(['node','cli','ride-elife','quote','--help','--format','json'])` | `true` |
-| UT-SCHEMA-02 | `wantsJsonSchema([...,'--format=json'])` | `true`（等号形式） |
-| UT-SCHEMA-03 | `wantsJsonSchema([...,'--help'])`（裸 help） | `false`（保留文本 help，尽管 program 默认 json——默认不写入 argv） |
+| UT-SCHEMA-02 | `wantsJsonSchema([...,'--format=json'])` | `true` (equals-sign form) |
+| UT-SCHEMA-03 | `wantsJsonSchema([...,'--help'])` (bare help) | `false` (preserves text help, even though program defaults to json — default is not written into argv) |
 | UT-SCHEMA-04 | `wantsJsonSchema([...,'--help','--format','table'])` | `false` |
-| UT-SCHEMA-05 | `emitSchema(quoteSchema)` 捕获 stdout | 单个 pretty JSON；`JSON.parse` 往返含 `cli/noun/verb/description/flags/response/example` |
-| UT-SCHEMA-06 | 各 schema 字段对齐 | `quoteSchema.flags['pickup-lat'].required===true`；`bookSchema.flags['idempotency-key'].required===true`、`flags['price-currency'].default==='USD'`；`bookSchema.flags` **无** `payment-method-id`（Property 5）；`rideGetSchema.polling.terminal_statuses` 恰 5 个 |
-| UT-SCHEMA-07 | `quote`/`list-orders` schema | 不含 `polling` 块；`get` schema 含 `polling`；`book`/`cancel` 含 `error_recovery.PARAM_IDEMPOTENCY_KEY_REQUIRED` |
+| UT-SCHEMA-05 | `emitSchema(quoteSchema)` capture stdout | Single pretty JSON; `JSON.parse` round-trip contains `cli/noun/verb/description/flags/response/example` |
+| UT-SCHEMA-06 | Each schema field alignment | `quoteSchema.flags['pickup-lat'].required===true`; `bookSchema.flags['idempotency-key'].required===true`, `flags['price-currency'].default==='USD'`; `bookSchema.flags` **has no** `payment-method-id` (Property 5); `rideGetSchema.polling.terminal_statuses` has exactly 5 |
+| UT-SCHEMA-07 | `quote`/`list-orders` schema | Does not contain `polling` block; `get` schema contains `polling`; `book`/`cancel` contain `error_recovery.PARAM_IDEMPOTENCY_KEY_REQUIRED` |
 
-### 4.7 services registry（Req 1.1/1.2）
+### 4.7 Services Registry (Req 1.1/1.2)
 
-文件：`tests/services.test.ts`（源：`src/services/registry.ts`）
+File: `tests/services.test.ts` (source: `src/services/registry.ts`)
 
-| 用例 | 输入 | 预期 |
+| Case | Input | Expected |
 |---|---|---|
-| UT-REG-01 | `findService('ride-elife')` | 返回该 capability（service_id/name/category=`ride`/provider=`elife`/cli_noun=`ride-elife`/verbs 5 个/workflow/since/discovery） |
-| UT-REG-02 | `findService('nope')` | 返回 `undefined` |
+| UT-REG-01 | `findService('ride-elife')` | Returns that capability (service_id/name/category=`ride`/provider=`elife`/cli_noun=`ride-elife`/verbs 5 items/workflow/since/discovery) |
+| UT-REG-02 | `findService('nope')` | Returns `undefined` |
 | UT-REG-03 | `SERVICE_REGISTRY[0].verbs` | `['quote','book','get','cancel','list-orders']` |
 
-### 4.8 PBT 属性测试（fast-check，Property 2 & 3）
+### 4.8 PBT Property-Based Tests (fast-check, Property 2 & 3)
 
-文件：`tests/pbt.test.ts`
+File: `tests/pbt.test.ts`
 
-| 用例 | 生成器 | 不变量 |
+| Case | Generator | Invariant |
 |---|---|---|
-| PBT-IDEM-01 | 任意 `[A-Za-z0-9_-]` 串，长度 1–128（1000 轮） | `normalizeIdempotencyKey(s)===s.trim()`（全部接受） |
-| PBT-IDEM-02 | 任意含越界字符（空格/`!`/`@`/中文/emoji）或长度 0 或 >128 的串 | `normalizeIdempotencyKey` 必抛 `PARAM_INVALID`（全部拒绝） |
-| PBT-IDEM-03 | 任意串 + yes=true | `resolveIdempotencyKey(undefined,{yes:true,...})` 恒抛 `IdempotencyKeyRequiredError`，永不返回自动生成键 |
-| PBT-WATCH-01 | 任意状态序列（含/不含终态，随机长度） + 任意 interval/timeout（interval>0,timeout>0），假时钟 | `runWatch` 必终止（不挂起）；写行数有限 |
-| PBT-WATCH-02 | 任意**不含**终态的状态序列 + 假时钟推进 | 最终必输出 `watch_status:'timeout'` 末行，且仅末行是 timeout 行 |
-| PBT-WATCH-03 | 任意以终态结尾的序列 | 命中终态即停（终态后不再 `fetchStatus`/`writeLine`）；无 timeout 行 |
-| PBT-WATCH-04 | 任意写出的 NDJSON 行 | 每行 `JSON.parse` 成功且为单行（不含未转义换行） |
+| PBT-IDEM-01 | Arbitrary `[A-Za-z0-9_-]` string, length 1–128 (1000 runs) | `normalizeIdempotencyKey(s)===s.trim()` (all accepted) |
+| PBT-IDEM-02 | Arbitrary string containing out-of-range characters (space/`!`/`@`/CJK/emoji) or length 0 or >128 | `normalizeIdempotencyKey` must throw `PARAM_INVALID` (all rejected) |
+| PBT-IDEM-03 | Arbitrary string + yes=true | `resolveIdempotencyKey(undefined,{yes:true,...})` always throws `IdempotencyKeyRequiredError`, never returns an auto-generated key |
+| PBT-WATCH-01 | Arbitrary status sequence (with/without terminal states, random length) + arbitrary interval/timeout (interval>0,timeout>0), fake clock | `runWatch` must terminate (not hang); number of written lines is finite |
+| PBT-WATCH-02 | Arbitrary status sequence **without** terminal states + fake clock advancement | Must eventually output `watch_status:'timeout'` final line, and only the final line is a timeout line |
+| PBT-WATCH-03 | Arbitrary sequence ending with a terminal status | Stops upon hitting terminal status (no more `fetchStatus`/`writeLine` after terminal); no timeout line |
+| PBT-WATCH-04 | Arbitrary written NDJSON lines | Each line passes `JSON.parse` successfully and is a single line (contains no unescaped newlines) |
 
 ```typescript
 import fc from 'fast-check';
@@ -228,65 +228,65 @@ it('accepts any [A-Za-z0-9_-]{1,128}', () => {
 
 ---
 
-## 5. L3 命令级测试用例（每条命令逐个）
+## 5. L3 Command-Level Test Cases (per command)
 
-> 每条命令一节，结构统一：**用例表**（正/负/边界，作 mock `ApiClient` 集成断言）+ **执行步骤**（可复制命令，作 L4 手动 E2E）。
-> mock 粒度（tasks 6.2–6.4）：mock `ApiClient`（拦截 `get`/`post` 返回预设 `{success,data}` 或 `{success:false,...}`），**不** mock commander（真实 `parseAsync`）；用 `vi.spyOn(process.stdout/stderr,'write')` 分离两条流。
-> 约定变量：`$API_KEY`（merchant scope）、`$QUOTE_ID`（quote 产出）、`$RIDE_ID`（book 产出，= `ride_id`）在前序步骤产生并复用。
+> Each command gets its own section with a uniform structure: **case table** (positive/negative/boundary, used as mock `ApiClient` integration assertions) + **execution steps** (copy-paste commands, used as L4 manual E2E).
+> Mock granularity (tasks 6.2–6.4): mock `ApiClient` (intercept `get`/`post` returning preset `{success,data}` or `{success:false,...}`), **do not** mock commander (real `parseAsync`); use `vi.spyOn(process.stdout/stderr,'write')` to separate the two streams.
+> Variable conventions: `$API_KEY` (merchant scope), `$QUOTE_ID` (produced by quote), `$RIDE_ID` (produced by book, = `ride_id`) are produced in prior steps and reused.
 
-### 5.1 `services list`（R，内置注册表，无网络，无 idem）
+### 5.1 `services list` (R, built-in registry, no network, no idem)
 
-对应：Req 1.1, 1.3, 5.1；cli-design §4.4.1.1。
+Corresponds to: Req 1.1, 1.3, 5.1; cli-design §4.4.1.1.
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-SVC-LST-01 | 正常列出 | `services list` | data=`{ services:[ServiceListItem] }`，每项含 `service_id`/`name`/`category`/`provider`/`cli_noun`/`version`/`verbs`/`since`/`discovery`；退出 0 |
-| TC-SVC-LST-02 | 无网络 | 抓包 | **不发起任何 HTTP**（数据源是内置 registry，D4） |
-| TC-SVC-LST-03 | 无 idem flag | `services list --idempotency-key k` | commander 拒绝未知选项（只读不接受 idem）；非 0 |
-| TC-SVC-LST-04 | json 信封 | `--format json` 管道 `jq .` | 解析成功；stdout 含 `services` + `profile`/`endpoint`；stderr 静默 |
-| TC-SVC-LST-05 | table 摘要 | `--format table` | stdout 表头 `Service ID/Name/Category/Provider/Version/Verbs` + 一行 `ride-elife`；状态行（若有）走 stderr |
-| TC-SVC-LST-06 | 列表精简 | json | list item **不含** `verb_descriptions`/`workflow`（那是 get 的全量字段） |
+| TC-SVC-LST-01 | Normal listing | `services list` | data=`{ services:[ServiceListItem] }`, each item contains `service_id`/`name`/`category`/`provider`/`cli_noun`/`version`/`verbs`/`since`/`discovery`; exit 0 |
+| TC-SVC-LST-02 | No network | Packet capture | **No HTTP requests made** (data source is built-in registry, D4) |
+| TC-SVC-LST-03 | No idem flag | `services list --idempotency-key k` | Commander rejects unknown option (read-only does not accept idem); non-0 |
+| TC-SVC-LST-04 | json envelope | `--format json` piped to `jq .` | Parses successfully; stdout contains `services` + `profile`/`endpoint`; stderr silent |
+| TC-SVC-LST-05 | table summary | `--format table` | stdout table header `Service ID/Name/Category/Provider/Version/Verbs` + one row `ride-elife`; status lines (if any) go to stderr |
+| TC-SVC-LST-06 | List is concise | json | List item **does not contain** `verb_descriptions`/`workflow` (those are full fields for get) |
 
 ```bash
 agenzo-merchant-cli services list --format json 1>out.json 2>err.txt
 echo "exit=$?"; jq -e '.services | type=="array"' out.json
 jq -e '.services[0].service_id=="ride-elife"' out.json
-test ! -s err.txt && echo "stderr clean"   # json 模式 stderr 静默
+test ! -s err.txt && echo "stderr clean"   # json mode stderr silent
 ```
 
-### 5.2 `services get <service-id>`（R，内置注册表，无网络）
+### 5.2 `services get <service-id>` (R, built-in registry, no network)
 
-对应：Req 1.2, 1.3, 5.1；cli-design §4.4.1.2。
+Corresponds to: Req 1.2, 1.3, 5.1; cli-design §4.4.1.2.
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-SVC-GET-01 | 命中 | `services get ride-elife` | data=完整 `ServiceCapability`（含 `verb_descriptions`/`workflow`/`discovery`）；退出 0 |
-| TC-SVC-GET-02 | 未命中 | `services get nope` | 抛 `CliError('SERVICE_NOT_FOUND')`（code_num 4101，exit 1）；message 提示 `Run "services list"` |
-| TC-SVC-GET-03 | 缺位置参数 | `services get` | commander 报缺 `<service-id>`；非 0 |
-| TC-SVC-GET-04 | table 全量 | `services get ride-elife --format table` | stdout keyValue 含 `Workflow`/`Verb descriptions:` 块；退出 0 |
-| TC-SVC-GET-05 | json 信封 | `--format json` | stdout 含 capability + `profile`/`endpoint`；stderr 静默 |
+| TC-SVC-GET-01 | Match found | `services get ride-elife` | data=full `ServiceCapability` (contains `verb_descriptions`/`workflow`/`discovery`); exit 0 |
+| TC-SVC-GET-02 | No match | `services get nope` | Throws `CliError('SERVICE_NOT_FOUND')` (code_num 4101, exit 1); message suggests `Run "services list"` |
+| TC-SVC-GET-03 | Missing positional argument | `services get` | Commander reports missing `<service-id>`; non-0 |
+| TC-SVC-GET-04 | table full view | `services get ride-elife --format table` | stdout keyValue contains `Workflow`/`Verb descriptions:` blocks; exit 0 |
+| TC-SVC-GET-05 | json envelope | `--format json` | stdout contains capability + `profile`/`endpoint`; stderr silent |
 
 ```bash
 agenzo-merchant-cli services get ride-elife --format json | jq '{service_id,verbs,workflow}'
-agenzo-merchant-cli services get nope 2>&1; echo "exit=$?"   # 期望 1（SERVICE_NOT_FOUND）
+agenzo-merchant-cli services get nope 2>&1; echo "exit=$?"   # expect 1 (SERVICE_NOT_FOUND)
 ```
 
-### 5.3 `ride-elife quote`（R，`POST /ride/quote`，无 idem）
+### 5.3 `ride-elife quote` (R, `POST /ride/quote`, no idem)
 
-对应：Req 2.1, 5.1, 7.1；cli-design §4.4.1.3 quote schema。
+Corresponds to: Req 2.1, 5.1, 7.1; cli-design §4.4.1.3 quote schema.
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-QUOTE-01 | 正常报价 | 全必填 + `--pickup-time now` | `POST /ride/quote`（`X-Api-Key`）；body `pickup{lat,lng,name}`/`dropoff{...}`/`pickup_time:'now'`；data=`QuoteResponse`（`vehicle_classes[]`+`meet_and_greet`+`is_airport_transfer`）；退出 0 |
-| TC-QUOTE-02 | 坐标 number 化 | `--pickup-lat 37.79` | body.pickup.lat **=== number** `37.79`（非字符串）（§4.4.1.3） |
-| TC-QUOTE-03 | epoch pickup-time | `--pickup-time 1735689600` | body.pickup_time === number `1735689600` |
-| TC-QUOTE-04 | 缺必填 | 缺 `--dropoff-name` | 抛 `PARAM_INVALID`（`Missing required --dropoff-name.`）；**不发请求**；退出 1 |
-| TC-QUOTE-05 | 非数坐标 | `--pickup-lat abc` | 抛 `PARAM_INVALID`（`must be a number`）；退出 1 |
-| TC-QUOTE-06 | 可选字段条件组装 | 带 `--passenger-count 2 --luggage-count 1` | body 含 `passenger_count:2`/`luggage_count:1`（number 化）；省略时 body 无对应键 |
-| TC-QUOTE-07 | 金额单位 | json | `vehicle_classes[].price.amount` 为 decimal 货币单位（**非 cents**），原样透传 |
-| TC-QUOTE-08 | api-key 401 | post 返回 401 | 抛 `CliError`（`fromApi(...,{auth:'api-key'})`）code=`KEY_INVALID`；退出 3 |
-| TC-QUOTE-09 | json stderr 静默 | `--format json 1>out 2>err` | `Fetching quotes...` 进度行（`notify('loading')`）**不**出现在 stderr；stdout 仅 payload+信封 |
-| TC-QUOTE-10 | table 进度行 | `--format table` | stderr 含 `Fetching quotes...` 状态行；stdout 为 vehicle 表 + 信息块 |
+| TC-QUOTE-01 | Normal quote | All required fields + `--pickup-time now` | `POST /ride/quote` (`X-Api-Key`); body `pickup{lat,lng,name}`/`dropoff{...}`/`pickup_time:'now'`; data=`QuoteResponse` (`vehicle_classes[]`+`meet_and_greet`+`is_airport_transfer`); exit 0 |
+| TC-QUOTE-02 | Coordinate numericization | `--pickup-lat 37.79` | body.pickup.lat **=== number** `37.79` (not string) (§4.4.1.3) |
+| TC-QUOTE-03 | Epoch pickup-time | `--pickup-time 1735689600` | body.pickup_time === number `1735689600` |
+| TC-QUOTE-04 | Missing required field | Missing `--dropoff-name` | Throws `PARAM_INVALID` (`Missing required --dropoff-name.`); **no request sent**; exit 1 |
+| TC-QUOTE-05 | Non-numeric coordinate | `--pickup-lat abc` | Throws `PARAM_INVALID` (`must be a number`); exit 1 |
+| TC-QUOTE-06 | Optional field conditional assembly | With `--passenger-count 2 --luggage-count 1` | body contains `passenger_count:2`/`luggage_count:1` (numericized); when omitted body has no corresponding keys |
+| TC-QUOTE-07 | Monetary amount unit | json | `vehicle_classes[].price.amount` is decimal currency unit (**not cents**), forwarded as-is |
+| TC-QUOTE-08 | api-key 401 | post returns 401 | Throws `CliError` (`fromApi(...,{auth:'api-key'})`) code=`KEY_INVALID`; exit 3 |
+| TC-QUOTE-09 | json stderr silence | `--format json 1>out 2>err` | `Fetching quotes...` progress line (`notify('loading')`) **does not** appear in stderr; stdout contains only payload+envelope |
+| TC-QUOTE-10 | table progress line | `--format table` | stderr contains `Fetching quotes...` status line; stdout is vehicle table + info block |
 
 ```bash
 agenzo-merchant-cli ride-elife quote --api-key "$API_KEY" \
@@ -296,29 +296,29 @@ agenzo-merchant-cli ride-elife quote --api-key "$API_KEY" \
 echo "exit=$?"; QUOTE_ID=$(jq -r '.vehicle_classes[0].price.quote_id' q.json); echo "$QUOTE_ID"
 ```
 
-### 5.4 `ride-elife book`（W/Y，`POST /ride/book`，[idem]）
+### 5.4 `ride-elife book` (W/Y, `POST /ride/book`, [idem])
 
-对应：Req 2.2, 2.3, 2.4, 2.5, 5.1, 5.3, 7.1；cli-design §4.4.1.3 book schema + §4.4.2.1。【Property 5】
+Corresponds to: Req 2.2, 2.3, 2.4, 2.5, 5.1, 5.3, 7.1; cli-design §4.4.1.3 book schema + §4.4.2.1. [Property 5]
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-BOOK-01 | 正常下单（--yes） | `--yes` + 必填 + `--idempotency-key k` | `POST /ride/book`（`X-Api-Key` + 头 `Idempotency-Key:k`）；body `quote_id`/`vehicle_class`/`price_amount`(num)/`price_currency`/`passenger_name`/`passenger_phone`；data=`BookResponse`；退出 0；记录 `$RIDE_ID` |
-| TC-BOOK-02 | **无 payment_method_id**（Property 5） | 任意 book 调用 | body **绝不含** `payment_method_id` 或任何卡字段；至多含可选 `payment_order_id` |
-| TC-BOOK-03 | pay_per_call | `--payment-order-id po_1` | body.payment_order_id===`'po_1'`；省略时 body 无该键（monthly_settlement） |
-| TC-BOOK-04 | price-currency 默认 | 不传 `--price-currency` | body.price_currency===`'USD'` |
-| TC-BOOK-05 | 价格 number 化 | `--price-amount 42.50` | body.price_amount === number `42.5`（decimal，非 cents） |
-| TC-BOOK-06 | 缺必填 | 缺 `--passenger-phone` | 抛 `PARAM_INVALID`；不发请求；退出 1 |
-| TC-BOOK-07 | 座椅越界 | `--child-seat-count 6` | 抛 `PARAM_INVALID`（整数 0–5）；退出 1 |
-| TC-BOOK-08 | pickup 组条件装配 | 任一 `--pickup-{lat/lng/name}` 出现 | body.pickup 三字段齐全（缺 name→`PARAM_INVALID`）；全不传则 body 无 pickup |
-| TC-BOOK-09 | 航班组装配 | `--arrival-flight-no AA1 --arrival-airline AA` | body.arrival_flight={flight_no,airline} |
-| TC-BOOK-10 | 非 --yes confirm | 非 `--yes`（mock confirm=true） | 弹 `Book ride with quote <id>?`（default true）→ 确认后下单；退出 0 |
-| TC-BOOK-11 | confirm 拒绝 | 非 `--yes`（confirm=false） | 抛 `CliError('CLIENT_ABORTED')`；**不发请求**；退出 5 |
-| TC-BOOK-12 | --yes 缺幂等键 | `--yes`（无 `--idempotency-key`） | 抛 `PARAM_IDEMPOTENCY_KEY_REQUIRED`；**不发请求**；退出 1 |
-| TC-BOOK-13 | 非法幂等键 | `--idempotency-key "bad!"` | 抛 `PARAM_INVALID`（归一拦截）；不发请求；退出 1 |
-| TC-BOOK-14 | 幂等键作头不进 body | `--idempotency-key k` | HTTP 头 `Idempotency-Key:k`；body **无** `idempotency_key`/任何幂等字段 |
-| TC-BOOK-15 | ride 字符串码保真（D3） | post 返回 `{code:'QUOTE_EXPIRED'}` HTTP 410 | 经 `fromApi` 保真 `QUOTE_EXPIRED`（code_num 4202，exit 1），不被 410→PARAM_INVALID 覆盖 |
-| TC-BOOK-16 | billing 错误 | post 返回 `BILLING_MODE_MISMATCH` | code 保真（3001，exit 1） |
-| TC-BOOK-17 | json stderr 静默 | `--yes ... --format json 1>out 2>err` | `Booking ride...` 不在 stderr；stdout 仅 `BookResponse`+信封 |
+| TC-BOOK-01 | Normal booking (--yes) | `--yes` + required fields + `--idempotency-key k` | `POST /ride/book` (`X-Api-Key` + header `Idempotency-Key:k`); body `quote_id`/`vehicle_class`/`price_amount`(num)/`price_currency`/`passenger_name`/`passenger_phone`; data=`BookResponse`; exit 0; record `$RIDE_ID` |
+| TC-BOOK-02 | **No payment_method_id** (Property 5) | Any book call | body **never contains** `payment_method_id` or any card fields; at most contains optional `payment_order_id` |
+| TC-BOOK-03 | pay_per_call | `--payment-order-id po_1` | body.payment_order_id===`'po_1'`; when omitted body has no such key (monthly_settlement) |
+| TC-BOOK-04 | price-currency default | `--price-currency` not provided | body.price_currency===`'USD'` |
+| TC-BOOK-05 | Price numericization | `--price-amount 42.50` | body.price_amount === number `42.5` (decimal, not cents) |
+| TC-BOOK-06 | Missing required field | Missing `--passenger-phone` | Throws `PARAM_INVALID`; no request sent; exit 1 |
+| TC-BOOK-07 | Seat count out of bounds | `--child-seat-count 6` | Throws `PARAM_INVALID` (integer 0–5); exit 1 |
+| TC-BOOK-08 | Pickup conditional assembly | Any `--pickup-{lat/lng/name}` present | body.pickup has all three fields (missing name→`PARAM_INVALID`); all absent then body has no pickup |
+| TC-BOOK-09 | Flight info assembly | `--arrival-flight-no AA1 --arrival-airline AA` | body.arrival_flight={flight_no,airline} |
+| TC-BOOK-10 | Non --yes confirm | Non `--yes` (mock confirm=true) | Shows `Book ride with quote <id>?` (default true) → after confirmation proceeds to book; exit 0 |
+| TC-BOOK-11 | Confirm rejected | Non `--yes` (confirm=false) | Throws `CliError('CLIENT_ABORTED')`; **no request sent**; exit 5 |
+| TC-BOOK-12 | --yes missing idempotency key | `--yes` (no `--idempotency-key`) | Throws `PARAM_IDEMPOTENCY_KEY_REQUIRED`; **no request sent**; exit 1 |
+| TC-BOOK-13 | Invalid idempotency key | `--idempotency-key "bad!"` | Throws `PARAM_INVALID` (normalization intercepts); no request sent; exit 1 |
+| TC-BOOK-14 | Idempotency key as header not in body | `--idempotency-key k` | HTTP header `Idempotency-Key:k`; body **has no** `idempotency_key`/any idempotency field |
+| TC-BOOK-15 | Ride string code preservation (D3) | post returns `{code:'QUOTE_EXPIRED'}` HTTP 410 | Via `fromApi` preserves `QUOTE_EXPIRED` (code_num 4202, exit 1), not overridden by 410→PARAM_INVALID |
+| TC-BOOK-16 | Billing error | post returns `BILLING_MODE_MISMATCH` | Code preserved (3001, exit 1) |
+| TC-BOOK-17 | json stderr silence | `--yes ... --format json 1>out 2>err` | `Booking ride...` not in stderr; stdout contains only `BookResponse`+envelope |
 
 ```bash
 agenzo-merchant-cli ride-elife book --api-key "$API_KEY" --yes \
@@ -326,51 +326,51 @@ agenzo-merchant-cli ride-elife book --api-key "$API_KEY" --yes \
   --passenger-name "Alice" --passenger-phone "+14155551234" \
   --idempotency-key "book-$(date +%s)" --format json 1>b.json 2>err.txt
 echo "exit=$?"; RIDE_ID=$(jq -r '.ride_id' b.json); echo "$RIDE_ID"
-# TC-BOOK-12 --yes 缺幂等键
+# TC-BOOK-12 --yes missing idempotency key
 agenzo-merchant-cli ride-elife book --api-key "$API_KEY" --yes \
   --quote-id "$QUOTE_ID" --vehicle-class Sedan --price-amount 42.50 \
-  --passenger-name A --passenger-phone "+1415" 2>&1; echo "exit=$?"   # 期望 1
+  --passenger-name A --passenger-phone "+1415" 2>&1; echo "exit=$?"   # expect 1
 ```
 
-### 5.5 `ride-elife get`（R，`GET /ride/<id>/status`；`--watch` → NDJSON）
+### 5.5 `ride-elife get` (R, `GET /ride/<id>/status`; `--watch` → NDJSON)
 
-对应：Req 3.1, 3.2, 5.1, 7.1；cli-design §4.4.1.3 get schema。【Property 2】
+Corresponds to: Req 3.1, 3.2, 5.1, 7.1; cli-design §4.4.1.3 get schema. [Property 2]
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-GET-01 | 单次查询 | `get --order-id $RIDE_ID`（无 watch） | `GET /ride/<id>/status`（id 经 `encodeURIComponent`）；data=`GetOrderResponse`；`CommandResult`+renderWithContext；退出 0 |
-| TC-GET-02 | 字段保真 | json | pickup/dropoff 为 `from_location`/`to_location`（**v3 snake_case**，非 elife `from`/`to`）；含 `source` 标记；金额 decimal |
-| TC-GET-03 | 缺 order-id | `get`（无 `--order-id`） | 抛 `PARAM_INVALID`；退出 1 |
-| TC-GET-04 | 404 透传 | get 返回 `VEHICLE_UNAVAILABLE`/404 | code 保真/映射；退出 1 |
-| TC-GET-05 | api-key 403 | get 返回 403 | code=`KEY_SCOPE_DENIED`；退出 3 |
-| TC-GET-06 | watch 终态停止 | `--watch`（mock 序列 `Pending`→`At destination`，缩短 interval） | stdout 2 行 NDJSON，每行独立 `jq` 可解析；末行 status=`At destination`；**无** timeout 行；退出 0 |
-| TC-GET-07 | watch 超时末行 | `--watch --watch-timeout`（mock 恒 `Pending`，假时钟） | 末行 `{ watch_status:'timeout', message, last_status:'Pending' }`；退出 0 |
-| TC-GET-08 | watch 不套信封 | `--watch --format json` | NDJSON 行**不含** `profile`/`endpoint`（line stream，逐行）；非 watch 单次则含信封 |
-| TC-GET-09 | watch 无 spinner | `--watch` | 无 `notify('loading')` 进度行（流本身即进度）；stderr 不含 `Fetching ride status...` |
-| TC-GET-10 | watch interval 解析 | `--watch-interval 0`（非正） | 回退默认 5s（`resolveSeconds`） |
+| TC-GET-01 | Single query | `get --order-id $RIDE_ID` (no watch) | `GET /ride/<id>/status` (id via `encodeURIComponent`); data=`GetOrderResponse`; `CommandResult`+renderWithContext; exit 0 |
+| TC-GET-02 | Field preservation | json | pickup/dropoff are `from_location`/`to_location` (**v3 snake_case**, not elife `from`/`to`); contains `source` marker; amount is decimal |
+| TC-GET-03 | Missing order-id | `get` (no `--order-id`) | Throws `PARAM_INVALID`; exit 1 |
+| TC-GET-04 | 404 forwarded | get returns `VEHICLE_UNAVAILABLE`/404 | Code preserved/mapped; exit 1 |
+| TC-GET-05 | api-key 403 | get returns 403 | code=`KEY_SCOPE_DENIED`; exit 3 |
+| TC-GET-06 | watch stops on terminal | `--watch` (mock sequence `Pending`→`At destination`, shortened interval) | stdout 2 lines NDJSON, each line independently parseable by `jq`; last line status=`At destination`; **no** timeout line; exit 0 |
+| TC-GET-07 | watch timeout final line | `--watch --watch-timeout` (mock always `Pending`, fake clock) | Final line `{ watch_status:'timeout', message, last_status:'Pending' }`; exit 0 |
+| TC-GET-08 | watch does not wrap in envelope | `--watch --format json` | NDJSON lines **do not contain** `profile`/`endpoint` (line stream, per-line); non-watch single query does contain envelope |
+| TC-GET-09 | watch no spinner | `--watch` | No `notify('loading')` progress line (the stream itself is the progress); stderr does not contain `Fetching ride status...` |
+| TC-GET-10 | watch interval resolution | `--watch-interval 0` (non-positive) | Falls back to default 5s (`resolveSeconds`) |
 
 ```bash
 agenzo-merchant-cli ride-elife get --api-key "$API_KEY" --order-id "$RIDE_ID" --format json | jq '{ride_id,status,from_location,to_location}'
-# watch（每行独立 NDJSON）
+# watch (each line is independent NDJSON)
 agenzo-merchant-cli ride-elife get --api-key "$API_KEY" --order-id "$RIDE_ID" --watch --watch-interval 3 --watch-timeout 30 \
   | while read -r line; do echo "$line" | jq -e . >/dev/null && echo "valid: $(echo "$line" | jq -r '.status // .watch_status')"; done
 ```
 
-### 5.6 `ride-elife cancel`（W/Y，`POST /ride/<id>/cancel`，无 body，[idem]）
+### 5.6 `ride-elife cancel` (W/Y, `POST /ride/<id>/cancel`, no body, [idem])
 
-对应：Req 3.3, 3.5, 5.1, 5.3, 7.1；cli-design §4.4.1.3 cancel schema。
+Corresponds to: Req 3.3, 3.5, 5.1, 5.3, 7.1; cli-design §4.4.1.3 cancel schema.
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-CANCEL-01 | 正常取消（--yes） | `--yes --order-id $RIDE_ID --idempotency-key k` | `POST /ride/<id>/cancel`（**无 body**，`X-Api-Key` + 头 `Idempotency-Key:k`）；data=`CancelResponse`（`ride_id`/`ride_stat`/`cancellation{fee,reversal,currency}`/`refund_amount`）；退出 0 |
-| TC-CANCEL-02 | 无 body 断言 | 任意 cancel | `apiClient.post` 第 3 参 body===`undefined`；幂等键仅在第 4 参 header |
-| TC-CANCEL-03 | 缺 order-id | 无 `--order-id` | 抛 `PARAM_INVALID`；退出 1 |
-| TC-CANCEL-04 | 非 --yes 确认 | 非 `--yes`（mock confirm=true） | 弹 `Cancel ride <id>? This may incur a fee.`（default **false**）→ 确认后取消；退出 0 |
-| TC-CANCEL-05 | 确认拒绝 | 非 `--yes`（confirm=false） | 抛 `CliError('CLIENT_ABORTED')`；**不发请求**；退出 5 |
-| TC-CANCEL-06 | --yes 缺幂等键 | `--yes`（无 `--idempotency-key`） | 抛 `PARAM_IDEMPOTENCY_KEY_REQUIRED`；不发请求；退出 1 |
-| TC-CANCEL-07 | 不可取消态 | post 返回 `CANCELLATION_NOT_ALLOWED` | code 保真（4204，exit 1） |
-| TC-CANCEL-08 | cancellation 可空 | 响应 `cancellation:null` | table 不渲染 fee/reversal 行；json 原样 `null`；退出 0 |
-| TC-CANCEL-09 | json stderr 静默 | `--yes ... --format json` | `Cancelling ride...` 不在 stderr；stdout 仅 payload+信封 |
+| TC-CANCEL-01 | Normal cancellation (--yes) | `--yes --order-id $RIDE_ID --idempotency-key k` | `POST /ride/<id>/cancel` (**no body**, `X-Api-Key` + header `Idempotency-Key:k`); data=`CancelResponse` (`ride_id`/`ride_stat`/`cancellation{fee,reversal,currency}`/`refund_amount`); exit 0 |
+| TC-CANCEL-02 | No body assertion | Any cancel | `apiClient.post` 3rd argument body===`undefined`; idempotency key only in 4th argument header |
+| TC-CANCEL-03 | Missing order-id | No `--order-id` | Throws `PARAM_INVALID`; exit 1 |
+| TC-CANCEL-04 | Non --yes confirm | Non `--yes` (mock confirm=true) | Shows `Cancel ride <id>? This may incur a fee.` (default **false**) → after confirmation proceeds to cancel; exit 0 |
+| TC-CANCEL-05 | Confirm rejected | Non `--yes` (confirm=false) | Throws `CliError('CLIENT_ABORTED')`; **no request sent**; exit 5 |
+| TC-CANCEL-06 | --yes missing idempotency key | `--yes` (no `--idempotency-key`) | Throws `PARAM_IDEMPOTENCY_KEY_REQUIRED`; no request sent; exit 1 |
+| TC-CANCEL-07 | Non-cancellable state | post returns `CANCELLATION_NOT_ALLOWED` | Code preserved (4204, exit 1) |
+| TC-CANCEL-08 | Cancellation nullable | Response `cancellation:null` | table does not render fee/reversal rows; json outputs `null` as-is; exit 0 |
+| TC-CANCEL-09 | json stderr silence | `--yes ... --format json` | `Cancelling ride...` not in stderr; stdout contains only payload+envelope |
 
 ```bash
 agenzo-merchant-cli ride-elife cancel --api-key "$API_KEY" --yes \
@@ -378,19 +378,19 @@ agenzo-merchant-cli ride-elife cancel --api-key "$API_KEY" --yes \
 echo "exit=$?"
 ```
 
-### 5.7 `ride-elife list-orders`（R，`GET /ride/orders`，query 透传）
+### 5.7 `ride-elife list-orders` (R, `GET /ride/orders`, query forwarded)
 
-对应：Req 3.4, 5.1, 7.1；cli-design §4.4.1.3 list-orders schema。
+Corresponds to: Req 3.4, 5.1, 7.1; cli-design §4.4.1.3 list-orders schema.
 
-| 用例 | 场景 | 输入 | 预期 |
+| Case | Scenario | Input | Expected |
 |---|---|---|---|
-| TC-LIST-01 | 有数据 | `list-orders` | `GET /ride/orders` query `page=1&page_size=20`（默认）；data=`ListOrdersResponse`（`orders[]`/`total`/`page`/`page_size`）；退出 0 |
-| TC-LIST-02 | 默认分页 | 不传 page/page-size | query 含 `page:'1'`/`page_size:'20'` |
-| TC-LIST-03 | 过滤透传 | `--status Pending --order-type airport` | query 含 `status:'Pending'`/`order_type:'airport'`；省略时 query 无对应键 |
-| TC-LIST-04 | 非法分页 | `--page 0` / `--page-size -1` / `--page x` | 抛 `PARAM_INVALID`（正整数）；不发请求；退出 1 |
-| TC-LIST-05 | 空列表 | 响应 `orders:[]` | table 显示 `No ride orders found`（stderr 信息行/stdout 视实现）；json `orders:[]`；退出 0 |
-| TC-LIST-06 | 金额单位 | json | `orders[].price_amount` decimal（非 cents） |
-| TC-LIST-07 | json 信封 | `--format json` | stdout 含 `orders`/`total`/`page`/`page_size` + `profile`/`endpoint`；stderr 静默 |
+| TC-LIST-01 | Has data | `list-orders` | `GET /ride/orders` query `page=1&page_size=20` (defaults); data=`ListOrdersResponse` (`orders[]`/`total`/`page`/`page_size`); exit 0 |
+| TC-LIST-02 | Default pagination | page/page-size not provided | query contains `page:'1'`/`page_size:'20'` |
+| TC-LIST-03 | Filter forwarded | `--status Pending --order-type airport` | query contains `status:'Pending'`/`order_type:'airport'`; when omitted query has no corresponding keys |
+| TC-LIST-04 | Invalid pagination | `--page 0` / `--page-size -1` / `--page x` | Throws `PARAM_INVALID` (positive integer); no request sent; exit 1 |
+| TC-LIST-05 | Empty list | Response `orders:[]` | table displays `No ride orders found` (stderr info line/stdout per implementation); json `orders:[]`; exit 0 |
+| TC-LIST-06 | Monetary amount unit | json | `orders[].price_amount` decimal (not cents) |
+| TC-LIST-07 | json envelope | `--format json` | stdout contains `orders`/`total`/`page`/`page_size` + `profile`/`endpoint`; stderr silent |
 
 ```bash
 agenzo-merchant-cli ride-elife list-orders --api-key "$API_KEY" --status Pending --page 1 --page-size 10 --format json \
@@ -400,123 +400,123 @@ echo "exit=$?"
 
 ---
 
-## 6. 横切一致性断言（跨全部命令）
+## 6. Cross-Cutting Consistency Assertions (across all commands)
 
-> 这些是 design「Correctness Properties」在测试层的落地核对项，由 §4/§5 用例分摊覆盖；本节集中陈述不变量，作 task 6.4 横切测试（`tests/cross-cutting.test.ts` 或并入各命令测试）的契约。
+> These are the test-layer manifestation of the design "Correctness Properties" verification items, covered across §4/§5 cases; this section consolidates the invariants as the contract for task 6.4 cross-cutting tests (`tests/cross-cutting.test.ts` or merged into individual command tests).
 
-### 6.1 输出通道纯净（Property 1 / Req 5.1）
+### 6.1 Output Channel Purity (Property 1 / Req 5.1)
 
-文件：`tests/cross-cutting.test.ts`
+File: `tests/cross-cutting.test.ts`
 
-| 用例 | 输入 | 预期 |
+| Case | Input | Expected |
 |---|---|---|
-| TC-CHAN-01 | `notify('json','loading','x')` | 不写 stderr（spy 0 次） |
-| TC-CHAN-02 | `notify('table','loading','x')` | 写 stderr 1 次（状态/spinner 文案） |
-| TC-CHAN-03 | 任一联网命令 `--format json` 实跑（mock 成功） | stdout 单一合法 JSON 含 `profile`+`endpoint`；stderr 不含 `✓`/`ℹ`/`⚠`/`✗` 或进度文案 |
-| TC-CHAN-04 | 同命令 `--format table` | stdout 业务输出（keyValue/table）；stderr 含进度/状态行 |
-| TC-CHAN-05 | watch（`--watch --format json`） | stdout 仅 NDJSON 行（无信封）；非 watch 命令才套 `profile`/`endpoint` |
-| TC-CHAN-06 | 默认格式：不传 `--format`（不设 `AGENZO_FORMAT`） | 解析为 `json`（D2，program 默认值） |
+| TC-CHAN-01 | `notify('json','loading','x')` | Does not write to stderr (spy called 0 times) |
+| TC-CHAN-02 | `notify('table','loading','x')` | Writes to stderr 1 time (status/spinner text) |
+| TC-CHAN-03 | Any network command `--format json` actual run (mock success) | stdout is single valid JSON containing `profile`+`endpoint`; stderr does not contain `✓`/`ℹ`/`⚠`/`✗` or progress text |
+| TC-CHAN-04 | Same command `--format table` | stdout is business output (keyValue/table); stderr contains progress/status lines |
+| TC-CHAN-05 | watch (`--watch --format json`) | stdout is only NDJSON lines (no envelope); non-watch commands do wrap in `profile`/`endpoint` |
+| TC-CHAN-06 | Default format: `--format` not provided (no `AGENZO_FORMAT` set) | Resolves to `json` (D2, program default value) |
 
-### 6.2 幂等键强制（Property 3 / Req 5.3）
+### 6.2 Idempotency Key Enforcement (Property 3 / Req 5.3)
 
-文件：`tests/cross-cutting.test.ts`（书 `book`/`cancel`）
+File: `tests/cross-cutting.test.ts` (for `book`/`cancel`)
 
-| 用例 | 命令 | 输入 | 预期 |
+| Case | Command | Input | Expected |
 |---|---|---|---|
-| TC-IDEM-REQ-01 | `ride-elife book` | `--yes` 无 `--idempotency-key` | 抛 `IdempotencyKeyRequiredError`（`PARAM_IDEMPOTENCY_KEY_REQUIRED`）；`apiClient.post` 未被调用；退出 1 |
-| TC-IDEM-REQ-02 | `ride-elife cancel` | `--yes` 无 `--idempotency-key` | 同上 |
-| TC-IDEM-REQ-03 | `book` / `cancel` | 传合法键 | 头 `Idempotency-Key:<值>`；body 无幂等字段；CLI 不自动生成 |
-| TC-IDEM-REQ-04 | 只读命令 | `quote`/`get`/`list-orders`/`services *` | 不声明 `--idempotency-key`（commander 拒绝该 flag） |
-| TC-IDEM-REQ-05 | 键格式 | 非法/越界键 | `normalizeIdempotencyKey` 抛 `PARAM_INVALID`（与 §4.1/PBT-IDEM-02 一致） |
+| TC-IDEM-REQ-01 | `ride-elife book` | `--yes` without `--idempotency-key` | Throws `IdempotencyKeyRequiredError` (`PARAM_IDEMPOTENCY_KEY_REQUIRED`); `apiClient.post` not called; exit 1 |
+| TC-IDEM-REQ-02 | `ride-elife cancel` | `--yes` without `--idempotency-key` | Same as above |
+| TC-IDEM-REQ-03 | `book` / `cancel` | Valid key provided | Header `Idempotency-Key:<value>`; body has no idempotency field; CLI does not auto-generate |
+| TC-IDEM-REQ-04 | Read-only commands | `quote`/`get`/`list-orders`/`services *` | Do not declare `--idempotency-key` (commander rejects that flag) |
+| TC-IDEM-REQ-05 | Key format | Invalid/out-of-range key | `normalizeIdempotencyKey` throws `PARAM_INVALID` (consistent with §4.1/PBT-IDEM-02) |
 
-### 6.3 错误码归并 + 退出码（Property 4 / Req 5.2, 5.4）
+### 6.3 Error Code Consolidation + Exit Codes (Property 4 / Req 5.2, 5.4)
 
-文件：`tests/cross-cutting.test.ts`
+File: `tests/cross-cutting.test.ts`
 
-| 用例 | 输入 | 预期 code | 预期 exitCode |
+| Case | Input | Expected code | Expected exitCode |
 |---|---|---|---|
 | TC-ERR-01 | `fromApi({statusCode:401},{auth:'api-key'})` | `KEY_INVALID` | 3 |
 | TC-ERR-02 | `fromApi({statusCode:403},{auth:'api-key'})` | `KEY_SCOPE_DENIED` | 3 |
-| TC-ERR-03 | `fromApi({code:'QUOTE_EXPIRED',statusCode:410})` | `QUOTE_EXPIRED`（字符串码优先，D3；code_num 4202） | 1 |
-| TC-ERR-04 | `fromApi({code:'VEHICLE_UNAVAILABLE',statusCode:404})` | `VEHICLE_UNAVAILABLE`（4201） | 1 |
-| TC-ERR-05 | `fromApi({code:'BILLING_MODE_MISMATCH'})` | `BILLING_MODE_MISMATCH`（3001） | 1 |
-| TC-ERR-06 | `fromApi({code:'PAYMENT_ORDER_NOT_PAID'})` | `PAYMENT_ORDER_NOT_PAID`（3202） | 1 |
-| TC-ERR-07 | `fromApi({code:'ACCOUNT_INSUFFICIENT_BALANCE'})` | `ACCOUNT_INSUFFICIENT_BALANCE`（3103） | 1 |
-| TC-ERR-08 | `CliError('SERVICE_NOT_FOUND')` | `SERVICE_NOT_FOUND`（4101） | 1 |
-| TC-ERR-09 | `CliError('PARAM_INVALID')` / `PARAM_IDEMPOTENCY_KEY_REQUIRED` | 同输入（2xxx） | 1 |
-| TC-ERR-10 | `fromApi({statusCode:429})` | `RATE_LIMITED`（5001） | 4 |
+| TC-ERR-03 | `fromApi({code:'QUOTE_EXPIRED',statusCode:410})` | `QUOTE_EXPIRED` (string code takes priority, D3; code_num 4202) | 1 |
+| TC-ERR-04 | `fromApi({code:'VEHICLE_UNAVAILABLE',statusCode:404})` | `VEHICLE_UNAVAILABLE` (4201) | 1 |
+| TC-ERR-05 | `fromApi({code:'BILLING_MODE_MISMATCH'})` | `BILLING_MODE_MISMATCH` (3001) | 1 |
+| TC-ERR-06 | `fromApi({code:'PAYMENT_ORDER_NOT_PAID'})` | `PAYMENT_ORDER_NOT_PAID` (3202) | 1 |
+| TC-ERR-07 | `fromApi({code:'ACCOUNT_INSUFFICIENT_BALANCE'})` | `ACCOUNT_INSUFFICIENT_BALANCE` (3103) | 1 |
+| TC-ERR-08 | `CliError('SERVICE_NOT_FOUND')` | `SERVICE_NOT_FOUND` (4101) | 1 |
+| TC-ERR-09 | `CliError('PARAM_INVALID')` / `PARAM_IDEMPOTENCY_KEY_REQUIRED` | Same as input (2xxx) | 1 |
+| TC-ERR-10 | `fromApi({statusCode:429})` | `RATE_LIMITED` (5001) | 4 |
 | TC-ERR-11 | `fromApi({statusCode:500})` / `NetworkError` | `INTERNAL_ERROR`/`UPSTREAM_ERROR` | 4 |
-| TC-ERR-12 | `UserCancelError`（SIGINT / confirm 拒绝） | `CLIENT_ABORTED` | 5 |
+| TC-ERR-12 | `UserCancelError` (SIGINT / confirm rejected) | `CLIENT_ABORTED` | 5 |
 | TC-ERR-13 | `UpgradeRequiredError` | `UPGRADE_REQUIRED` | 2 |
-| TC-ERR-14 | 任一失败 `--format json` | stderr 仅 `{ error:{ code, code_num, message, request_id? } }`（§8.2）；stdout 空（无半个 payload） | 按矩阵 |
-| TC-ERR-15 | 同失败 `--format table` | stderr `✗ [<code_num>] <message>`；`request_id` 仅 HTTP 来源时存在 | 按矩阵 |
+| TC-ERR-14 | Any failure `--format json` | stderr contains only `{ error:{ code, code_num, message, request_id? } }` (§8.2); stdout is empty (no partial payload) | Per matrix |
+| TC-ERR-15 | Same failure `--format table` | stderr `✗ [<code_num>] <message>`; `request_id` present only for HTTP-origin errors | Per matrix |
 
-> 对外码恒 ∈ cli-core `error-catalog`；退出码恒由 `exitCodeFor` 映射（与 §1.1.5 / §3.5 一致）。D3 字符串码保真的前提（v3 ride 错误响应是否带字符串 `error.code`）需 §7 E2E 阶段 curl 实测确认。
+> External codes are always ∈ cli-core `error-catalog`; exit codes are always mapped by `exitCodeFor` (consistent with §1.1.5 / §3.5). The premise for D3 string code preservation (whether v3 ride error responses carry a string `error.code`) requires confirmation via §7 E2E curl testing.
 
-### 6.4 复用 cli-core（无重复实现，Property 6 / Req 4.1, 4.3）
+### 6.4 Reuse cli-core (No Duplicate Implementation, Property 6 / Req 4.1, 4.3)
 
-文件：`tests/cross-cutting.test.ts`（静态/结构断言）
+File: `tests/cross-cutting.test.ts` (static/structural assertions)
 
-| 用例 | 断言 |
+| Case | Assertion |
 |---|---|
-| TC-CORE-01 | `src/` 下**不存在** `core/`（无本地 api-client/config-manager/errors/formatter/output/prompt-engine/version 副本）；上述符号均自 `@agenzo/cli-core` import |
-| TC-CORE-02 | `src/**` 无 `import ... from '../admin-cli'`/`token-cli`/`payment-cli`（不 import 任何其它 app） |
-| TC-CORE-03 | ride/service 响应类型（`QuoteResponse`/`BookResponse`/... ）import 自 `@agenzo/cli-core`，app 内不重复定义 |
-| TC-CORE-04 | 商户域件（`watch.ts`/`verb-schema.ts`/`services/registry.ts`/`idempotency.ts` 的 resolve/normalize）留在 app 内（未下沉 cli-core） |
+| TC-CORE-01 | `src/` **does not contain** `core/` (no local api-client/config-manager/errors/formatter/output/prompt-engine/version copies); all such symbols are imported from `@agenzo/cli-core` |
+| TC-CORE-02 | `src/**` has no `import ... from '../admin-cli'`/`token-cli`/`payment-cli` (does not import any other app) |
+| TC-CORE-03 | Ride/service response types (`QuoteResponse`/`BookResponse`/...) are imported from `@agenzo/cli-core`; app does not re-define them |
+| TC-CORE-04 | Merchant domain modules (`watch.ts`/`verb-schema.ts`/`services/registry.ts`/`idempotency.ts` resolve/normalize) remain in-app (not pushed down to cli-core) |
 
 ---
 
-## 7. L4 命令级冒烟（E2E，手动可执行）+ 逐字对齐核对（Diff Review）
+## 7. L4 Command-Level Smoke (E2E, manually executable) + Verbatim Alignment Review (Diff Review)
 
-### 7.1 E2E 执行顺序（建议一次性走通）
+### 7.1 E2E Execution Order (recommended single pass)
 
-需真实 merchant-scope key（`$API_KEY`）。按业务依赖链执行，每步 `echo $?` 校验退出码：
+Requires a real merchant-scope key (`$API_KEY`). Execute in business dependency order, `echo $?` after each step to verify exit code:
 
 ```text
 services list → services get ride-elife
-  → ride-elife quote（产出 $QUOTE_ID）
-  → ride-elife book --yes --idempotency-key …（产出 $RIDE_ID）
+  → ride-elife quote (produces $QUOTE_ID)
+  → ride-elife book --yes --idempotency-key … (produces $RIDE_ID)
   → ride-elife get --order-id $RIDE_ID
-  → ride-elife get --order-id $RIDE_ID --watch（观察 NDJSON / 终态 / 超时末行）
+  → ride-elife get --order-id $RIDE_ID --watch (observe NDJSON / terminal status / timeout final line)
   → ride-elife list-orders
   → ride-elife cancel --order-id $RIDE_ID --yes --idempotency-key …
 ```
 
-每条写命令补一条「`--yes` 缺 `--idempotency-key`」用例确认本地拦截（exit 1、不发请求），一条 `--format table` 用例确认状态行走 stderr。
+For each write command, add one case for "`--yes` missing `--idempotency-key`" to confirm local interception (exit 1, no request sent), and one `--format table` case to confirm status lines go to stderr.
 
-### 7.2 curl 确认 D3（错误码保真前提）
+### 7.2 curl Confirmation for D3 (Error Code Preservation Prerequisite)
 
 ```bash
-# 触发一个 ride 业务错误（如过期 quote 再 book），确认 v3 错误响应是否带字符串 error.code
+# Trigger a ride business error (e.g., expired quote then book), confirm whether v3 error response carries string error.code
 curl -s -X POST "$HOST/api/v3/agent-pay/ride/book" -H "X-Api-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"quote_id":"expired",...}' | jq '.code, .message, .data'
 ```
 
-- 若响应带字符串码（如 `QUOTE_EXPIRED`）→ D3 保真生效（§6.3 TC-ERR-03/04 端到端成立）。
-- 若仅返数字码/HTTP status → ride 专有码保真需后端补 `error.code`（§7.7.3 BACK-021），CLI 侧暂回退 HTTP-status 映射。
+- If response carries string code (e.g., `QUOTE_EXPIRED`) → CLI `fromApi` preserves it verbatim, test TC-ERR-03/TC-BOOK-15 pass directly.
+- If only numeric code / HTTP status is returned → ride-specific code preservation requires backend to add `error.code` (§7.7.3 BACK-021); CLI-side temporarily falls back to HTTP-status mapping.
 
-### 7.3 逐字对齐核对清单（Diff Review，Property 7 / Req 7.1）
+### 7.3 Verbatim Alignment Review Checklist (Diff Review, Property 7 / Req 7.1)
 
-代码走查逐项核对（与 cli-design §4.4 + 现有 `merchant-cli/src/` 对照）：
+Code review item-by-item verification (comparing against cli-design §4.4 + existing `merchant-cli/src/`):
 
-| 核对项 | 断言 |
+| Review Item | Assertion |
 |---|---|
-| DIFF-01 | noun 名为 `ride-elife`（非 `ride`）；services group 为 `services` |
-| DIFF-02 | HTTP method+path：quote=`POST /ride/quote`、book=`POST /ride/book`、get=`GET /ride/<id>/status`、cancel=`POST /ride/<id>/cancel`（无 body）、list-orders=`GET /ride/orders`；base `/api/v3/agent-pay` |
-| DIFF-03 | 鉴权全部 `X-Api-Key`（`{type:'api-key'}`）；无 Bearer/keystore |
-| DIFF-04 | 金额为 decimal 货币单位（非 cents）——quote/book/get/list-orders/cancel 全链 |
-| DIFF-05 | get 字段 `from_location`/`to_location`（v3 snake_case，非 elife `from`/`to`）+ `source` 标记 |
-| DIFF-06 | book body 无 `payment_method_id`/卡字段，至多可选 `payment_order_id`（Property 5） |
-| DIFF-07 | watch 终态集合 5 个（大小写敏感）；默认 interval 5s / timeout 600s；超时末行 `watch_status:'timeout'`；NDJSON 不套信封 |
-| DIFF-08 | book/cancel 各 flags 全集与 verb-schema 一致；`--idempotency-key` 为 header 透传不进 body |
-| DIFF-09 | services list 字段子集 / get 全量（含 `verb_descriptions`/`workflow`/`discovery`）；未命中 `SERVICE_NOT_FOUND` |
-| DIFF-10 | 成功路径 stdout 文案/字段与现有实现等价（迁移不改成功路径输出；仅错误路径统一改走 cli-core 信封） |
+| DIFF-01 | Noun name is `ride-elife` (not `ride`); services group is `services` |
+| DIFF-02 | HTTP method+path: quote=`POST /ride/quote`, book=`POST /ride/book`, get=`GET /ride/<id>/status`, cancel=`POST /ride/<id>/cancel` (no body), list-orders=`GET /ride/orders`; base `/api/v3/agent-pay` |
+| DIFF-03 | Authentication is all `X-Api-Key` (`{type:'api-key'}`); no Bearer/keystore |
+| DIFF-04 | Amounts are decimal currency units (not cents) — quote/book/get/list-orders/cancel full chain |
+| DIFF-05 | get fields `from_location`/`to_location` (v3 snake_case, not elife `from`/`to`) + `source` marker |
+| DIFF-06 | book body has no `payment_method_id`/card fields, at most optional `payment_order_id` (Property 5) |
+| DIFF-07 | watch terminal status set has 5 entries (case-sensitive); default interval 5s / timeout 600s; timeout final line `watch_status:'timeout'`; NDJSON does not wrap in envelope |
+| DIFF-08 | book/cancel full flag sets are consistent with verb-schema; `--idempotency-key` is forwarded as header not in body |
+| DIFF-09 | services list field subset / get full (contains `verb_descriptions`/`workflow`/`discovery`); not found → `SERVICE_NOT_FOUND` |
+| DIFF-10 | Success path stdout text/fields are equivalent to existing implementation (migration does not change success path output; only error path unified to use cli-core envelope) |
 
 ---
 
-## 8. 覆盖矩阵（命令 × 需求/属性）
+## 8. Coverage Matrix (Command × Requirement/Property)
 
-| 命令 | 主要用例 | 覆盖需求 | 覆盖属性 |
+| Command | Primary Cases | Requirements Covered | Properties Covered |
 |---|---|---|---|
 | services list | TC-SVC-LST-01..06 | 1.1, 1.3, 5.1 | P1 |
 | services get | TC-SVC-GET-01..05 | 1.2, 1.3, 5.1 | P1, P4 |
@@ -525,41 +525,29 @@ curl -s -X POST "$HOST/api/v3/agent-pay/ride/book" -H "X-Api-Key: $API_KEY" \
 | ride-elife get (+watch) | TC-GET-01..10 | 3.1, 3.2, 5.1, 7.1 | P1, P2, P4, P7 |
 | ride-elife cancel | TC-CANCEL-01..09 | 3.3, 3.5, 5.1, 5.3, 7.1 | P1, P3, P4, P7 |
 | ride-elife list-orders | TC-LIST-01..07 | 3.4, 5.1, 7.1 | P1, P4, P7 |
-| 横切（输出通道） | TC-CHAN-01..06 | 5.1 | P1 |
-| 横切（幂等强制） | TC-IDEM-REQ-01..05、UT-IDEM-01..15、PBT-IDEM-01..03 | 5.3 | P3 |
-| 横切（错误/退出码） | TC-ERR-01..15 | 5.2, 5.4 | P4 |
-| 横切（复用 cli-core） | TC-CORE-01..04 | 4.1, 4.3 | P6 |
-| watch 引擎 | UT-WATCH-01..17、PBT-WATCH-01..04 | 3.2 | P2 |
+| Cross-cutting (output channel) | TC-CHAN-01..06 | 5.1 | P1 |
+| Cross-cutting (idempotency enforcement) | TC-IDEM-REQ-01..05, UT-IDEM-01..15, PBT-IDEM-01..03 | 5.3 | P3 |
+| Cross-cutting (error/exit codes) | TC-ERR-01..15 | 5.2, 5.4 | P4 |
+| Cross-cutting (reuse cli-core) | TC-CORE-01..04 | 4.1, 4.3 | P6 |
+| Watch engine | UT-WATCH-01..17, PBT-WATCH-01..04 | 3.2 | P2 |
 | verb-schema/help | UT-SCHEMA-01..07 | 7.1 | P5*, P7 |
-| body 校验助手 | UT-BODY-01..09 | 2.1, 2.2, 3.1, 3.4 | P7 |
+| Body validation helpers | UT-BODY-01..09 | 2.1, 2.2, 3.1, 3.4 | P7 |
 
-> 属性编号 P1–P7 对应 design.md「Correctness Properties」。退出码语义见 §3.5。`P5*`：verb-schema 的 `book` flags 无 `payment-method-id`，间接佐证 Property 5。
+> Property numbers P1–P7 correspond to design.md "Correctness Properties". Exit code semantics are in §3.5. `P5*`: verb-schema's `book` flags having no `payment-method-id` indirectly supports Property 5.
 
 ---
 
-## 9. 已规划自动化测试文件映射（tasks 6.2–6.5）
+## 9. Planned Automated Test File Mapping (tasks 6.2–6.5)
 
-| 测试文件 | 覆盖的用例/属性 | 对应 task |
+| Test File | Cases/Properties Covered | Corresponding Task |
 |---|---|---|
-| `tests/helpers.ts` | mock `ApiClient`（拦截 get/post）、captureStdout/captureStderr、buildProgram —— 共享工具（对齐 admin/token `tests/helpers.ts`） | 6.2 |
-| `tests/services.test.ts` | TC-SVC-LST-01..06、TC-SVC-GET-01..05、UT-REG-01..03；输出契约（json stdout 纯净） | 6.2 |
-| `tests/ride-elife.test.ts` | TC-QUOTE/BOOK/GET(非 watch)/CANCEL/LIST happy + 关键分支；UT-BODY-01..09；book 无 `payment_method_id`、confirm、坐标 number 化、字段逐字对齐 | 6.3 |
-| `tests/cross-cutting.test.ts` | TC-CHAN-01..06、TC-IDEM-REQ-01..05、TC-ERR-01..15、TC-CORE-01..04（输出通道/幂等必传/错误映射/复用 cli-core） | 6.4 |
+| `tests/helpers.ts` | Mock `ApiClient` (intercepts get/post), captureStdout/captureStderr, buildProgram — shared utilities (aligned with admin/token `tests/helpers.ts`) | 6.2 |
+| `tests/services.test.ts` | TC-SVC-LST-01..06, TC-SVC-GET-01..05, UT-REG-01..03; output contract (json stdout purity) | 6.2 |
+| `tests/ride-elife.test.ts` | TC-QUOTE/BOOK/GET(non-watch)/CANCEL/LIST happy + key branches; UT-BODY-01..09; book has no `payment_method_id`, confirm, coordinate numericization, field verbatim alignment | 6.3 |
+| `tests/cross-cutting.test.ts` | TC-CHAN-01..06, TC-IDEM-REQ-01..05, TC-ERR-01..15, TC-CORE-01..04 (output channel/idempotency enforcement/error mapping/reuse cli-core) | 6.4 |
 | `tests/idempotency.test.ts` | UT-IDEM-01..15 | 6.4/6.5 |
-| `tests/watch.test.ts` | UT-WATCH-01..17（含假时钟 `runWatch`） | 6.5 |
+| `tests/watch.test.ts` | UT-WATCH-01..17 (including fake clock `runWatch`) | 6.5 |
 | `tests/verb-schema.test.ts` | UT-SCHEMA-01..07 | 6.3 |
-| `tests/pbt.test.ts` | PBT-IDEM-01..03、PBT-WATCH-01..04（fast-check） | 6.5 |
+| `tests/pbt.test.ts` | PBT-IDEM-01..03, PBT-WATCH-01..04 (fast-check) | 6.5 |
 
-> 运行 PBT 时在 `execute-bash` 的 warning 字段传 `LongRunningPBT`。L3 命令集成 mock `ApiClient`、真实 `parseAsync`；L4 E2E（§7）需真实 merchant-scope key，手动复现，不纳入 `vitest run`。
-
----
-
-## 10. 未覆盖项与后续计划
-
-| 项 | 说明 | 优先级 |
-|---|---|---|
-| 交互模式 prompt 补输（api-key / 幂等键） | 需 stdin/TTY 模拟（commander 真实 parse 下挂起） | P3（§7 手动 E2E 覆盖） |
-| D3 ride 字符串码端到端保真 | 依赖 curl 确认 v3 错误响应是否带 `error.code`（§7.2） | P1（接后端时确认） |
-| 后端 `/services` discovery endpoint | BACK-063 pending impl；本期读内置 registry | 范围外 |
-| `ride-elife track` | D5 pending impl；`get --watch` 覆盖订单状态轮询诉求 | 范围外 |
-| ride 第二阶段（payment-order-id 反查 / 月结扣减） | CLI 仅透传可选 `--payment-order-id`，服务端逻辑属后端 | 范围外 |
+> When running PBT, pass `LongRunningPBT` in the `execute-bash` warning field. L3 command integration mocks `ApiClient`, uses real `parseAsync`; L4 E2E (§7) requires a real merchant-scope key, manually reproduced, not included in `vitest run`.

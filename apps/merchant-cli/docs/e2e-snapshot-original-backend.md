@@ -1,18 +1,11 @@
 # Merchant-CLI E2E Snapshot — Original Backend (PycharmProjects/agenzo)
 
-> 生成时间: 2026-06-11T17:30+08:00
-> 后端: http://localhost:8000 (PycharmProjects/agenzo, FastAPI + MongoDB)
+> Generated: 2026-06-11T17:30+08:00
+> Backend: http://localhost:8000 (PycharmProjects/agenzo, FastAPI + MongoDB)
 > CLI: agenzo-cli/apps/merchant-cli/dist/index.js (v0.1.0)
 > API Key: sk_test_REDACTED
 > Developer: dev_01KTTY4RB8GTYM89XGVNF40S1P
-> 用途: 切换到 agenzo-platform 后端后, 对比输出是否一致
-
----
-
-## 已知问题
-
-- ride-elife quote 和 book 依赖外部 eLife API, 本地环境该服务不可达 (超时)
-- merchant-cli 默认 `--format json` (与 admin/token-cli 默认 table 不同)
+> Purpose: Compare output consistency after switching to the agenzo-platform backend
 
 ---
 
@@ -36,7 +29,7 @@
 ```
 Exit: 0
 
-注: services list 是纯本地命令 (CLI 内置 registry), 不调用后端 API.
+Note: services list is a local-only command (CLI built-in registry), does not call the backend API.
 
 ---
 
@@ -71,7 +64,7 @@ Exit: 0
 ```
 Exit: 0
 
-注: services get 也是纯本地命令.
+Note: services get is also a local-only command.
 
 ---
 
@@ -90,7 +83,7 @@ Exit: 0
 ```
 Exit: 0
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "0000",
@@ -112,7 +105,7 @@ Exit: 0
 ```
 Exit: 1
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "1905",
@@ -131,7 +124,7 @@ Exit: 1
 ```
 Exit: 1
 
-### 后端原始响应 (curl)
+### Backend raw response (curl)
 ```json
 {
   "code": "1905",
@@ -144,7 +137,7 @@ Exit: 1
 
 ## 6. ride-elife quote
 
-### JSON (成功)
+### JSON (success)
 ```json
 {
   "profile": "custom",
@@ -160,7 +153,7 @@ Exit: 1
       },
       "passenger_capacity": 3,
       "luggage_capacity": 3,
-      "typical_vehicle": { "model": "迷你" },
+      "typical_vehicle": { "model": "Mini" },
       "image_url": "https://elifetransfer.s3.us-east-2.amazonaws.com/..."
     },
     {
@@ -189,7 +182,7 @@ Exit: 1
 ```
 Exit: 0
 
-**CLI 命令:**
+**CLI command:**
 ```bash
 agenzo-merchant-cli ride-elife quote \
   --api-key $KEY \
@@ -202,7 +195,7 @@ agenzo-merchant-cli ride-elife quote \
 
 ---
 
-## 7. ride-elife book (成功, monthly_settlement)
+## 7. ride-elife book (success, monthly_settlement)
 
 ### JSON
 ```json
@@ -225,7 +218,7 @@ agenzo-merchant-cli ride-elife quote \
 ```
 Exit: 0
 
-**CLI 命令:**
+**CLI command:**
 ```bash
 agenzo-merchant-cli ride-elife book \
   --api-key $MS_KEY \
@@ -241,11 +234,11 @@ agenzo-merchant-cli ride-elife book \
   --yes --format json
 ```
 
-注: book 需要 monthly_settlement developer + active settlement account (balance >= fare in minor units, 存为 integer 非 string) + --passenger-email (eLife 要求).
+Note: book requires a monthly_settlement developer + active settlement account (balance >= fare in minor units, stored as integer not string) + --passenger-email (eLife requirement).
 
 ---
 
-## 8. ride-elife get (成功)
+## 8. ride-elife get (success)
 
 ### JSON
 ```json
@@ -275,11 +268,11 @@ agenzo-merchant-cli ride-elife book \
 ```
 Exit: 0
 
-注: get 使用 `ride_id` (eLife 返回的外部ID: "4112785"), 不是 `order_id` (内部ID: "rio_...")
+Note: get uses `ride_id` (external ID returned by eLife: "4112785"), not `order_id` (internal ID: "rio_...")
 
 ---
 
-## 9. ride-elife list-orders (有数据)
+## 9. ride-elife list-orders (with data)
 
 ### JSON
 ```json
@@ -314,7 +307,7 @@ Exit: 0
 
 ---
 
-## 10. ride-elife cancel (成功)
+## 10. ride-elife cancel (success)
 
 ### JSON
 ```json
@@ -333,15 +326,15 @@ Exit: 0
 ```
 Exit: 0
 
-注: cancel 也用 `ride_id` (外部ID), 不是 `order_id` (内部ID)
+Note: cancel also uses `ride_id` (external ID), not `order_id` (internal ID)
 
 ---
 
-## 11. 错误输出中的 upstream 诊断字段（eLife 上游错误）
+## 11. Upstream diagnostic fields in error output (eLife upstream errors)
 
-当 ride-elife 命令因 eLife 上游错误而失败时，CLI stderr 的错误 JSON 中会额外携带 `upstream` 字段，承载 eLife 原始错误码与错误信息。该字段为可选，仅用于诊断，内容不稳定。
+When a ride-elife command fails due to an eLife upstream error, the CLI stderr error JSON includes an additional `upstream` field carrying the original eLife error code and message. This field is optional, for diagnostics only, and its content is unstable.
 
-### 示例：ride-elife book 因上游 eLife 拒绝而失败
+### Example: ride-elife book rejected by upstream eLife
 
 #### JSON (stderr)
 ```json
@@ -349,7 +342,7 @@ Exit: 0
 ```
 Exit: 1
 
-### 示例：ride-elife quote 因报价过期而失败
+### Example: ride-elife quote expired
 
 #### JSON (stderr)
 ```json
@@ -357,21 +350,21 @@ Exit: 1
 ```
 Exit: 1
 
-注:
-- `upstream` 字段仅在错误源自 eLife 上游服务时出现。
-- 顶层 `code` / `message` 始终为 CLI 契约定义的固定文案，不含 eLife 原始内容。
-- 消费者不应基于 `upstream` 字段内容做分支判断（该字段不稳定、仅供诊断）。
-- 当 eLife 不可达（网络超时等）时，`upstream.code` 为 `"NETWORK_ERROR"`。
-- 非 eLife 上游错误（如本地校验失败、纯后端业务错误）不会出现 `upstream` 字段。
+Notes:
+- The `upstream` field only appears when the error originates from the eLife upstream service.
+- The top-level `code` / `message` are always the CLI contract's fixed text, not raw eLife content.
+- Consumers should not branch on `upstream` field content (unstable, diagnostics only).
+- When eLife is unreachable (network timeout, etc.), `upstream.code` is `"NETWORK_ERROR"`.
+- Non-eLife upstream errors (e.g., local validation failures, pure backend business errors) do not include the `upstream` field.
 
 ---
 
-## 关键对比维度 (切 platform 后检查)
+## Key Comparison Dimensions (check after switching to platform)
 
-1. **后端信封**: `{code:"0000", message:..., data:...}` 格式保持
-2. **ride orders 分页**: `{data:[], total, page, page_size}` 结构
-3. **错误码映射**: 后端 `1905` (ride not found) → CLI `RESOURCE_NOT_FOUND` (2001)
-4. **services 命令**: 纯本地, 不依赖后端, platform 切换后应仍正常
-5. **X-Api-Key 认证**: 与 token-cli 相同
-6. **ride-elife quote/book**: 需要 eLife 外部服务可达, 两个后端行为应一致 (都转发到 eLife)
-7. **list-orders 字段**: orders array + total + page + page_size
+1. **Backend envelope**: `{code:"0000", message:..., data:...}` format maintained
+2. **Ride orders pagination**: `{data:[], total, page, page_size}` structure
+3. **Error code mapping**: backend `1905` (ride not found) maps to CLI `RESOURCE_NOT_FOUND` (2001)
+4. **services commands**: local-only, not backend-dependent, should still work after platform switch
+5. **X-Api-Key auth**: same as token-cli
+6. **ride-elife quote/book**: requires eLife external service to be reachable; both backends should behave identically (both forward to eLife)
+7. **list-orders fields**: orders array + total + page + page_size

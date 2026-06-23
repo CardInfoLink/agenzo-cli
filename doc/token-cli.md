@@ -1,6 +1,6 @@
 # token-cli — Payment Methods & Tokens (`agenzo-token-cli`)
 
-`@agenzo/token-cli` — runtime plane: bind cards (`payment-methods`) and mint payment tokens (`payment-tokens`). **API Key** auth (`--api-key`, the full `sk_<env>_...` string from [admin-cli](admin-cli.md) `keys create`).
+`@agenzo/token-cli` — runtime plane: manage payment methods (`payment-methods`) and mint payment tokens (`payment-tokens`). **API Key** auth (`--api-key`, the full `sk_<env>_...` string from [admin-cli](admin-cli.md) `keys create`).
 
 See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exit codes, idempotency).
 
@@ -10,7 +10,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 
 | Noun | Verb | Type | Description |
 |---|---|---|---|
-| `payment-methods` | `add` | Write | Bind card + poll 3DS verification |
+| `payment-methods` | `add` | Write | Add a payment method + poll 3DS verification |
 | `payment-methods` | `list` | Read | List payment methods |
 | `payment-methods` | `get` | Read | View payment method details |
 | `payment-methods` | `disable` | Write | Disable a payment method |
@@ -29,7 +29,7 @@ agenzo-token-cli payment-methods get <pm_id> --api-key <key>
 agenzo-token-cli payment-methods disable <pm_id> --api-key <key>
 ```
 
-### add — Card Binding + 3DS (onboarding Step 4)
+### add — Add Payment Method + 3DS (onboarding Step 4)
 
 - **Ask: `--email`** — This is for 3DS verification and may differ from the developer or login email. MUST ask the user which email to use. Do NOT default to any previously used email.
 - `--api-key`: Use the key from admin-cli Step 3 (do not ask again).
@@ -118,7 +118,7 @@ VCN, X402, and Network Token all involve pre-authorization (fund freeze) on a ga
 
 ### Network Token Compatibility
 
-Not all cards support Network Token. Depends on issuer and card network, not brand. How to check: after card binding, the `evo_data.network_token` field has a value if supported, empty if not. Cards without support return: `This card does not support Network Token.`
+Not all cards support Network Token. Depends on issuer and card network, not brand. How to check: after the payment method is added, the `evo_data.network_token` field has a value if supported, empty if not. Cards without support return: `This card does not support Network Token.`
 
 ### VCN / X402 Compatibility
 
@@ -135,16 +135,12 @@ When this happens, DO NOT retry `payment-tokens create --type vcn` with differen
 | Card Brand | Revoke Action |
 |------------|---------------|
 | **Visa** | No action needed. Cryptogram auto-expires in 24 hours. |
-| **MasterCard** | Generates a new cryptogram to push out the old one (max 2 active). Cryptogram auto-expires in 5 days. |
-
-MasterCard uses a FIFO cryptogram cache queue (max 2 entries):
-- **Create**: fills cache to 2, returns the oldest (queue head)
-- **Revoke**: removes queue head, generates new one to refill to 2
+| **MasterCard** | No action needed. Cryptogram auto-expires in 5 days. |
 
 ## token-specific Errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `No active payment methods found` | API key belongs to a different developer | Use the correct API key |
-| `This card does not support Network Token` | Issuer does not support NT | Bind a card that supports NT |
+| `This card does not support Network Token` | Issuer does not support NT | Add a payment method that supports NT |
 | `Evo preauth failed` | PSP or issuer rejected preauth | Try a different card or retry later |

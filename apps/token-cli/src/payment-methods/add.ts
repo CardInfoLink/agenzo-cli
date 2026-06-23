@@ -29,7 +29,7 @@ const POLL_TIMEOUT_MS = 15 * 60 * 1000;
 // ============================================================
 
 /**
- * `payment-methods add` — bind a card and run 3DS verification (§3.4.0.1).
+ * `payment-methods add` — add a payment method and run 3DS verification (§3.4.0.1).
  *
  * Flags: --api-key, --type (default card), --email, --card-number, --expiry (MMYY), --cvv.
  * Missing values collected via PromptEngine.collectPaymentMethodParams.
@@ -47,7 +47,7 @@ const POLL_TIMEOUT_MS = 15 * 60 * 1000;
 export function registerAddCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('add')
-    .description('Add a payment method (card binding + 3DS)')
+    .description('Add a payment method (with 3DS verification)')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--type <type>', 'Payment method type (default: card)', 'card')
     .option('--email <email>', 'Email for 3DS verification')

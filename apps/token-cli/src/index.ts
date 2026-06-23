@@ -49,7 +49,7 @@ async function main() {
     .name('agenzo-token-cli')
     .version(getCurrentVersion())
     .description(
-      'Agenzo token plane: payment methods (card binding + 3DS) and payment tokens (VCN / Network Token / X402)',
+      'Agenzo token plane: payment methods (add payment method + 3DS) and payment tokens (VCN / Network Token / X402)',
     )
     .option('--verbose', 'Show verbose logs')
     .option('--yes', 'Skip confirmation prompts (for automation/AI Agents)')

@@ -94,7 +94,7 @@ describe('PBT — idempotency key format (Property 3 / Req 5.3)', () => {
     const tooLong = fc.integer({ min: 129, max: 400 }).map((n) => 'a'.repeat(n));
     // a bad char sandwiched between two in-class cores so trim cannot rescue it
     const core = fc.stringMatching(/^[A-Za-z0-9_-]{1,40}$/);
-    const badChar = fc.constantFrom(' ', '!', '@', '#', '/', '\t', '中', '😀', '\n');
+    const badChar = fc.constantFrom(' ', '!', '@', '#', '/', '\t', '\u4e2d', '\u{1f600}', '\n');
     const withBadChar = fc
       .tuple(core, badChar, core)
       .map(([a, b, c]) => `${a}${b}${c}`);

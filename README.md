@@ -23,7 +23,6 @@ agenzo-cli/
     admin-cli/                # @agenzo/admin-cli    → bin: agenzo-admin-cli    (control plane / Bearer)
     token-cli/                # @agenzo/token-cli    → bin: agenzo-token-cli    (payment methods + tokens / API key)
     merchant-cli/             # @agenzo/merchant-cli → bin: agenzo-merchant-cli (merchant fulfillment / API key)
-    payment-cli/              # reserved slot — not yet implemented
   contracts/                  # backend error-code catalog snapshot the CLI validates against
   scripts/                    # repo tooling (error-code contract check)
   doc/                        # per-CLI guides (admin / token / merchant)
@@ -36,12 +35,10 @@ agenzo-cli/
 | `admin-cli` | `@agenzo/admin-cli` | `agenzo-admin-cli` | Bearer token | Implemented |
 | `token-cli` | `@agenzo/token-cli` | `agenzo-token-cli` | API key | Implemented |
 | `merchant-cli` | `@agenzo/merchant-cli` | `agenzo-merchant-cli` | API key | Implemented |
-| `payment-cli` | — | — | — | Not implemented (reserved) |
 
 - **admin-cli** — control plane: `auth` / `config` / `orgs` / `developers` / `keys` / `accounts`.
-- **token-cli** — `payment-methods` (card add + 3DS) and `payment-tokens` (VCN / Network Token / X402).
+- **token-cli** — `payment-methods` (add payment method + 3DS) and `payment-tokens` (VCN / Network Token / X402).
 - **merchant-cli** — `ride-elife` fulfillment (`quote` / `book` / `get` / `cancel` / `list-orders`).
-- **payment-cli** — reserved workspace slot; no implementation yet.
 
 ## Conventions
 
