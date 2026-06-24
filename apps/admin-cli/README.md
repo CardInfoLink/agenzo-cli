@@ -1,6 +1,10 @@
 # @agenzo/admin-cli
 
+[![npm](https://img.shields.io/npm/v/@agenzo/admin-cli.svg)](https://www.npmjs.com/package/@agenzo/admin-cli) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../../LICENSE) ![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
+
 > The **control-plane CLI** for the Agenzo platform. Operators and Agents use it to sign in, manage organizations, developers, API keys, and settlement accounts, and to point the toolchain at an environment.
+
+**[Installation](#installation)** · **[Authentication](#authentication)** · **[Config](#environment-configuration)** · **[Commands](#command-matrix)** · **[keys](#keys)** · **[Idempotency](#idempotency)** · **[Errors](#output-and-errors)**
 
 Binary: `agenzo-admin-cli` ｜ Auth: Bearer Token (via `auth login`)
 
@@ -10,7 +14,7 @@ Binary: `agenzo-admin-cli` ｜ Auth: Bearer Token (via `auth login`)
 npm install -g @agenzo/admin-cli
 ```
 
-The `agenzo-admin-cli` command is available after installation. Requires Node.js ≥ 18.
+The `agenzo-admin-cli` command is available after installation. Requires Node.js ≥ 22. Upgrade later with `npm install -g @agenzo/admin-cli@latest`.
 
 ## Authentication
 
@@ -20,7 +24,7 @@ admin-cli is a **control-plane** tool. Sign in once with a magic link; the resul
 agenzo-admin-cli auth login --email you@example.com --idempotency-key <unique_key>
 ```
 
-- First-time emails are auto-registered (prompts for an organization name, and an invitation code if the backend requires one).
+- First-time emails are auto-registered (prompts for an organization name, and an invitation code if the platform requires one).
 - The CLI sends a magic link and polls until you click it (up to 10 minutes).
 - Bearer Tokens (`access_token` / `refresh_token`) are stored under `~/.agenzo-admin-cli/` and **never printed to stdout**. Expired sessions are refreshed (or re-authenticated) automatically.
 - The Bearer Token and the API Keys minted by `keys create` are **not interchangeable**: API Keys are for the runtime-plane CLIs ([`@agenzo/token-cli`](https://www.npmjs.com/package/@agenzo/token-cli) and friends).
@@ -30,7 +34,7 @@ agenzo-admin-cli auth login --email you@example.com --idempotency-key <unique_ke
 admin-cli **owns** the environment for the whole toolchain. The host and path it writes to `~/.agenzo-admin-cli/config.json` are shared by the runtime-plane CLIs. The default target is production `https://agent.everonet.com`.
 
 ```bash
-agenzo-admin-cli config set-host https://agent-test.everonet.com   # switch to test
+agenzo-admin-cli config set-host https://agent-dev.agenzo.com   # switch to the test environment
 agenzo-admin-cli config set-host production                        # built-in profile name
 agenzo-admin-cli config show                                       # show host / path / active org
 agenzo-admin-cli config reset-host                                 # back to production default
@@ -42,8 +46,8 @@ Changing the host auto-selects a stored credential matching that host (clearing 
 
 | Option | Description |
 |---|---|
-| `--format <json\|table>` | Output format. Default `table` (human-readable); `json` for Agent / script parsing. Can also be set via the `AGENZO_FORMAT` environment variable |
-| `--yes` | Skip interactive prompts (for automation / AI Agents) |
+| `--format <json\|table>` | Output format. Defaults to `table`; pass `json` (or set `AGENZO_FORMAT=json`) for machine-readable output |
+| `--yes` | Skip interactive prompts (non-interactive automation) |
 | `--verbose` | Print verbose logs to stderr |
 | `--version` | Print the CLI version |
 
@@ -88,7 +92,7 @@ agenzo-admin-cli auth login --email you@example.com --idempotency-key <unique_ke
 | `--email` | Yes | Prompted interactively when omitted |
 | `--idempotency-key` | Yes | Forwarded verbatim as the `Idempotency-Key` header on login/registration; prompted when omitted (required explicitly under `--yes`) |
 
-Probes whether the email is registered; unknown emails branch to registration (prompts for organization name, and an invitation code if the backend returns one). Then polls the magic-link status (3s interval, 10 min timeout) and stores the credential on success. In `json` mode the payload is `{ organization_id, organization: { id, name }, email }` — tokens are never included.
+Probes whether the email is registered; unknown emails branch to registration (prompts for organization name, and an invitation code if the platform returns one). Then polls the magic-link status (3s interval, 10 min timeout) and stores the credential on success. In `json` mode the payload is `{ organization_id, organization: { id, name }, email }` — tokens are never included.
 
 ### logout
 
@@ -149,7 +153,7 @@ agenzo-admin-cli orgs update --email ops@acme.com --idempotency-key <unique_key>
 | `--email` | No | New email — triggers an email-verification flow instead of an inline change |
 | `--idempotency-key` | Yes | Forwarded as the `Idempotency-Key` header; prompted when omitted (required under `--yes`) |
 
-A name-only change returns the updated `Organization`. An email change does **not** update inline: the backend issues a verification email and the CLI renders `Status: PENDING_EMAIL_VERIFICATION` plus an expiry. The underlying `magic_link_token` is deliberately withheld from output.
+A name-only change returns the updated `Organization`. An email change does **not** update inline: the platform issues a verification email and the CLI renders `Status: PENDING_EMAIL_VERIFICATION` plus an expiry. The underlying `magic_link_token` is deliberately withheld from output.
 
 ### list
 
@@ -235,7 +239,7 @@ agenzo-admin-cli keys create \
 | Flag | Required | Description |
 |---|---|---|
 | `--developer-id` | Yes | Owning developer; prompted when omitted |
-| `--key-name` | Yes | Human-readable key name; prompted when omitted |
+| `--key-name` | Yes | Display name for the key; prompted when omitted |
 | `--scope` | No | Comma-separated subset of `token`, `merchant`, `payment` (which runtime CLIs the key may call). Defaults to all three; validated locally |
 | `--idempotency-key` | Yes | Forwarded as the `Idempotency-Key` header; prompted when omitted (required under `--yes`) |
 
@@ -295,7 +299,7 @@ Every **server-side write** must be idempotent. These 7 commands require `--idem
 
 ## Output and errors
 
-- **Success**: `table` mode prints human-readable text to stdout; `json` mode emits the structured payload to stdout and silences status lines.
+- **Success**: `table` mode prints formatted text to stdout; `json` mode emits the structured payload to stdout and silences status lines.
 - **Failure**: an error envelope is written to stderr. In `json` mode it is `{ "error": { "code", "code_num", "message", "request_id?" } }`; in `table` mode it is `✗ [<code_num>] <message>`.
 - **Secrets**: Bearer Tokens never reach stdout in any format; API Key plaintext is shown only once on create/rotate, and stripped from all read commands.
 - **Exit codes**: `0` success · `1` business / parameter (4xx) · `2` upgrade required · `3` auth failure / invalid · `4` network / 5xx · `5` user cancel.
@@ -312,13 +316,4 @@ All state lives under `~/.agenzo-admin-cli/`:
 
 ## Related
 
-- Full field-level specification: internal design doc `architecture-upgrade/v1/cli-design.md` §2.
 - Runtime plane (payment methods / payment tokens): [`@agenzo/token-cli`](https://www.npmjs.com/package/@agenzo/token-cli).
-
-## Development
-
-```bash
-npm install      # install dependencies from the monorepo root
-npm run build    # build (tsup, output at dist/index.js)
-npm test         # run tests (vitest)
-```

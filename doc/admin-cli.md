@@ -4,6 +4,19 @@
 
 See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exit codes, API key format, idempotency).
 
+## Command matrix
+
+19 commands across 6 nouns. `config` and the local `orgs` verbs are pure-local (no network); all others use the stored Bearer Token.
+
+| Noun | Verb | Type | Description |
+|---|---|---|---|
+| `auth` | `login` / `logout` | Write | Magic-link sign-in / sign out |
+| `config` | `set-host` / `show` / `reset-host` | Read/Write | Manage the API host (local only) |
+| `orgs` | `get` / `list` / `switch` / `update` | Read/Write | Organization info and active-org switch |
+| `developers` | `create` / `list` / `get` / `update` | Read/Write | Manage developers |
+| `keys` | `create` / `list` / `get` / `rotate` / `disable` | Read/Write | Manage API keys |
+| `accounts` | `get` | Read | Query a settlement account |
+
 ## Onboarding (control-plane half: Steps 1–3)
 
 The end-to-end flow starts here, then continues in `agenzo-token-cli`:
@@ -21,7 +34,7 @@ agenzo-admin-cli auth login --email user@example.com
 ```
 
 - First-time users are auto-registered (prompts for org name)
-- **Invitation code**: If the backend requires an invitation code for new registrations (error `1103`), the CLI will prompt `Invitation code:` interactively. MUST ask the user to provide it; do not generate or guess a value. The CLI sends it as the `invitation_code` field and retries registration automatically.
+- **Invitation code**: If an invitation code is required for new registrations (error `1103`), the CLI will prompt `Invitation code:` interactively. MUST ask the user to provide it; do not generate or guess a value. The CLI sends it as the `invitation_code` field and retries registration automatically.
 - Sends a magic link to the email
 - CLI polls until the link is clicked (up to 10 minutes)
 - Credentials are stored locally in `~/.agenzo-admin-cli/`
@@ -49,7 +62,7 @@ agenzo-admin-cli keys create --developer-id <developer_id> --key-name "My Key"
 - `--developer-id`: Use the value from Step 2 (do not ask again).
 - `--scope` (optional): comma-separated `token,merchant,payment` (default: all three). `--yes` defaults to all; otherwise an interactive checkbox is shown. Invalid values fail locally (`PARAM_INVALID`, exit 1).
 - Returns the full API key (shown only once!) — remind the user to save it.
-- Key format: `sk_<env>_...` — the prefix is set by the server's `AGENT_PAY_API_KEY_PREFIX`: `sk_prod_` in production, `sk_test_` in test/dev (e.g. agent-dev). Do not assume `sk_prod_`.
+- Key format: `sk_<env>_...` — `sk_prod_` in production, `sk_test_` in test/dev. Do not assume `sk_prod_`.
 - Used for all Runtime Plane operations (`agenzo-token-cli`, `agenzo-merchant-cli`).
 
 ## Organizations
@@ -98,12 +111,12 @@ agenzo-admin-cli accounts get --developer-id <developer_id>
 ## Configuration
 
 ```bash
-agenzo-admin-cli config set-host http://localhost:8000  # Set API host (local dev, or a profile name e.g. production)
+agenzo-admin-cli config set-host https://agent-dev.agenzo.com  # Switch to the test environment (or a profile name, e.g. production)
 agenzo-admin-cli config show                            # Show current host / active org
 agenzo-admin-cli config reset-host                      # Reset host to default (https://agent.everonet.com)
 ```
 
-## Admin-specific Errors
+## Admin-specific errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|

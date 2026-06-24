@@ -4,7 +4,7 @@
 
 See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exit codes, idempotency).
 
-## Command Matrix
+## Command matrix
 
 8 commands, all API-Key auth (`--api-key`):
 
@@ -137,7 +137,7 @@ When this happens, DO NOT retry `payment-tokens create --type vcn` with differen
 | **Visa** | No action needed. Cryptogram auto-expires in 24 hours. |
 | **MasterCard** | No action needed. Cryptogram auto-expires in 5 days. |
 
-## token-specific Errors
+## Token-specific errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|

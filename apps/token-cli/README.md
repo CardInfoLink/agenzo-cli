@@ -1,6 +1,10 @@
 # @agenzo/token-cli
 
+[![npm](https://img.shields.io/npm/v/@agenzo/token-cli.svg)](https://www.npmjs.com/package/@agenzo/token-cli) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../../LICENSE) ![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
+
 > The **payment credential CLI** (runtime plane) for the Agenzo platform. Agents use it to manage payment methods (card details + 3DS verification) and to issue payment tokens (VCN / Network Token / X402) before a transaction.
+
+**[Installation](#installation)** · **[Authentication](#authentication)** · **[Commands](#command-matrix)** · **[payment-methods](#payment-methods)** · **[payment-tokens](#payment-tokens)** · **[Errors](#output-and-errors)**
 
 Binary: `agenzo-token-cli` ｜ Auth: API Key (`X-Api-Key`)
 
@@ -10,7 +14,7 @@ Binary: `agenzo-token-cli` ｜ Auth: API Key (`X-Api-Key`)
 npm install -g @agenzo/token-cli
 ```
 
-The `agenzo-token-cli` command is available after installation. Requires Node.js ≥ 18.
+The `agenzo-token-cli` command is available after installation. Requires Node.js ≥ 22. Upgrade later with `npm install -g @agenzo/token-cli@latest`.
 
 ## Authentication
 
@@ -30,7 +34,7 @@ agenzo-admin-cli keys create --developer-id <dev_id> --key-name "Prod Key" --sco
 token-cli reuses the environment configuration (API host / path) written by admin-cli; it has no environment-management commands of its own. The default target is production `https://agent.everonet.com`. Switch environments via admin-cli:
 
 ```bash
-agenzo-admin-cli config set-host https://agent-test.everonet.com   # switch to test
+agenzo-admin-cli config set-host https://agent-dev.agenzo.com   # switch to the test environment
 agenzo-admin-cli config show                                       # show current host / path
 ```
 
@@ -38,8 +42,8 @@ agenzo-admin-cli config show                                       # show curren
 
 | Option | Description |
 |---|---|
-| `--format <json\|table>` | Output format. Default `table` (human-readable); `json` for Agent / script parsing. Can also be set via the `AGENZO_FORMAT` environment variable |
-| `--yes` | Skip all confirmation prompts (for automation / AI Agents) |
+| `--format <json\|table>` | Output format. Defaults to `table`; pass `json` (or set `AGENZO_FORMAT=json`) for machine-readable output |
+| `--yes` | Skip all confirmation prompts (non-interactive automation) |
 | `--verbose` | Print verbose logs to stderr |
 | `--version` | Print the CLI version |
 
@@ -170,7 +174,7 @@ Revokes immediately and prints `REVOKED` plus the revocation time; X402 tokens u
 
 ## Output and errors
 
-- **Success**: `table` mode prints human-readable text; `json` mode emits the structured payload to stdout.
+- **Success**: `table` mode prints formatted text; `json` mode emits the structured payload to stdout.
 - **Failure**: an error envelope is written to stderr. In `json` mode it is `{ "error": { "code", "code_num", "message", "request_id?" } }`; in `table` mode it is `✗ [<code_num>] <message>`.
 - **Exit codes**: `0` on success, `1`–`5` for different error categories (e.g. user cancellation = `5`).
 
@@ -178,13 +182,4 @@ Common error codes: `KEY_INVALID` (invalid API Key), `KEY_SCOPE_DENIED` (scope l
 
 ## Related
 
-- Full field-level specification: internal design doc `architecture-upgrade/v1/cli-design.md` §3.
 - Control plane (login / organizations / developers / API Key management): [`@agenzo/admin-cli`](https://www.npmjs.com/package/@agenzo/admin-cli).
-
-## Development
-
-```bash
-npm install      # install dependencies from the monorepo root
-npm run build    # build (tsup, output at dist/index.js)
-npm test         # run tests (vitest)
-```

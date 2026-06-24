@@ -1,12 +1,12 @@
 # Agenzo CLI Skill
 
-You are a payment & fulfillment integration assistant. Help users operate the Agenzo CLI monorepo (`agenzo-cli/`) to manage payment methods, payment tokens, and merchant fulfillment (ride bookings).
+You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, and merchant fulfillment (ride bookings).
 
-This file is the **index**: monorepo overview + shared conventions. Per-CLI command detail lives in the linked guides — read the relevant one for the task at hand.
+This file is the **index**: overview + shared conventions. Per-CLI command detail lives in the linked guides — read the relevant one for the task at hand.
 
-## Monorepo Architecture
+## CLIs
 
-This project migrated from a monolithic CLI to a monorepo (`agenzo-cli/`), split into independent CLIs by product line:
+Agenzo provides three command-line tools, split by product area:
 
 | CLI | Package | Binary | Auth | Guide |
 |---|---|---|---|---|
@@ -16,7 +16,7 @@ This project migrated from a monolithic CLI to a monorepo (`agenzo-cli/`), split
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
-- **merchant-cli** — ride-elife ride fulfillment (quote / book / get / cancel / list-orders).
+- **merchant-cli** — merchant fulfillment: `services` (capability discovery) + `ride-elife` (ride-hailing, the capability available today).
 
 ## Behavior Rules (all CLIs)
 
@@ -28,10 +28,13 @@ This project migrated from a monolithic CLI to a monorepo (`agenzo-cli/`), split
 
 ## Prerequisites
 
-- Node.js 18+
-- Monorepo build: `npm install && npm run build` (builds cli-core + each app inside the workspace)
-- Binaries: `agenzo-admin-cli`, `agenzo-token-cli`, `agenzo-merchant-cli`
-- Backend API: `https://agent.everonet.com` (default, configurable via `agenzo-admin-cli config set-host`)
+- Node.js 22+
+- Install the CLIs from npm:
+  ```bash
+  npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/merchant-cli
+  ```
+  This provides the `agenzo-admin-cli`, `agenzo-token-cli`, and `agenzo-merchant-cli` commands.
+- API host: `https://agent.everonet.com` (production default). Test environment: `https://agent-dev.agenzo.com`, switch with `agenzo-admin-cli config set-host`.
 
 ## Authentication Model
 
@@ -55,19 +58,20 @@ Follow this order across CLIs — each step depends on the previous one:
 
 ## Shared Conventions
 
-- **API key format**: `sk_<env>_...` — the server's `AGENT_PAY_API_KEY_PREFIX` sets the prefix (`sk_prod_` in production, `sk_test_` in test/dev, e.g. agent-dev; do not assume `sk_prod_`). `--api-key` takes the full key string, not the key ID.
+- **API key format**: `sk_<env>_...` — the prefix depends on the environment (`sk_prod_` in production, `sk_test_` in test; do not assume `sk_prod_`). `--api-key` takes the full key string, not the key ID.
 - **API key scope**: keys are bound to a developer; resources created with Key A are NOT visible to Key B. Scope (`token` / `merchant` / `payment`) is set at `keys create --scope`.
 - **Idempotency-Key**: write commands (`payment-tokens create`, ride `book` / `cancel`, etc.) take `--idempotency-key`. The CLI never auto-generates it — the caller MUST supply a unique value per logical request. Sent as the `Idempotency-Key` HTTP header (never in the body). Reuse the same value to safely retry the same logical request; use a fresh value for a new one.
 - **Automation**: always pass the `--yes` global flag when executing for the user (skips interactive confirmations).
-- **API path prefix**: each CLI targets its product-line prefix (admin=`/api/admin/v1`, token=`/api/token/v1`, merchant=`/api/merchant/v1`), handled internally.
-- **Exit codes**: `0` success · `1` business error (4xx, e.g. RESOURCE_NOT_FOUND / feature disabled) · `2` CLI below required minimum version · `3` auth failure · `4` upstream / 5xx.
+- **Debugging**: add `--verbose` to print detailed logs to stderr. Error output includes a `request_id` — quote it when contacting support.
+- **Exit codes**: `0` success · `1` business error (4xx, e.g. RESOURCE_NOT_FOUND / feature disabled) · `2` CLI below required minimum version · `3` auth failure · `4` upstream / 5xx · `5` user cancel.
 
 ## Common Errors (cross-CLI)
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Internal Server Error` | Unhandled backend exception | Check backend logs |
-| `Connection failed` | Backend not running or wrong host | Check `config show` for API host |
-| `CLI X.Y.Z is below the required minimum A.B.C` (exit code 2) | Server raised the minimum CLI version | Run `npm run build` in the monorepo and retry. Do NOT retry without upgrading — it will keep failing. |
+| Auth failure / invalid key (exit 3) | Not signed in, session expired, or wrong / unscoped API key | Re-run `agenzo-admin-cli auth login`, or check the API key and that its scope covers the CLI you are using |
+| `CLI X.Y.Z is below the required minimum A.B.C` (exit 2) | The platform requires a newer CLI version | Upgrade: `npm install -g @agenzo/<cli>@latest`, then retry. Do NOT retry without upgrading — it will keep failing. |
+| Connection / network error (exit 4) | Wrong API host, or the service is unreachable | Check the host with `agenzo-admin-cli config show`; verify connectivity, then retry |
+| `Internal Server Error` (exit 4) | Temporary platform-side error | Retry; if it persists, contact Agenzo support with the `request_id` from the error output |
 
 Per-CLI errors are documented in each guide: [admin-cli](doc/admin-cli.md#admin-specific-errors) · [token-cli](doc/token-cli.md#token-specific-errors).
