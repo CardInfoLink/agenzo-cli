@@ -16,7 +16,7 @@ Agenzo provides three command-line tools, split by product area:
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
-- **merchant-cli** — merchant fulfillment: `services` (capability discovery) + `ride-elife` (ride-hailing, the capability available today).
+- **merchant-cli** — ride-elife ride fulfillment (quote / book / get / cancel / list-orders).
 
 ## Behavior Rules (all CLIs)
 
@@ -34,7 +34,7 @@ Agenzo provides three command-line tools, split by product area:
   npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/merchant-cli
   ```
   This provides the `agenzo-admin-cli`, `agenzo-token-cli`, and `agenzo-merchant-cli` commands.
-- API host: `https://agent.everonet.com` (production default). Test environment: `https://agent-dev.agenzo.com`, switch with `agenzo-admin-cli config set-host`.
+- API host: `https://agent.everonet.com` (default; change with `agenzo-admin-cli config set-host`).
 
 ## Authentication Model
 

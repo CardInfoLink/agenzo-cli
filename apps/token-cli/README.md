@@ -53,7 +53,7 @@ agenzo-admin-cli config show                                       # show curren
 
 | Noun | Verb | Purpose | Write/Read |
 |---|---|---|---|
-| `payment-methods` | `add` | Add a payment method, then auto-poll 3DS verification (up to 15 min) | W |
+| `payment-methods` | `add` | Add a payment method via `--mode manual` (collect card + 3DS, default) or `--mode dropin` (Drop-in session), then auto-poll verification | W |
 | `payment-methods` | `list` | List payment methods under the current API Key | R |
 | `payment-methods` | `get <pm_id>` | Show details of a single payment method | R |
 | `payment-methods` | `disable <pm_id>` | Disable a payment method (cascades to revoke its issued tokens) | W |
@@ -64,7 +64,14 @@ agenzo-admin-cli config show                                       # show curren
 
 ## payment-methods
 
-### add — add a payment method + 3DS verification
+### add — add a payment method
+
+Two modes, selected with `--mode`:
+
+- **`manual`** (default): the CLI collects card details and polls 3DS verification.
+- **`dropin`**: the CLI mints a Drop-in session and polls until the user finishes adding the payment method in their browser — no card details are entered at the terminal.
+
+#### Manual mode (default)
 
 ```bash
 agenzo-token-cli payment-methods add \
@@ -79,13 +86,32 @@ agenzo-token-cli payment-methods add \
 | Flag | Required | Description |
 |---|---|---|
 | `--api-key` | Yes | Prompted interactively when omitted |
+| `--mode` | No | `manual` (default) or `dropin` |
 | `--type` | No | Payment method type, defaults to `card` |
 | `--email` | Yes | Used to deliver the 3DS email challenge |
 | `--card-number` | Yes | Card number |
 | `--expiry` | Yes | Expiry date in `MMYY` format (note: not `MM/YY`) |
 | `--cvv` | Yes | CVV; piping via stdin is recommended to keep it out of shell history |
+| `--idempotency-key` | Yes (in `--yes`) | Forwarded verbatim as the `Idempotency-Key` header |
 
 Returns a `PM ID` with `PENDING` status immediately, then auto-polls 3DS verification (3s interval, 15 min timeout). On success it prints `ACTIVE` status plus card brand, first six and last four. On timeout it suggests continuing with `payment-methods get`.
+
+#### Drop-in mode
+
+```bash
+agenzo-token-cli payment-methods add \
+  --api-key <api_key> \
+  --mode dropin \
+  --email user@example.com
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--api-key` | Yes | Prompted interactively when omitted |
+| `--mode` | Yes | Set to `dropin` |
+| `--email` | Yes | Reference for the Drop-in session |
+
+Mints a Drop-in session and prints a `Session ID`. Initialise the add-payment UI in your own front-end with that `Session ID` (the user enters card details and completes verification in the browser). The CLI then polls the same verification endpoint (5s interval, 30 min timeout) and prints `ACTIVE` with brand / first six / last four on success. If the payment method is not added it reports `FAILED` / `EXPIRED` (or a 30-minute timeout) with the `PM ID` and exits non-zero — re-run with the same email to resume. Card flags (`--card-number` / `--expiry` / `--cvv`) and `--idempotency-key` are not used in this mode.
 
 ### list
 

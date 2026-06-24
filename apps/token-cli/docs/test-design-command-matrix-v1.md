@@ -27,6 +27,7 @@
 - `CliError.fromApi` with `{auth:'api-key'}` parameterization (401->KEY_INVALID, 403->KEY_SCOPE_DENIED).
 - `renderWithContext` (profile/endpoint envelope, BACK-011).
 - 3DS polling (payment-methods add).
+- `--mode` dispatch for `payment-methods add`: `manual` (collect card + 3DS polling, default) and `dropin` (Drop-in session create + verification polling, terminal ACTIVE/FAILED/EXPIRED, no idempotency key).
 - VCN fee calculation (string->cents without floating-point).
 - Network-token fee fallback.
 - X402 USDC calculation.

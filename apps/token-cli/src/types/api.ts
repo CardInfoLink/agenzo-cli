@@ -20,6 +20,28 @@ export interface PaymentMethod {
   created_at: string;
 }
 
+// ---- Drop-in session (payment-methods add --mode dropin) ----
+
+/**
+ * Response from `POST /payment-methods/dropin/create`.
+ *
+ * In dropin mode the CLI mints a Drop-in session instead of collecting
+ * card details itself; the payment method is created in PENDING state and
+ * activated by the developer's own front-end (which embeds the add-payment
+ * UI initialised with `session_id`). The CLI then polls
+ * `/payment-methods/verification/status` by `id` until a terminal status.
+ */
+export interface DropinCreateResponse {
+  /** Payment method id, e.g. "pm_xxxxx" — poll verification/status by this. */
+  id: string;
+  /** Session id used by the front-end SDK to render the add-payment UI. */
+  session_id: string;
+  /** Upstream merchant transaction id, format T{y}{MMddHHmmss}{rand3}. */
+  merchant_trans_id: string;
+  /** Always "PENDING" on creation. */
+  status: string;
+}
+
 // ---- Revoke result ----
 
 export interface RevokeResult {

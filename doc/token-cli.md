@@ -10,7 +10,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 
 | Noun | Verb | Type | Description |
 |---|---|---|---|
-| `payment-methods` | `add` | Write | Add a payment method + poll 3DS verification |
+| `payment-methods` | `add` | Write | Add a payment method — manual 3DS or `--mode dropin` (DropInSDK) — + poll verification |
 | `payment-methods` | `list` | Read | List payment methods |
 | `payment-methods` | `get` | Read | View payment method details |
 | `payment-methods` | `disable` | Write | Disable a payment method |
@@ -24,6 +24,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 ```bash
 agenzo-token-cli payment-methods add --api-key <key>
 agenzo-token-cli payment-methods add --api-key <key> --email user@example.com --card-number 2223001870064586 --expiry 1226 --cvv 935
+agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@example.com   # Drop-in (DropInSDK) — no card details at the terminal
 agenzo-token-cli payment-methods list --api-key <key>
 agenzo-token-cli payment-methods get <pm_id> --api-key <key>
 agenzo-token-cli payment-methods disable <pm_id> --api-key <key>
@@ -40,6 +41,74 @@ agenzo-token-cli payment-methods disable <pm_id> --api-key <key>
 - The CLI keeps polling status until the card becomes ACTIVE, so **the process must stay alive** for the whole 3DS flow (for automation, run it in the background; do not kill it / do not close its stdin).
 - On success, the card becomes ACTIVE (a 32-char hex payment-method id).
 - Duplicate cards (same first6 + last4) are overwritten, not rejected.
+
+### add `--mode dropin` — Drop-in (DropInSDK) flow
+
+Alternative to the manual flow: the CLI mints a hosted **LinkPay** session and the cardholder enters their card in the **DropIn SDK** widget rendered in the agent's own front-end. PAN/CVV are **never** collected by the CLI or the backend.
+
+```bash
+agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@example.com
+```
+
+- **Ask: `--email`** — used as the LinkPay reference for the session. MUST ask the user.
+- `--api-key`: reuse the key from admin-cli Step 3 (do not ask again).
+- Card flags (`--card-number` / `--expiry` / `--cvv`) and `--idempotency-key` are **not** used in this mode.
+
+**How it works:**
+
+1. The CLI creates a LinkPay session and prints a `Session ID` (the full `{ id, session_id, merchant_trans_id, status }` payload under `--format json`).
+2. The agent renders the DropIn SDK in their own front-end using that `Session ID` (see below).
+3. The CLI polls verification status every 5 seconds (up to 30 minutes) — **keep the process alive** for the whole flow (run it in the background for automation; do not kill it / do not close its stdin).
+4. Once the user completes the card form + 3DS in the widget, the PM becomes **ACTIVE** and the CLI prints brand + last4, then exits.
+5. The resulting payment-method id can be used with `payment-tokens create` exactly like a manual-mode card.
+
+**Drop-in front-end integration** (the agent renders this in their own web page):
+
+1. Install the SDK:
+   ```bash
+   npm install cil-dropin-components
+   ```
+   or load via CDN:
+   ```html
+   <script src="https://cdn.jsdelivr.net/npm/cil-dropin-components@latest/dist/index.min.js"></script>
+   ```
+2. Add a container element:
+   ```html
+   <div id="dropInApp"></div>
+   ```
+3. Initialise with the `Session ID` from the CLI output:
+   ```javascript
+   import DropInSDK from 'cil-dropin-components'
+
+   const sdk = new DropInSDK({
+     id: '#dropInApp',
+     type: 'payment',
+     sessionID: '<session_id from CLI output>',
+     locale: 'en-US',
+     mode: 'embedded',           // or 'bottomUp' for mobile
+     environment: 'HKG_prod',    // use 'UAT' for sandbox testing
+     appearance: { colorBackground: '#fff' },
+     payment_completed: (data) => {
+       // Added successfully — the CLI detects this via polling.
+       // data: { type, merchantTransID, sessionID }
+       console.log('Payment method added:', data.merchantTransID)
+     },
+     payment_failed: (data) => {
+       // Failed — the CLI also detects this.
+       // data: { type, merchantTransID, sessionID, code, message }
+       console.log('Add failed:', data.message)
+     },
+     payment_cancelled: (data) => {
+       // User cancelled — session stays PENDING, the CLI keeps polling.
+       console.log('User cancelled')
+     },
+   })
+   ```
+4. That's it — the CLI handles all backend status polling and prints the final result.
+
+**Key points:**
+- The `Session ID` is one-time use. If the session expires (30 min), re-run the same command with the same `--email` to mint a fresh session — the old PENDING record is overwritten.
+- `FAILED` / `EXPIRED` (or a 30-minute timeout) are reported with the `PM ID` and a non-zero exit code; the underlying card is never exposed to the CLI.
 
 ## Payment Tokens
 
