@@ -8,6 +8,9 @@ import { buildProgram, captureStdout, captureStderr, mockApiClient } from './hel
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.AGENZO_FORMAT;
+  // dropin terminal failures set process.exitCode; reset so it does not leak
+  // into other tests or the vitest process exit code.
+  process.exitCode = 0;
 });
 
 // ============================================================
@@ -372,5 +375,172 @@ describe('payment-methods add', () => {
     ).rejects.toThrow('--idempotency-key');
 
     expect(apiClient.post).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// payment-methods add --mode dropin (§3.4.0.1, Drop-in session)
+// ============================================================
+
+describe('payment-methods add --mode dropin', () => {
+  const SESSION = {
+    id: 'pm_dropin',
+    session_id: 'sess_abc123',
+    merchant_trans_id: 'T5060112345678',
+    status: 'PENDING',
+  };
+
+  /** apiClient mock: dropin/create returns a session; verification/status returns `statusData`. */
+  function dropinClient(statusData: Record<string, unknown>) {
+    return {
+      post: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods/dropin/create') {
+          return Promise.resolve({ success: true, data: SESSION });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods/verification/status') {
+          return Promise.resolve({ success: true, data: statusData });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+    };
+  }
+
+  it('rejects an unknown --mode without calling the API', async () => {
+    const apiClient = mockApiClient();
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', 'payment-methods', 'add',
+        '--api-key', 'sk_key', '--mode', 'bogus',
+      ]),
+    ).rejects.toThrow(/Expected "manual" or "dropin"/);
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('happy path: POST /payment-methods/dropin/create with {email}, prints Session ID, polls to ACTIVE', async () => {
+    const apiClient = dropinClient({
+      id: 'pm_dropin',
+      status: 'ACTIVE',
+      brand: 'Visa',
+      first6: '411111',
+      last4: '4242',
+    });
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--mode', 'dropin',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    // dropin/create called with {email} only (no card details / idempotency key)
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/dropin/create',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'user@example.com' },
+    );
+
+    // polls verification/status by the returned pm id
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/payment-methods/verification/status',
+      { type: 'api-key', key: 'sk_key' },
+      { payment_method_id: 'pm_dropin' },
+    );
+
+    const errText = err.text();
+    expect(errText).toContain('Drop-in session created');
+    expect(errText).toContain('Payment method activated');
+
+    const outText = out.text();
+    expect(outText).toContain('sess_abc123'); // Session ID printed
+    expect(outText).toContain('pm_dropin');
+    expect(outText).toContain('Visa');
+    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+  });
+
+  it('does not require --idempotency-key even in --yes mode', async () => {
+    const apiClient = dropinClient({ id: 'pm_dropin', status: 'ACTIVE' });
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-methods', 'add',
+      '--mode', 'dropin',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    // Reached the API call instead of throwing IdempotencyKeyRequiredError.
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/dropin/create',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'user@example.com' },
+    );
+  });
+
+  it('FAILED terminal status: error message + exit code 1', async () => {
+    const apiClient = dropinClient({ id: 'pm_dropin', status: 'FAILED' });
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--mode', 'dropin',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    expect(err.text()).toContain('Failed to add payment method');
+    expect(out.text()).toContain('pm_dropin'); // PM ID hint
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('EXPIRED terminal status: error message + exit code 1', async () => {
+    const apiClient = dropinClient({ id: 'pm_dropin', status: 'EXPIRED' });
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--mode', 'dropin',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    expect(err.text()).toContain('Session expired before the payment method was added');
+    expect(out.text()).toContain('pm_dropin');
+    expect(process.exitCode).toBe(1);
   });
 });
