@@ -76,6 +76,10 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header (manual mode only)',
+    )
+    .option(
+      '--no-poll',
+      'Dropin mode: mint the session, print it, and exit immediately without polling verification status (for server/SDK-driven flows where the front-end completes the binding)',
     );
 
   cmd.action(async () => {
@@ -308,6 +312,13 @@ async function handleDropinMode(
     'info',
     'Use the Session ID to add the payment method in the browser via the Drop-in SDK',
   );
+
+  // --no-poll: server/SDK-driven flows finish the binding in the front-end, so
+  // the CLI mints + prints the session and exits immediately. The session id is
+  // already on stdout (clean JSON in --format json), so the caller can parse it.
+  if (opts.poll === false) {
+    return;
+  }
 
   // 3) Poll verification/status (same endpoint manual mode uses) until the PM
   // reaches a terminal status or we time out at 30 minutes.
