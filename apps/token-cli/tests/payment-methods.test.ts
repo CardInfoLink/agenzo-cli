@@ -3,7 +3,7 @@ import { registerListCommand } from '../src/payment-methods/list.js';
 import { registerGetCommand } from '../src/payment-methods/get.js';
 import { registerDisableCommand } from '../src/payment-methods/disable.js';
 import { registerAddCommand } from '../src/payment-methods/add.js';
-import { buildProgram, captureStdout, captureStderr, mockApiClient } from './helpers.js';
+import { buildProgram, captureStdout, captureStderr, mockApiClient, parseJsonOutput } from './helpers.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -542,5 +542,65 @@ describe('payment-methods add --mode dropin', () => {
     expect(err.text()).toContain('Session expired before the payment method was added');
     expect(out.text()).toContain('pm_dropin');
     expect(process.exitCode).toBe(1);
+  });
+
+  it('--no-poll: mints + prints the session and exits immediately without polling', async () => {
+    const apiClient = dropinClient({ id: 'pm_dropin', status: 'PENDING' });
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--mode', 'dropin',
+      '--no-poll',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    // Session minted and printed
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/dropin/create',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'user@example.com' },
+    );
+    expect(out.text()).toContain('sess_abc123');
+    expect(err.text()).toContain('Drop-in session created');
+
+    // Crucially: no polling of verification/status
+    expect(apiClient.get).not.toHaveBeenCalled();
+
+    // Clean exit
+    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+  });
+
+  it('--no-poll --format json: stdout is clean parseable JSON with session_id', async () => {
+    const apiClient = dropinClient({ id: 'pm_dropin', status: 'PENDING' });
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--format', 'json', 'payment-methods', 'add',
+      '--mode', 'dropin',
+      '--no-poll',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    // stdout must be parseable JSON carrying session_id (orchestrator parses it)
+    const parsed = parseJsonOutput(out.text()) as Record<string, unknown>;
+    expect(parsed.session_id).toBe('sess_abc123');
+
+    // no polling happened
+    expect(apiClient.get).not.toHaveBeenCalled();
   });
 });
