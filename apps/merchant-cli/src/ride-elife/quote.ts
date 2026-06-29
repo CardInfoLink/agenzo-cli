@@ -110,7 +110,9 @@ export function registerQuoteCommand(parent: Command, deps: { apiClient: ApiClie
     .option('--passenger-count <n>', 'Passenger count')
     .option('--luggage-count <n>', 'Luggage count')
     .option('--passenger-email <email>', 'Passenger email')
-    .option('--children-count <n>', 'Children count');
+    .option('--children-count <n>', 'Children count')
+    .option('--infant-count <n>', 'Infant count (passenger breakdown)')
+    .option('--toddler-count <n>', 'Toddler count (passenger breakdown)');
 
   attachSchemaHelp(cmd, quoteSchema);
 
@@ -154,6 +156,12 @@ export function registerQuoteCommand(parent: Command, deps: { apiClient: ApiClie
     }
     if (opts.childrenCount !== undefined) {
       body.children_count = num(opts.childrenCount as string, 'children-count');
+    }
+    if (opts.infantCount !== undefined) {
+      body.infant_count = num(opts.infantCount as string, 'infant-count');
+    }
+    if (opts.toddlerCount !== undefined) {
+      body.toddler_count = num(opts.toddlerCount as string, 'toddler-count');
     }
     if (opts.passengerEmail !== undefined) {
       body.passenger_email = opts.passengerEmail as string;
