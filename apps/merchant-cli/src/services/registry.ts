@@ -49,7 +49,7 @@ export interface ServiceCapability {
   discovery: ServiceDiscovery;
 }
 
-/** Static registry. This iteration ships a single `ride-elife` capability. */
+/** Static registry. This iteration ships ride-elife and hotel-redaug capabilities. */
 export const SERVICE_REGISTRY: ServiceCapability[] = [
   {
     service_id: 'ride-elife',
@@ -70,6 +70,56 @@ export const SERVICE_REGISTRY: ServiceCapability[] = [
     workflow: ['quote', 'book', 'get (poll for status)', 'cancel (optional)'],
     since: '2026-06-01',
     discovery: { help_command: 'agenzo-merchant-cli ride-elife --help' },
+  },
+  {
+    service_id: 'svc_01J0HT5REDAUG0001',
+    name: 'Hotel booking (Redaug)',
+    description:
+      'International hotel booking via Redaug: search by location, real-time room/rate availability, instant booking on monthly settlement, cancel and partial check-out.',
+    category: 'hotel',
+    version: 'v1',
+    provider: 'redaug',
+    cli_noun: 'hotel-redaug',
+    verbs: [
+      'find-destination',
+      'hotel-filters',
+      'list-cities',
+      'search',
+      'hotel-detail',
+      'quote',
+      'book',
+      'get',
+      'cancel',
+      'checkout',
+      'get-checkout',
+      'list-orders',
+    ],
+    verb_descriptions: {
+      'find-destination': 'Resolve a free-text place into destinations.',
+      'hotel-filters': 'Get available filter options for a location.',
+      'list-cities': 'List the cities of a country.',
+      search: 'Search hotels by destination or coordinates.',
+      'hotel-detail': 'Get hotel detail (name/star/address/facilities/photos).',
+      quote: 'Get real-time room types and bookable rates for a hotel.',
+      book: 'Book a hotel (combined check + create + pay).',
+      get: 'Query order status (poll for async confirmation).',
+      cancel: 'Cancel an order (whole-order, in-policy).',
+      checkout: 'Apply for partial check-out / out-of-policy cancellation.',
+      'get-checkout': 'Poll a check-out application status.',
+      'list-orders': 'List hotel orders (local store, no upstream call).',
+    },
+    workflow: [
+      'find-destination / list-cities (optional)',
+      'hotel-filters (optional)',
+      'search',
+      'hotel-detail (optional)',
+      'quote',
+      'book',
+      'get (poll until CONFIRMED)',
+      'cancel / checkout (optional)',
+    ],
+    since: '2026-06-25',
+    discovery: { help_command: 'agenzo-merchant-cli hotel-redaug --help' },
   },
 ];
 

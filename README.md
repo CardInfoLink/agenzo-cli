@@ -18,7 +18,7 @@
 
 - **admin-cli** — control plane: `auth` / `config` / `orgs` / `developers` / `keys` / `accounts`.
 - **token-cli** — `payment-methods` (add payment method: Evo 3DS or UnionPay enrollment) and `payment-tokens` (VCN / Network Token / X402).
-- **merchant-cli** — merchant fulfillment: `services` (discover capabilities) and `ride-elife` (ride-hailing, the capability available today).
+- **merchant-cli** — merchant fulfillment: `services` (discover capabilities), `ride-elife` (ride-hailing), and `hotel-redaug` (international hotel booking via Redaug).
 
 ## Conventions
 
@@ -40,6 +40,13 @@
 | `keys` | `create` / `list` / `get` / `rotate` / `disable` |
 | `accounts` | `get` |
 
+`developers create` options:
+- `--developer-name <name>` — developer name
+- `--developer-email <email>` — developer email
+- `--billing-mode <mode>` — `pay_per_call` (default) or `monthly_settlement`
+- `--settlement-currency <code>` — ISO 4217 currency for the settlement account (e.g. `USD`, `CNY`). Only meaningful for `monthly_settlement`. Defaults to platform setting (`USD`) when omitted.
+- `--idempotency-key <key>` — required for safe retry
+
 ### token-cli (runtime plane / API key)
 
 | Noun | Verbs |
@@ -55,7 +62,13 @@
 
 | Noun | Verbs |
 |---|---|
+| `services` | `list` / `get` |
 | `ride-elife` | `quote` / `book` / `get` / `cancel` / `list-orders` |
+| `hotel-redaug` | `find-destination` / `hotel-filters` / `list-cities` / `search` / `hotel-detail` / `quote` / `book` / `get` / `cancel` / `checkout` / `get-checkout` / `list-orders` |
+
+`services list` discovers available capabilities from the platform backend, gated against the CLI's own registered commands (services/verbs the CLI cannot execute are hidden). `services get <service-id>` returns the full schema for a service (Agent reads this to learn how to use it).
+
+`hotel-redaug` typical workflow: `find-destination` → `search` → `hotel-detail` (optional) → `quote` → `book` → `get` (poll until CONFIRMED) → `cancel` / `checkout` (optional).
 
 ## Authentication
 
@@ -79,11 +92,16 @@ Then sign in, create a developer, and mint an API key — after which the runtim
 ```bash
 agenzo-admin-cli auth login --email you@example.com               # sign in (magic link)
 agenzo-admin-cli developers create --developer-name "my-bot" \
-  --developer-email you@example.com --idempotency-key <key>
+  --developer-email you@example.com \
+  --billing-mode monthly_settlement \
+  --settlement-currency CNY \
+  --idempotency-key <key>
 agenzo-admin-cli keys create --developer-id <dev_id> \
   --key-name "Prod Key" --scope token,merchant --idempotency-key <key>
 # the one-time key is shown once — save it, then:
 agenzo-token-cli payment-methods list --api-key <key>
+agenzo-merchant-cli services list --api-key <key>
+agenzo-merchant-cli hotel-redaug find-destination --keyword "上海" --api-key <key>
 ```
 
 See [SKILL.md](SKILL.md) and the per-CLI guides below for the full onboarding flow and every command.

@@ -169,6 +169,14 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
   QUOTE_EXPIRED: 'The quote has expired. Please request a new quote and retry.',
   BOOKING_FAILED: 'The booking could not be completed. Please retry.',
   CANCELLATION_NOT_ALLOWED: 'This order cannot be cancelled in its current state.',
+  NO_AVAILABILITY: 'No rooms available for the selected hotel and dates.',
+  PRICE_CHANGED: 'The price changed since the quote. Re-quote and confirm.',
+  NAME_FORMAT_INVALID: 'The guest name format is not accepted; use Latin letters.',
+  HOTEL_ORDER_NOT_FOUND: 'Hotel order not found.',
+  ALREADY_CANCELLED: 'This hotel order is already cancelled.',
+  CHECKOUT_NOT_ALLOWED: 'A partial check-out is not allowed in the current state.',
+  CHECKOUT_TASK_NOT_FOUND: 'Check-out application not found.',
+  PAY_PER_CALL_NOT_AVAILABLE: 'Pay-per-call billing is not available; use monthly_settlement.',
   NOT_IMPLEMENTED: 'This operation is not implemented yet.',
 };
 

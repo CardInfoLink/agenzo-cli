@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { CliError } from '@agenzo/cli-core';
+import { Command } from 'commander';
+import { CliError, type ApiClient } from '@agenzo/cli-core';
 import { registerServicesListCommand } from '../src/services/list.js';
 import { registerServiceGetCommand } from '../src/services/get.js';
 import { SERVICE_REGISTRY, findService } from '../src/services/registry.js';
@@ -9,6 +10,88 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.AGENZO_FORMAT;
 });
+
+// ============================================================
+// Local command-tree fixtures
+//
+// `services list/get` gate backend capabilities against the CLI's OWN command
+// tree (the registered nouns + verbs), NOT a bundled schema. These helpers wire
+// a realistic program: the ride-elife / hotel-redaug nouns with the same verbs
+// the production index.ts registers (mirrors SERVICE_REGISTRY), so gating the
+// local registry is an identity op — while letting individual tests drop a noun
+// or verb to prove the gate hides what the CLI cannot run.
+// ============================================================
+
+const RIDE_VERBS = ['quote', 'book', 'get', 'cancel', 'list-orders'];
+const HOTEL_VERBS = [
+  'find-destination',
+  'hotel-filters',
+  'list-cities',
+  'search',
+  'hotel-detail',
+  'quote',
+  'book',
+  'get',
+  'cancel',
+  'checkout',
+  'get-checkout',
+  'list-orders',
+];
+
+/** Register the service nouns/verbs on the program so the gate has a local map. */
+function registerNouns(
+  program: Command,
+  opts: { ride?: string[] | null; hotel?: string[] | null } = {},
+): void {
+  if (opts.ride !== null) {
+    const ride = program.command('ride-elife');
+    for (const v of opts.ride ?? RIDE_VERBS) ride.command(v);
+  }
+  if (opts.hotel !== null) {
+    const hotel = program.command('hotel-redaug');
+    for (const v of opts.hotel ?? HOTEL_VERBS) hotel.command(v);
+  }
+}
+
+/**
+ * Mock discovery client. With no impl it REJECTS (simulates an unreachable
+ * backend → the command falls back to the local registry). Pass an impl to
+ * simulate a successful backend response.
+ */
+function mockDiscovery(impl?: (path: string) => Promise<unknown>): ApiClient {
+  const get = impl
+    ? vi.fn().mockImplementation(impl)
+    : vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+  return { get } as unknown as ApiClient;
+}
+
+function setupList(
+  opts: {
+    discovery?: ApiClient;
+    nouns?: { ride?: string[] | null; hotel?: string[] | null };
+  } = {},
+) {
+  const program = buildProgram();
+  registerNouns(program, opts.nouns ?? {});
+  const servicesCmd = program.command('services');
+  const discoveryClient = opts.discovery ?? mockDiscovery();
+  registerServicesListCommand(servicesCmd, { discoveryClient, program });
+  return { program, discoveryClient };
+}
+
+function setupGet(
+  opts: {
+    discovery?: ApiClient;
+    nouns?: { ride?: string[] | null; hotel?: string[] | null };
+  } = {},
+) {
+  const program = buildProgram();
+  registerNouns(program, opts.nouns ?? {});
+  const servicesCmd = program.command('services');
+  const discoveryClient = opts.discovery ?? mockDiscovery();
+  registerServiceGetCommand(servicesCmd, { discoveryClient, program });
+  return { program, discoveryClient };
+}
 
 // ============================================================
 // services registry (unit) — §4.7 UT-REG-01..03 (Req 1.1, 1.2)
@@ -38,19 +121,17 @@ describe('services registry (registry.ts)', () => {
 });
 
 // ============================================================
-// services list — §5.1 TC-SVC-LST-01..06 (Req 1.1, 1.3, 5.1)
+// services list — §5.1 TC-SVC-LST-* (Req 1.1, 1.3, 5.1) + gating
 // ============================================================
 
 describe('services list', () => {
-  it('TC-SVC-LST-01/02: lists registry entries with discovery fields, no HTTP call', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServicesListCommand(cmd);
+  it('TC-SVC-LST-01/02: backend unreachable → lists local registry, gated by the full command tree (identity)', async () => {
+    const { program } = setupList(); // discovery rejects → fallback to registry
 
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json']);
+    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json', '--api-key', 'k']);
 
     const payload = parseJsonOutput(out.text()) as { services: Array<Record<string, unknown>> };
     expect(Array.isArray(payload.services)).toBe(true);
@@ -67,15 +148,73 @@ describe('services list', () => {
     expect(item.verbs).toEqual(['quote', 'book', 'get', 'cancel', 'list-orders']);
   });
 
-  it('TC-SVC-LST-06: list items omit the heavy verb_descriptions / workflow detail', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServicesListCommand(cmd);
+  it('TC-SVC-LST-BACKEND: backend capabilities are returned and gated to locally-registered verbs', async () => {
+    const discovery = mockDiscovery(async () => ({
+      success: true,
+      data: {
+        capabilities: [
+          {
+            service_id: 'svc_01J0HT5REDAUG0001',
+            name: 'Hotel booking (Redaug)',
+            category: 'hotel',
+            provider: 'redaug',
+            cli_noun: 'hotel-redaug',
+            version: 'v1',
+            since: '2026-06-25',
+            discovery: { help_command: 'agenzo-merchant-cli hotel-redaug --help' },
+            // includes a verb this CLI build does NOT register:
+            verbs: ['search', 'book', 'future-verb-not-in-cli'],
+          },
+          {
+            // a whole service whose noun this CLI does not have at all:
+            service_id: 'svc_unknown',
+            name: 'Unknown',
+            category: 'misc',
+            provider: 'x',
+            cli_noun: 'not-a-local-noun',
+            version: 'v1',
+            since: '',
+            verbs: ['do'],
+          },
+        ],
+      },
+    }));
+    const { program } = setupList({ discovery });
 
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json']);
+    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json', '--api-key', 'k']);
+
+    const payload = parseJsonOutput(out.text()) as { services: Array<Record<string, unknown>> };
+    // The unknown noun is dropped entirely; only hotel-redaug survives.
+    expect(payload.services.length).toBe(1);
+    const hotel = payload.services[0];
+    expect(hotel.cli_noun).toBe('hotel-redaug');
+    // The verb the CLI doesn't register is filtered out.
+    expect(hotel.verbs).toEqual(['search', 'book']);
+  });
+
+  it('TC-SVC-LST-GATE: a service whose noun is not registered locally is hidden (fallback)', async () => {
+    const { program } = setupList({ nouns: { hotel: null } }); // only ride-elife registered
+
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json', '--api-key', 'k']);
+
+    const payload = parseJsonOutput(out.text()) as { services: Array<Record<string, unknown>> };
+    expect(payload.services.length).toBe(1);
+    expect(payload.services[0].cli_noun).toBe('ride-elife');
+  });
+
+  it('TC-SVC-LST-06: list items omit the heavy verb_descriptions / workflow / description detail', async () => {
+    const { program } = setupList();
+
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json', '--api-key', 'k']);
 
     const payload = parseJsonOutput(out.text()) as { services: Array<Record<string, unknown>> };
     const item = payload.services[0];
@@ -85,14 +224,12 @@ describe('services list', () => {
   });
 
   it('TC-SVC-LST-04: json stdout is a single valid JSON with services + profile/endpoint envelope, stderr silent', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServicesListCommand(cmd);
+    const { program } = setupList();
 
     const out = captureStdout();
     const err = captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json']);
+    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'json', '--api-key', 'k']);
 
     // stdout parses as a single JSON object (pure payload).
     const payload = parseJsonOutput(out.text()) as Record<string, unknown>;
@@ -111,14 +248,12 @@ describe('services list', () => {
   });
 
   it('TC-SVC-LST-05: table output renders headers and the ride-elife row', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServicesListCommand(cmd);
+    const { program } = setupList();
 
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'table']);
+    await program.parseAsync(['node', 'cli', 'services', 'list', '--format', 'table', '--api-key', 'k']);
 
     const output = out.text();
     for (const header of ['Service ID', 'Name', 'Category', 'Provider', 'Version', 'Verbs']) {
@@ -129,20 +264,17 @@ describe('services list', () => {
 });
 
 // ============================================================
-// services get — §5.2 TC-SVC-GET-01/04/05 hit + TC-SVC-GET-02 miss
-// (Req 1.2, 1.3, 5.1)
+// services get — §5.2 TC-SVC-GET-* (Req 1.2, 1.3, 5.1) + gating
 // ============================================================
 
 describe('services get', () => {
-  it('TC-SVC-GET-01/05: hit returns full capability with verb_descriptions/workflow + json envelope, stderr silent', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServiceGetCommand(cmd);
+  it('TC-SVC-GET-01/05: backend unreachable → full local capability (verb_descriptions/workflow/discovery) + json envelope, stderr silent', async () => {
+    const { program } = setupGet();
 
     const out = captureStdout();
     const err = captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'get', 'ride-elife', '--format', 'json']);
+    await program.parseAsync(['node', 'cli', 'services', 'get', 'ride-elife', '--format', 'json', '--api-key', 'k']);
 
     const payload = parseJsonOutput(out.text()) as Record<string, unknown>;
     expect(payload.service_id).toBe('ride-elife');
@@ -157,15 +289,68 @@ describe('services get', () => {
     expect(err.text()).toBe('');
   });
 
-  it('TC-SVC-GET-04: table output renders the full key/value block including verb descriptions', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServiceGetCommand(cmd);
+  it('TC-SVC-GET-SCHEMA: backend returns full schema_content, gated to locally-registered verbs', async () => {
+    const discovery = mockDiscovery(async () => ({
+      success: true,
+      data: {
+        service_id: 'svc_01J0HT5REDAUG0001',
+        name: 'Hotel booking (Redaug)',
+        cli_noun: 'hotel-redaug',
+        verbs: ['search', 'book', 'future-verb'],
+        schema_content: {
+          verbs: {
+            search: { description: 'search hotels' },
+            book: { description: 'book a hotel' },
+            'future-verb': { description: 'not in this CLI' },
+          },
+        },
+      },
+    }));
+    const { program } = setupGet({ discovery });
 
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'get', 'ride-elife', '--format', 'table']);
+    await program.parseAsync([
+      'node', 'cli', 'services', 'get', 'svc_01J0HT5REDAUG0001', '--format', 'json', '--api-key', 'k',
+    ]);
+
+    const payload = parseJsonOutput(out.text()) as {
+      verbs: string[];
+      schema_content: { verbs: Record<string, unknown> };
+    };
+    // Both the top-level summary and the schema_content.verbs map are intersected.
+    expect(payload.verbs).toEqual(['search', 'book']);
+    expect(Object.keys(payload.schema_content.verbs)).toEqual(['search', 'book']);
+  });
+
+  it('TC-SVC-GET-GATE: backend service whose noun is not local → SERVICE_NOT_FOUND', async () => {
+    const discovery = mockDiscovery(async () => ({
+      success: true,
+      data: {
+        service_id: 'svc_unknown',
+        name: 'Unknown',
+        cli_noun: 'not-a-local-noun',
+        verbs: ['do'],
+      },
+    }));
+    const { program } = setupGet({ discovery });
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync(['node', 'cli', 'services', 'get', 'svc_unknown', '--format', 'json', '--api-key', 'k']),
+    ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
+  });
+
+  it('TC-SVC-GET-04: table output renders the full key/value block including verb descriptions', async () => {
+    const { program } = setupGet();
+
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync(['node', 'cli', 'services', 'get', 'ride-elife', '--format', 'table', '--api-key', 'k']);
 
     const output = out.text();
     expect(output).toContain('ride-elife');
@@ -174,21 +359,20 @@ describe('services get', () => {
   });
 
   it('TC-SVC-GET-02: miss throws CliError(SERVICE_NOT_FOUND) and points to "services list"', async () => {
-    const program = buildProgram();
-    const cmd = program.command('services');
-    registerServiceGetCommand(cmd);
+    const { program } = setupGet();
 
     const out = captureStdout();
     captureStderr();
 
     await expect(
-      program.parseAsync(['node', 'cli', 'services', 'get', 'nope', '--format', 'json']),
+      program.parseAsync(['node', 'cli', 'services', 'get', 'nope', '--format', 'json', '--api-key', 'k']),
     ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
 
-    // Re-run to assert message + error type without consuming the rejection above.
+    // Re-run on a fresh program to assert message + error type.
+    const { program: program2 } = setupGet();
     let caught: unknown;
     try {
-      await program.parseAsync(['node', 'cli', 'services', 'get', 'nope', '--format', 'json']);
+      await program2.parseAsync(['node', 'cli', 'services', 'get', 'nope', '--format', 'json', '--api-key', 'k']);
     } catch (e) {
       caught = e;
     }

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "total_members": 58,
-  "total_unique_codes": 58,
+  "total_members": 65,
+  "total_unique_codes": 65,
   "members": [
     {
       "name": "ACCESS_DENIED",
@@ -26,6 +26,12 @@
       "code": "1908",
       "http_status": 403,
       "default_message": "The settlement account is suspended."
+    },
+    {
+      "name": "ALREADY_CANCELLED",
+      "code": "1924",
+      "http_status": 409,
+      "default_message": "This hotel order is already cancelled."
     },
     {
       "name": "API_KEY_DISABLED",
@@ -68,6 +74,18 @@
       "code": "1701",
       "http_status": 502,
       "default_message": "Blockchain operation failed. Please try again later."
+    },
+    {
+      "name": "CHECKOUT_NOT_ALLOWED",
+      "code": "1925",
+      "http_status": 409,
+      "default_message": "A partial check-out is not allowed for this order in its current state."
+    },
+    {
+      "name": "CHECKOUT_TASK_NOT_FOUND",
+      "code": "1926",
+      "http_status": 404,
+      "default_message": "Check-out application not found."
     },
     {
       "name": "DEVELOPER_NOT_FOUND",
@@ -122,6 +140,12 @@
       "code": "1801",
       "http_status": 400,
       "default_message": "Fee rule validation failed."
+    },
+    {
+      "name": "HOTEL_ORDER_NOT_FOUND",
+      "code": "1923",
+      "http_status": 404,
+      "default_message": "Hotel order not found."
     },
     {
       "name": "IDEMPOTENCY_CONFLICT",
@@ -190,10 +214,22 @@
       "default_message": "Verification link is invalid or has expired. Please request a new one."
     },
     {
+      "name": "NAME_FORMAT_INVALID",
+      "code": "1922",
+      "http_status": 400,
+      "default_message": "The guest name format is not accepted by the property. Please provide it in Latin letters."
+    },
+    {
       "name": "NETWORK_MISMATCH",
       "code": "1507",
       "http_status": 400,
       "default_message": "The blockchain network does not match."
+    },
+    {
+      "name": "NO_AVAILABILITY",
+      "code": "1920",
+      "http_status": 409,
+      "default_message": "No rooms are available for the selected hotel and dates."
     },
     {
       "name": "OPERATION_NOT_FOUND",
@@ -230,6 +266,12 @@
       "code": "1910",
       "http_status": 501,
       "default_message": "Pay-per-call billing is not available yet. Use a monthly_settlement developer."
+    },
+    {
+      "name": "PRICE_CHANGED",
+      "code": "1921",
+      "http_status": 409,
+      "default_message": "The price has changed since the quote. Please re-quote and confirm the new price."
     },
     {
       "name": "PRICE_MISMATCH",
@@ -410,6 +452,13 @@
     "1910",
     "1911",
     "1912",
+    "1920",
+    "1921",
+    "1922",
+    "1923",
+    "1924",
+    "1925",
+    "1926",
     "1999"
   ],
   "duplicate_codes": {}
