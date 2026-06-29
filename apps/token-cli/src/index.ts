@@ -17,6 +17,8 @@ import { registerAddCommand } from './payment-methods/add.js';
 import { registerListCommand as registerPmListCommand } from './payment-methods/list.js';
 import { registerGetCommand as registerPmGetCommand } from './payment-methods/get.js';
 import { registerDisableCommand as registerPmDisableCommand } from './payment-methods/disable.js';
+import { registerDropinCreateCommand } from './payment-methods/dropin-create.js';
+import { registerDropinStatusCommand } from './payment-methods/dropin-status.js';
 
 // payment-tokens commands
 import { registerCreateCommand } from './payment-tokens/create.js';
@@ -72,6 +74,9 @@ async function main() {
   registerPmListCommand(pmCmd, deps);
   registerPmGetCommand(pmCmd, deps);
   registerPmDisableCommand(pmCmd, deps);
+  // Drop-in non-blocking commands (programmatic callers; not in SKILL/README).
+  registerDropinCreateCommand(pmCmd, deps);
+  registerDropinStatusCommand(pmCmd, deps);
 
   // payment-tokens command group
   const ptCmd = program.command('payment-tokens').description('Payment token management');
