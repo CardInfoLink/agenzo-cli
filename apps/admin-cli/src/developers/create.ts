@@ -28,6 +28,10 @@ export function registerCreateCommand(
       '--billing-mode <mode>',
       'Billing mode: pay_per_call | monthly_settlement (default: pay_per_call)',
     )
+    .option(
+      '--settlement-currency <code>',
+      'ISO 4217 currency for the settlement account (e.g. USD, CNY). Only for monthly_settlement. Defaults to platform setting (USD).',
+    )
     .option('--idempotency-key <key>', 'Idempotency key forwarded as the Idempotency-Key header')
     .action(async (options, command: Command) => {
       const format = resolveFormat(command.optsWithGlobals().format);
@@ -64,7 +68,14 @@ export function registerCreateCommand(
         deps.apiClient.post<Developer>(
           '/developers/create',
           { type: 'bearer', token },
-          { name, email, billing_mode: billingMode },
+          {
+            name,
+            email,
+            billing_mode: billingMode,
+            ...(options.settlementCurrency
+              ? { settlement_currency: options.settlementCurrency as string }
+              : {}),
+          },
           extraHeaders,
         ),
       );

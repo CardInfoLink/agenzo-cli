@@ -1,13 +1,22 @@
 import { Command } from 'commander';
-import { ConfigManager, Formatter, resolveFormat, renderWithContext } from '@agenzo/cli-core';
+import {
+  ApiClient,
+  ConfigManager,
+  Formatter,
+  PromptEngine,
+  CliError,
+  resolveFormat,
+  renderWithContext,
+} from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
-import { SERVICE_REGISTRY, type ServiceCapability } from './registry.js';
+import { SERVICE_REGISTRY } from './registry.js';
+import { buildLocalCapabilityMap, type LocalCapabilityMap } from './local-caps.js';
 
 /**
- * Summary view of a registry entry for `services list` (§4.4.1.1): the
- * discovery-relevant subset — service_id/name/category/provider/cli_noun/
- * version/verbs/since/discovery — without the heavier verb_descriptions /
- * workflow detail (those are returned in full by `services get`).
+ * Summary view of a capability for `services list` output. Lightweight on
+ * purpose — the full schema (incl. per-verb detail) is fetched via `services
+ * get`. Heavy fields (verb_descriptions / workflow / description / schema_content)
+ * are deliberately omitted here.
  */
 interface ServiceListItem {
   service_id: string;
@@ -18,41 +27,108 @@ interface ServiceListItem {
   version: string;
   verbs: string[];
   since: string;
-  discovery: ServiceCapability['discovery'];
+  discovery?: unknown;
 }
 
-function toListItem(s: ServiceCapability): ServiceListItem {
+/**
+ * Normalize any capability-like record — a backend discovery item OR a local
+ * registry entry — down to the lightweight list summary. Both sources share
+ * field names, so one normalizer keeps `list` output identical regardless of
+ * where it came from and prevents heavy fields from leaking in.
+ */
+function toListItem(s: Record<string, unknown>): ServiceListItem {
   return {
-    service_id: s.service_id,
-    name: s.name,
-    category: s.category,
-    provider: s.provider,
-    cli_noun: s.cli_noun,
-    version: s.version,
-    verbs: s.verbs,
-    since: s.since,
+    service_id: String(s.service_id ?? ''),
+    name: String(s.name ?? ''),
+    category: String(s.category ?? ''),
+    provider: String(s.provider ?? ''),
+    cli_noun: String(s.cli_noun ?? ''),
+    version: String(s.version ?? ''),
+    verbs: Array.isArray(s.verbs) ? (s.verbs as string[]) : [],
+    since: String(s.since ?? ''),
     discovery: s.discovery,
   };
 }
 
 /**
- * `services list` — list available merchant capabilities (§4.4.1.1).
+ * Gate backend capabilities against what this CLI binary can actually execute.
  *
- * Read-only, no `--idempotency-key`. Data source is the CLI-bundled registry
- * (D4), not a live backend feed. Output is wrapped by `renderWithContext` so
- * json carries the profile/endpoint envelope; the table form renders a
- * one-line-per-service summary on stdout.
+ * The schema lives on the backend (dynamic); the CLI does NOT bundle it. The
+ * gate uses the CLI's own command tree (`localCaps`): a capability is kept only
+ * if this CLI registers its `cli_noun`, and its `verbs` are intersected with the
+ * locally-registered verbs (so a verb the CLI doesn't implement is never shown).
+ * Capabilities with no executable verb are dropped entirely — the Agent never
+ * sees a service/verb it cannot run.
  */
-export function registerServicesListCommand(parent: Command): void {
+function gateByLocalCommands(
+  capabilities: ServiceListItem[],
+  localCaps: LocalCapabilityMap,
+): ServiceListItem[] {
+  const gated: ServiceListItem[] = [];
+  for (const cap of capabilities) {
+    const localVerbs = localCaps[cap.cli_noun];
+    if (!localVerbs) continue; // CLI doesn't have this noun at all → hide
+    const usableVerbs = (cap.verbs || []).filter((v) => localVerbs.includes(v));
+    if (usableVerbs.length === 0) continue; // nothing executable → hide
+    gated.push({ ...cap, verbs: usableVerbs });
+  }
+  return gated;
+}
+
+/**
+ * `services list` — discover available merchant capabilities.
+ *
+ * Primary path: call the platform discovery API (`GET /api/discovery/v1/catalog`),
+ * then gate the result against this CLI's command tree (see gateByLocalCommands)
+ * so only services/verbs this binary can run are shown.
+ *
+ * Fallback: if the platform is unreachable, fall back to the CLI-bundled local
+ * registry (offline usability), gated the same way.
+ */
+export function registerServicesListCommand(
+  parent: Command,
+  deps: { discoveryClient: ApiClient; program: Command },
+): void {
   const cmd = parent
     .command('list')
-    .description('List available merchant services from the registry');
+    .description('List available merchant services (from platform discovery)')
+    .option('--api-key <key>', 'API Key for authentication (X-Api-Key)');
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();
     const format = resolveFormat(opts.format as string | undefined);
+    const localCaps = buildLocalCapabilityMap(deps.program);
 
-    const services = SERVICE_REGISTRY.map(toListItem);
+    let services: ServiceListItem[];
+
+    try {
+      // Resolve API key (required for the discovery endpoint).
+      const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
+        message: 'API Key:',
+        type: 'password',
+      });
+
+      // Discovery lives at /api/discovery/v1/catalog (host root, not the merchant
+      // prefix); deps.discoveryClient is built from the raw host in index.ts.
+      const result = await deps.discoveryClient.get<{
+        capabilities: Array<Record<string, unknown>>;
+      }>('/api/discovery/v1/catalog', { type: 'api-key', key: apiKey });
+
+      if (!result.success) {
+        throw CliError.fromApi(result, { auth: 'api-key' });
+      }
+
+      services = gateByLocalCommands(
+        (result.data.capabilities || []).map(toListItem),
+        localCaps,
+      );
+    } catch {
+      // Fallback to local registry when the backend is unreachable.
+      services = gateByLocalCommands(
+        SERVICE_REGISTRY.map((s) => toListItem(s as unknown as Record<string, unknown>)),
+        localCaps,
+      );
+    }
 
     const configManager = new ConfigManager();
     const commandResult: CommandResult<{ services: ServiceListItem[] }> = {
