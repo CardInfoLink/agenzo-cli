@@ -41,6 +41,24 @@ function num(value: string | undefined, flag: string): number {
 }
 
 /**
+ * Validate a passenger phone as E.164 shape (edge fail-fast). The authoritative
+ * region-aware validity check (libphonenumber) runs server-side; this catches
+ * obviously malformed input before a request is sent. Accepts spaces/dashes,
+ * normalizes them away, and requires a leading "+" country code.
+ */
+function phone(value: string | undefined, flag: string): string {
+  const raw = need(value, flag);
+  const cleaned = raw.replace(/[\s-]/g, '');
+  if (!/^\+[1-9]\d{7,14}$/.test(cleaned)) {
+    throw new CliError(
+      'PARAM_INVALID',
+      `--${flag} must be a valid international phone number, e.g. +14155552671.`,
+    );
+  }
+  return cleaned;
+}
+
+/**
  * Number-ify a seat count and enforce the 0–5 range (design §4.4.1.3 book
  * schema). Out-of-range values map to `PARAM_INVALID`.
  */
@@ -164,7 +182,7 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       price_amount: num(opts.priceAmount as string | undefined, 'price-amount'),
       price_currency: (opts.priceCurrency as string | undefined) ?? 'USD',
       passenger_name: need(opts.passengerName as string | undefined, 'passenger-name'),
-      passenger_phone: need(opts.passengerPhone as string | undefined, 'passenger-phone'),
+      passenger_phone: phone(opts.passengerPhone as string | undefined, 'passenger-phone'),
     };
 
     // pay_per_call: optional paid payment order id (the only payment handle the
