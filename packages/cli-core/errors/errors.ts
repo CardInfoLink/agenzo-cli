@@ -175,6 +175,7 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
   ARREARS_OUTSTANDING: 'You have outstanding arrears. Please settle your balance before booking a new ride.',
   CONTACT_REQUIRED: 'Passenger contact information is required. Please provide a passenger name and phone number.',
   INVALID_PHONE: 'The passenger phone number is not valid. Please provide a valid international number.',
+  SEAT_LIMIT_EXCEEDED: 'The number of child/infant/toddler seats exceeds the vehicle capacity. Reduce seats or choose a larger vehicle.',
   RIDE_NOT_FOUND: 'The ride order was not found or does not belong to you.',
   CANCELLATION_NOT_ALLOWED: 'This order cannot be cancelled in its current state.',
   NO_AVAILABILITY: 'No rooms available for the selected hotel and dates.',
