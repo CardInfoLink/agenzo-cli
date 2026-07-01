@@ -50,15 +50,29 @@ export type AuthMode =
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly timeout: number;
+  /**
+   * Correlation id for this CLI invocation. Generated once per `ApiClient`
+   * instance (i.e. once per command execution — each `apps/*` entrypoint
+   * constructs exactly one `ApiClient` per process run) and sent as
+   * `X-Request-Id` on every request this client makes. The backend's
+   * `RequestIdMiddleware` adopts a client-supplied `X-Request-Id` verbatim as
+   * both `trace_id` and `request_id` (only generating its own when the header
+   * is absent), so every HTTP call belonging to one CLI operation — including
+   * multi-step flows like `payment-methods add`'s create + poll + get — shares
+   * a single trace_id server-side and can be followed as one chain in logs.
+   */
+  private readonly requestId: string;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
     this.timeout = config.timeout ?? 60000;
+    this.requestId = crypto.randomUUID();
   }
 
   private buildHeaders(auth: AuthMode): Record<string, string> {
     const headers: Record<string, string> = {
       'User-Agent': `agenzo-admin-cli/${getCurrentVersion()}`,
+      'X-Request-Id': this.requestId,
     };
     if (auth.type === 'bearer') {
       headers['Authorization'] = `Bearer ${auth.token}`;

@@ -329,7 +329,7 @@ describe('PBT — Property 3: Structured JSON flags are parsed and validated', (
   describe('parsePriceItems', () => {
     it('valid JSON arrays with correct fields return the array', () => {
       const validItem = fc.record({
-        sale_date: fc.date().map((d) => d.toISOString().slice(0, 10)),
+        sale_date: fc.date({ noInvalidDate: true }).map((d) => d.toISOString().slice(0, 10)),
         sale_price: fc.double({ min: 0, max: 10000, noNaN: true, noDefaultInfinity: true }),
         breakfast_num: fc.integer({ min: 0, max: 10 }),
       });
@@ -405,7 +405,7 @@ describe('PBT — Property 3: Structured JSON flags are parsed and validated', (
       const validRoom = fc.record({
         room_index: fc.string({ minLength: 1, maxLength: 5 }),
         guest_name: fc.string({ minLength: 1, maxLength: 30 }),
-        cancel_check_in_date: fc.date().map((d) => d.toISOString().slice(0, 10)),
+        cancel_check_in_date: fc.date({ noInvalidDate: true }).map((d) => d.toISOString().slice(0, 10)),
       });
 
       fc.assert(
