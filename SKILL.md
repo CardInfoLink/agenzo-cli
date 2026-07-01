@@ -37,7 +37,7 @@ For Active_Payment, if EVO has not yet confirmed the payment, `pay-order` return
 2. **Session memory**: Remember outputs from previous steps (email, developer_id, api_key, pm_id, etc.) and reuse them in subsequent commands. Do not ask the user to repeat information they already provided.
 3. **One step at a time**: Execute one command, confirm the result, then proceed to the next step.
 4. **Error recovery**: If a command fails, explain the error and suggest a fix. Do not silently retry with different parameters.
-5. **Automation mode**: When executing commands for the user, always add the `--yes` global flag to skip interactive confirmations (e.g. pre-authorization prompts).
+5. **Automation mode**: When executing commands for the user, always add the `--yes` global flag — it only skips this CLI's own interactive TTY prompts (which can't be answered by a non-interactive Agent process). `--yes` is NOT a substitute for user consent: it does not remove the requirement to show the user what a command will do (which hotel/rate, how much money moves, which account is charged) and get their explicit decision in the chat UI BEFORE running a booking- or money-moving command. For hotel-redaug specifically, this means: present hotel/rate candidates and get the user's pick before `create-order`, and confirm the amount + billing path before `pay-order` — every time, `--yes` or not.
 
 ## Prerequisites
 
@@ -75,7 +75,7 @@ Follow this order across CLIs — each step depends on the previous one:
 - **API key format**: `sk_<env>_...` — the prefix depends on the environment (`sk_prod_` in production, `sk_test_` in test; do not assume `sk_prod_`). `--api-key` takes the full key string, not the key ID.
 - **API key scope**: keys are bound to a developer; resources created with Key A are NOT visible to Key B. Scope (`token` / `merchant` / `payment`) is set at `keys create --scope`.
 - **Idempotency-Key**: write commands (`payment-tokens create`, ride `book` / `cancel`, hotel-redaug `create-order` / `pay-order`, etc.) take `--idempotency-key`. The CLI never auto-generates it — the caller MUST supply a unique value per logical request. Sent as the `Idempotency-Key` HTTP header (never in the body). Reuse the same value to safely retry the same logical request; use a fresh value for a new one.
-- **Automation**: always pass the `--yes` global flag when executing for the user (skips interactive confirmations).
+- **Automation**: always pass the `--yes` global flag when executing for the user (skips this CLI's own TTY prompts only — it does not replace showing the user what will happen and getting their decision before booking- or money-moving commands; see Behavior Rule 5).
 - **Debugging**: add `--verbose` to print detailed logs to stderr. Error output includes a `request_id` — quote it when contacting support.
 - **Exit codes**: `0` success · `1` business error (4xx, e.g. RESOURCE_NOT_FOUND / feature disabled) · `2` CLI below required minimum version · `3` auth failure · `4` upstream / 5xx · `5` user cancel.
 

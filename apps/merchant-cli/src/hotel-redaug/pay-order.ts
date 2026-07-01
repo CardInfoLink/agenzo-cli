@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { confirm } from '@inquirer/prompts';
 import {
   ApiClient,
   ConfigManager,
@@ -91,6 +92,12 @@ function isPaymentTerminal(record: unknown): boolean {
  * - `--watch` / `--watch-interval` / `--watch-timeout`: polling mode that
  *   retries on PAYMENT_NOT_COMPLETED until PAID or timeout.
  *
+ * This is the step that actually moves money, so the non-`--yes` path MUST
+ * confirm (naming the billing path — monthly settlement vs. Active Payment)
+ * before the write; `--yes` skips it. A declined confirm maps to
+ * `CLIENT_ABORTED` (exit 5). Applies to both the single-shot and `--watch`
+ * paths (the confirm happens once, before polling begins).
+ *
  * On success: exit 0, print settlement result.
  * On business error: exit 1, error code to stderr.
  * Watch mode: NDJSON output per poll iteration.
@@ -154,6 +161,24 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     const body: Record<string, unknown> = {};
     if (merchantTransId !== undefined) {
       body.merchant_trans_id = merchantTransId;
+    }
+
+    // Confirm before the write unless --yes. This is the step that actually
+    // moves money (settlement account debit, or EVO verification), so the
+    // prompt is explicit about which billing path applies. The prompt goes to
+    // stderr; declining maps to CLIENT_ABORTED (exit 5) via the top-level
+    // envelope.
+    if (!isYes) {
+      const billingPath = merchantTransId !== undefined
+        ? `Active Payment (verifying EVO transaction ${merchantTransId})`
+        : 'monthly settlement (deducting from your settlement account)';
+      const confirmed = await confirm({
+        message: `Settle hotel order ${orderId} via ${billingPath}? This will move money.`,
+        default: false,
+      });
+      if (!confirmed) {
+        throw new CliError('CLIENT_ABORTED', 'Payment aborted by user.');
+      }
     }
 
     const path = `/hotel/${encodeURIComponent(orderId)}/pay`;

@@ -33,22 +33,33 @@ run \`hotel-redaug <verb> --help\`.
    - Pass ONE location branch (coordinates OR destination_id) + dates + guests
    - Optional: hotel-filters first to get valid filter codes, then pass to search
 
-3. Choose a hotel
-   - Present results to the user; hotel-detail <hotel-id> for more info if asked
+3. Choose a hotel (MANDATORY unless the user already named one exact hotel)
+   - MUST present the candidates to the user (name, address/distance, star/score if useful)
+     and get an explicit pick — never auto-select by distance or price alone, even for an
+     open-ended request like "book me something near the Bund"
+   - hotel-detail <hotel-id> is OPTIONAL (only when the user asks for more info or the
+     search fields aren't enough to describe the property) — it is NOT required, but
+     showing candidates and getting a pick IS required
 
 4. Quote
    - quote the chosen hotel + same dates/guests → rates[]
    - Empty rates[] = no availability → stop, tell the user
    - Each rate carries the inputs for create-order: product_token, total_price, price_items
+   - MUST present the rate options (room_name, rate_plan_name, breakfast, free_cancellation,
+     total_price+currency) and get the user's explicit pick of which rate to book — same rule
+     as step 3, this is not optional just because hotel-detail is
 
-5. Create order (lock inventory, no charge)
+5. Create order (lock inventory, no charge) — MUST NOT run until step 3+4 confirmation happened
    - create-order: forward quote outputs VERBATIM (product_token, amount, currency, price_items)
    - Collect from user: guest_name, contact_name, contact_phone
    - Generate a unique idempotency-key
    - Response → save order_id + fc_order_code + total_amount + currency
    - Order status: AWAITING_PAYMENT (no money charged yet)
 
-6. Pay order (settle the locked order)
+6. Pay order (settle the locked order) — MUST confirm with the user before calling this
+   - Before calling: show the user total_amount + currency from create-order and which
+     billing path applies, and get explicit go-ahead — pay-order is the step that actually
+     moves money
    - pay-order --order-id <order_id from create-order>
    - Billing path determined by developer's billing_mode:
      a) Monthly settlement (omit --merchant-trans-id):
@@ -102,9 +113,21 @@ run \`hotel-redaug <verb> --help\`.
 - create-order and pay-order are separate steps; create-order does NOT charge
 - pay-order depends on create-order's output (order_id)
 - Write verbs (create-order/pay-order/cancel/checkout) always need --idempotency-key and --yes
+- IMPORTANT: --yes only skips this CLI's own interactive TTY prompt (needed because the Agent
+  runs non-interactively). It is NOT a substitute for showing the user the hotel/rate/price and
+  getting their decision in the chat UI. Passing --yes does not remove the confirmation steps in
+  step 3/4 (choose hotel + rate) or step 6 (confirm before pay-order) above.
+- After a cancel call returns successfully (including the cancel_status='cancel_pending' shape),
+  do NOT call cancel again for the same order — poll get instead. A pending acknowledgement is
+  success, not failure.
 
 ## Errors
 
+- RESOURCE_NOT_FOUND (find-destination) → platform 404 for this keyword, distinct from an
+  empty destinations[] (which is a normal no-match, not an error). Do not keep retrying the
+  keyword — fall back to the coordinate branch (search/hotel-filters --lat/--lng) if you can
+  geocode the place or already know its coordinates; otherwise ask the user for a city or a
+  more specific landmark.
 - BILLING_MODE_MISMATCH            → billing path and flags don't match (see cross-guards)
 - PARAM_MERCHANT_TRANS_ID_REQUIRED → Active Payment dev must supply --merchant-trans-id
 - ACCOUNT_INSUFFICIENT_BALANCE     → settlement account needs top-up; inform user
