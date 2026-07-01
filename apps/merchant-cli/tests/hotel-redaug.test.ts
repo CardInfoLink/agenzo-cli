@@ -11,7 +11,7 @@ import { confirm } from '@inquirer/prompts';
 
 import { registerHotelSearchCommand } from '../src/hotel-redaug/search.js';
 import { registerHotelQuoteCommand } from '../src/hotel-redaug/quote.js';
-import { registerHotelBookCommand } from '../src/hotel-redaug/book.js';
+import { registerHotelCreateOrderCommand } from '../src/hotel-redaug/create-order.js';
 import { registerHotelGetCommand } from '../src/hotel-redaug/get.js';
 import { registerHotelCancelCommand } from '../src/hotel-redaug/cancel.js';
 import { registerHotelCheckoutCommand } from '../src/hotel-redaug/checkout.js';
@@ -111,7 +111,7 @@ function hotelProgram(apiClient: Mock) {
   const deps = { apiClient: apiClient as unknown as ApiClient };
   registerHotelSearchCommand(hotel, deps);
   registerHotelQuoteCommand(hotel, deps);
-  registerHotelBookCommand(hotel, deps);
+  registerHotelCreateOrderCommand(hotel, deps);
   registerHotelGetCommand(hotel, deps);
   registerHotelCancelCommand(hotel, deps);
   registerHotelCheckoutCommand(hotel, deps);
@@ -257,82 +257,6 @@ describe('hotel-redaug quote', () => {
 
 // ============================================================
 // book
-// ============================================================
-
-describe('hotel-redaug book', () => {
-  const bookArgs = (extra: string[] = []) => [
-    ...BASE, 'book', '--api-key', 'k',
-    '--product-token', 'tok_1', '--total-amount', '640', '--currency', 'CNY',
-    '--price-items', '[{"sale_date":"2026-03-01","sale_price":320,"breakfast_num":2}]',
-    '--check-in', '2026-03-01', '--check-out', '2026-03-03',
-    '--guest-name', 'Alice', '--contact-name', 'Alice', '--contact-phone', '13800138000',
-    ...extra,
-  ];
-
-  it('--yes happy path POSTs /hotel/book with correct body and Idempotency-Key header', async () => {
-    const api = mockApiClient({ '/hotel/book': BOOK_RESP });
-    const program = hotelProgram(api);
-    const out = captureStdout();
-    captureStderr();
-
-    await program.parseAsync(bookArgs(['--yes', '--idempotency-key', 'book-1', '--format', 'json']));
-
-    expect(api.post).toHaveBeenCalledTimes(1);
-    const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, any>, Record<string, string>];
-    expect(path).toBe('/hotel/book');
-    expect(auth).toEqual({ type: 'api-key', key: 'k' });
-    expect(body.product_token).toBe('tok_1');
-    expect(body.total_amount).toBe(640);
-    expect(body.currency).toBe('CNY');
-    expect(body.adults).toBe(2);
-    expect(body.children).toBe(0);
-    expect(body.nationality).toBe('CN');
-    expect(body.contact_country_code).toBe('86');
-    expect(headers).toEqual({ 'Idempotency-Key': 'book-1' });
-    expect(body).not.toHaveProperty('idempotency_key');
-
-    const payload = parseJsonOutput(out.text()) as Record<string, any>;
-    expect(payload.order_id).toBe('ord_h1');
-    expect(payload.order_status).toBe('PROCESSING');
-  });
-
-  it('declined confirmation → CLIENT_ABORTED (exit 5), 0 requests', async () => {
-    confirmMock.mockResolvedValue(false);
-    const api = mockApiClient({ '/hotel/book': BOOK_RESP });
-    const program = hotelProgram(api);
-    captureStdout();
-    captureStderr();
-
-    await expect(
-      program.parseAsync(bookArgs(['--idempotency-key', 'book-1'])),
-    ).rejects.toMatchObject({ code: 'CLIENT_ABORTED' });
-    expect(api.post).not.toHaveBeenCalled();
-  });
-
-  it('--yes skips the prompt', async () => {
-    const api = mockApiClient({ '/hotel/book': BOOK_RESP });
-    const program = hotelProgram(api);
-    captureStdout();
-    captureStderr();
-
-    await program.parseAsync(bookArgs(['--yes', '--idempotency-key', 'book-1']));
-    expect(confirmMock).not.toHaveBeenCalled();
-    expect(api.post).toHaveBeenCalledTimes(1);
-  });
-
-  it('--payment-order-id rejects with BILLING_MODE_MISMATCH before any request', async () => {
-    const api = mockApiClient({ '/hotel/book': BOOK_RESP });
-    const program = hotelProgram(api);
-    captureStdout();
-    captureStderr();
-
-    await expect(
-      program.parseAsync(bookArgs(['--yes', '--idempotency-key', 'k', '--payment-order-id', 'po_1'])),
-    ).rejects.toMatchObject({ code: 'BILLING_MODE_MISMATCH' });
-    expect(api.post).not.toHaveBeenCalled();
-  });
-});
-
 // ============================================================
 // get
 // ============================================================

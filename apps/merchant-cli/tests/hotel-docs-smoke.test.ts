@@ -22,7 +22,8 @@ describe('hotel-redaug documentation presence', () => {
     'list-cities',
     'hotel-detail',
     'quote',
-    'book',
+    'create-order',
+    'pay-order',
     'get',
     'cancel',
     'checkout',
@@ -30,7 +31,7 @@ describe('hotel-redaug documentation presence', () => {
     'list-orders',
   ];
 
-  it('README.md features table contains a row for each of the 12 hotel-redaug verbs', () => {
+  it('README.md features table contains a row for each of the 13 hotel-redaug verbs', () => {
     for (const verb of HOTEL_VERBS) {
       // The README table format is: | `hotel-redaug` | `<verb>` | ...
       const escaped = verb.replace(/-/g, '\\-');

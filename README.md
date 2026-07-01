@@ -60,11 +60,11 @@
 |---|---|
 | `services` | `list` / `get` |
 | `ride-elife` | `quote` / `book` / `get` / `cancel` / `list-orders` |
-| `hotel-redaug` | `find-destination` / `hotel-filters` / `list-cities` / `search` / `hotel-detail` / `quote` / `book` / `get` / `cancel` / `checkout` / `get-checkout` / `list-orders` |
+| `hotel-redaug` | `find-destination` / `hotel-filters` / `list-cities` / `search` / `hotel-detail` / `quote` / `create-order` / `pay-order` / `get` / `cancel` / `checkout` / `get-checkout` / `list-orders` |
 
 `services list` discovers available capabilities from the platform backend, gated against the CLI's own registered commands (services/verbs the CLI cannot execute are hidden). `services get <service-id>` returns the full schema for a service (Agent reads this to learn how to use it).
 
-`hotel-redaug` typical workflow: `find-destination` → `search` → `hotel-detail` (optional) → `quote` → `book` → `get` (poll until CONFIRMED) → `cancel` / `checkout` (optional).
+`hotel-redaug` typical workflow: `find-destination` → `search` → `hotel-detail` (optional) → `quote` → `create-order` → `pay-order` → `get` (poll until CONFIRMED) → `cancel` / `checkout` (optional).
 
 ## Authentication
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { Command } from 'commander';
 import { registerHotelSearchCommand } from '../src/hotel-redaug/search.js';
 import { registerHotelQuoteCommand } from '../src/hotel-redaug/quote.js';
-import { registerHotelBookCommand } from '../src/hotel-redaug/book.js';
+import { registerHotelCreateOrderCommand } from '../src/hotel-redaug/create-order.js';
 import { registerHotelGetCommand } from '../src/hotel-redaug/get.js';
 import { registerHotelCancelCommand } from '../src/hotel-redaug/cancel.js';
 import { registerHotelCheckoutCommand } from '../src/hotel-redaug/checkout.js';
@@ -37,7 +37,7 @@ function buildHotelProgram() {
   const hotelCmd = program.command('hotel-redaug').description('Hotel booking (Redaug)');
   registerHotelSearchCommand(hotelCmd, deps);
   registerHotelQuoteCommand(hotelCmd, deps);
-  registerHotelBookCommand(hotelCmd, deps);
+  registerHotelCreateOrderCommand(hotelCmd, deps);
   registerHotelGetCommand(hotelCmd, deps);
   registerHotelCancelCommand(hotelCmd, deps);
   registerHotelCheckoutCommand(hotelCmd, deps);
@@ -84,10 +84,11 @@ async function getVerbSchema(verb: string): Promise<Record<string, unknown>> {
 // ============================================================
 
 describe('hotel-redaug verb schema (--help --format json)', () => {
+  // Verbs with attached schemas (--help --format json emits JSON schema).
+  // Note: create-order and pay-order do not have verb schemas attached yet.
   const ALL_VERBS = [
     'search',
     'quote',
-    'book',
     'get',
     'cancel',
     'checkout',
@@ -132,15 +133,6 @@ describe('hotel-redaug verb schema (--help --format json)', () => {
   });
 
   describe('error_recovery on write and long-running verbs', () => {
-    it('book schema carries an error_recovery map', async () => {
-      const schema = await getVerbSchema('book');
-      expect(schema).toHaveProperty('error_recovery');
-      const recovery = schema.error_recovery as Record<string, string>;
-      expect(recovery).toHaveProperty('BILLING_MODE_MISMATCH');
-      expect(recovery).toHaveProperty('NO_AVAILABILITY');
-      expect(recovery).toHaveProperty('PARAM_IDEMPOTENCY_KEY_REQUIRED');
-    });
-
     it('cancel schema carries an error_recovery map', async () => {
       const schema = await getVerbSchema('cancel');
       expect(schema).toHaveProperty('error_recovery');
@@ -250,7 +242,7 @@ describe('hotel-redaug noun registration', () => {
     const expected = [
       'search',
       'quote',
-      'book',
+      'create-order',
       'get',
       'cancel',
       'checkout',
