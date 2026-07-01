@@ -148,8 +148,10 @@ function resolveActiveFormat(): OutputFormat {
  * format and exits with the mapped code (1–5). stdout is left untouched so a
  * partial machine payload is never emitted on failure.
  *
- * - `json`: a single `{ error: { code, code_num, message, request_id? } }` envelope (§8.2).
- * - `table`: `✗ [<code_num>] <message>` plus, for `AuthError`, the suggestion line.
+ * - `json`: a single `{ error: { code, code_num, message, request_id?, upstream? } }` envelope (§8.2).
+ * - `table`: `✗ [<code_num>] <message>` plus, for `AuthError`, the suggestion line, plus a
+ *   `  ↳ [<upstream.code>] <upstream.message>` line when this failure originated from a
+ *   third-party upstream the platform calls out to.
  */
 function reportError(error: unknown): never {
   const envelope = toErrorEnvelope(error);
@@ -161,6 +163,9 @@ function reportError(error: unknown): never {
     console.error(
       Formatter.status('error', `[${envelope.error.code_num}] ${envelope.error.message}`),
     );
+    if (envelope.error.upstream) {
+      console.error(`  ↳ [${envelope.error.upstream.code}] ${envelope.error.upstream.message}`);
+    }
     if (error instanceof AuthError) {
       console.error(Formatter.status('info', error.suggestion));
     }

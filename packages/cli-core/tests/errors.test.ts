@@ -99,6 +99,27 @@ describe('error-catalog toErrorEnvelope mapping (§8.4)', () => {
     expect(CliError.fromApi({ success: false, errorCode: 0, errorMessage: 'm', statusCode: 422, code: 'PAYMENT_ORDER_MISMATCH' }).code).toBe('PAYMENT_ORDER_MISMATCH');
   });
 
+  it('UT-ERR-12f: INVALID_PAYMENT_METHOD (backend 1403, HTTP 400) routes verbatim, NOT a PARAM_INVALID fallback', () => {
+    // Regression: backend sends error_code="INVALID_PAYMENT_METHOD" (1403) at HTTP 400.
+    // Before this code was added to the CLI catalog, isKnownErrorCode() returned
+    // false and this fell through to the generic 4xx branch -> PARAM_INVALID
+    // (2101), losing the real reason (e.g. "card does not support this payment
+    // type") behind a generic "check your input" message.
+    const err = CliError.fromApi(
+      { success: false, errorCode: 1403, errorMessage: 'This card does not support this payment type.', statusCode: 400, code: 'INVALID_PAYMENT_METHOD' },
+      { auth: 'api-key' },
+    );
+    expect(err.code).toBe('INVALID_PAYMENT_METHOD');
+    expect(err.code).not.toBe('PARAM_INVALID');
+    // The real backend reason is preserved (not the stable message) for diagnostics.
+    expect(err.backendMessage).toBe('This card does not support this payment type.');
+  });
+
+  it('UT-ERR-12g: PAYMENT_METHOD_NOT_FOUND (1401) and PAYMENT_METHOD_DISABLED (1402) route verbatim', () => {
+    expect(CliError.fromApi({ success: false, errorCode: 1401, errorMessage: 'm', statusCode: 404, code: 'PAYMENT_METHOD_NOT_FOUND' }).code).toBe('PAYMENT_METHOD_NOT_FOUND');
+    expect(CliError.fromApi({ success: false, errorCode: 1402, errorMessage: 'm', statusCode: 409, code: 'PAYMENT_METHOD_DISABLED' }).code).toBe('PAYMENT_METHOD_DISABLED');
+  });
+
   it('UT-ERR-12d: D3 unknown string code falls back to HTTP-status mapping', () => {
     expect(CliError.fromApi({ success: false, errorCode: 0, errorMessage: 'm', statusCode: 404, code: 'SOME_UNKNOWN_CODE' }, { auth: 'api-key' }).code).toBe('RESOURCE_NOT_FOUND');
     // numeric string codes are not catalog keys → fall back too
@@ -228,6 +249,17 @@ describe('provider pass-through and STABLE_MESSAGE isolation (§8.2 / Req 2.3, 4
       code: 'BOOKING_FAILED',
     });
     expect(err.upstream).toBeUndefined();
+  });
+
+  it('UT-PROV-06a: toErrorEnvelope surfaces backend_message for INVALID_PAYMENT_METHOD (real card-decline reason)', () => {
+    const err = CliError.fromApi(
+      { success: false, errorCode: 1403, errorMessage: 'This card does not support this payment type.', statusCode: 400, code: 'INVALID_PAYMENT_METHOD' },
+      { auth: 'api-key' },
+    );
+    const env = toErrorEnvelope(err);
+    expect(env.error.code).toBe('INVALID_PAYMENT_METHOD');
+    expect(env.error.message).toBe('The payment method is not available for this operation.');
+    expect(env.error.backend_message).toBe('This card does not support this payment type.');
   });
 
   it('UT-PROV-06: top-level message is ALWAYS from STABLE_MESSAGE regardless of upstream presence', () => {

@@ -20,7 +20,7 @@ import type { PaymentMethod } from '../types/api.js';
 // ============================================================
 
 /** Default network-token fee in cents when /config/network-token-fee is unreachable. */
-const DEFAULT_NT_FEE_CENTS = 500;
+const DEFAULT_NT_FEE_CENTS = 50;
 
 /** Smallest USDC unit (1 USDC = 1_000_000 micro-units). */
 const USDC_UNIT = 1_000_000;
@@ -659,7 +659,7 @@ async function checkVcnFeatureEnabled(apiClient: ApiClient, apiKey: string): Pro
 
 /**
  * Fetch network-token fee from /config/network-token-fee.
- * Falls back to DEFAULT_NT_FEE_CENTS (500) if unreachable.
+ * Falls back to DEFAULT_NT_FEE_CENTS (50) if unreachable.
  */
 async function fetchNetworkTokenFee(apiClient: ApiClient, apiKey: string): Promise<number> {
   try {

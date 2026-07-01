@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { confirm } from '@inquirer/prompts';
 import {
   ApiClient,
   ConfigManager,
@@ -154,7 +155,10 @@ function formatCreateOrder(data: CreateHotelOrderResponse): string {
  * On success: exit 0, prints the created order_id to stdout.
  *
  * This is the first step of the create-then-pay flow; the order enters
- * AWAITING_PAYMENT status and must be settled via `pay-order`.
+ * AWAITING_PAYMENT status and must be settled via `pay-order`. Locking a rate
+ * is a real commitment (though not a charge), so the non-`--yes` path MUST
+ * confirm (restating amount/currency/dates) before the write; `--yes` skips
+ * it. A declined confirm maps to `CLIENT_ABORTED` (exit 5).
  */
 export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
@@ -232,6 +236,21 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.contactEmail !== undefined) body.contact_email = opts.contactEmail as string;
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
+
+    // Confirm before the write unless --yes. This locks inventory at the quoted
+    // rate — the user must have already picked this hotel/rate (from search +
+    // quote), so the prompt restates what is being locked in before the call is
+    // made. The prompt goes to stderr; declining maps to CLIENT_ABORTED (exit 5)
+    // via the top-level envelope.
+    if (!isYes) {
+      const confirmed = await confirm({
+        message: `Create this hotel order for ${totalAmount} ${currency} (check-in ${checkIn}, check-out ${checkOut})? This locks the rate but does NOT charge anything yet.`,
+        default: false,
+      });
+      if (!confirmed) {
+        throw new CliError('CLIENT_ABORTED', 'Order creation aborted by user.');
+      }
+    }
 
     // Idempotency key resolution — under --yes a missing key is a hard error.
     const idempotencyKey = await resolveIdempotencyKey(opts.idempotencyKey as string | undefined, {
