@@ -15,7 +15,7 @@
 
 - **`services`** (capability discovery): list what's currently available and how to call it — run this first to learn the current capability set.
 - **`ride-elife`** (ride-hailing): the full loop of quote → book → query/poll → cancel → list-orders.
-- **`hotel-redaug`** (hotel booking): search, find-destination, hotel-filters, list-cities, hotel-detail, quote, book, get (status/poll), cancel, checkout, get-checkout, list-orders. Settles **on account** (monthly_settlement only).
+- **`hotel-redaug`** (hotel booking): search, find-destination, hotel-filters, list-cities, hotel-detail, quote, create-order, pay-order, get (status/poll), cancel, checkout, get-checkout, list-orders. Supports both **monthly_settlement** (on-account deduction) and **Active_Payment** (user pays via EVO, passes back `merchant_trans_id`).
 
 More fulfillment capabilities are added as new nouns over time; `services list` always reflects the current set.
 
@@ -36,14 +36,15 @@ More fulfillment capabilities are added as new nouns over time; `services list` 
 | `hotel-redaug` | `list-cities` | Read | `POST /hotel/cities` | List cities for a country (destination_id + coordinates) |
 | `hotel-redaug` | `hotel-detail` | Read | `POST /hotel/detail` | Hotel detail with facilities and images |
 | `hotel-redaug` | `quote` | Read | `POST /hotel/quote` | Real-time rooms/rates for one hotel (`product_token` + `price_items`) |
-| `hotel-redaug` | `book` | Write/Y | `POST /hotel/book` | Book a quoted rate (monthly_settlement only, see below) |
+| `hotel-redaug` | `create-order` | Write/Y | `POST /hotel/create-order` | Create a hotel order without charging (locks rate + returns `order_id` + payable amount) |
+| `hotel-redaug` | `pay-order` | Write/Y | `POST /hotel/{order_id}/pay` | Pay for a created order; `--merchant-trans-id` triggers Active_Payment path, omit for monthly_settlement |
 | `hotel-redaug` | `get` | Read | `GET /hotel/<id>/status` | Query order status; `--watch` emits an NDJSON polling stream |
 | `hotel-redaug` | `cancel` | Write/Y | `POST /hotel/<id>/cancel` | Cancel a whole order (acceptance ≠ proof; poll `get`) |
 | `hotel-redaug` | `checkout` | Write/Y | `POST /hotel/<id>/checkout` | Partial check-out / out-of-policy cancellation (async) |
 | `hotel-redaug` | `get-checkout` | Read | `GET /hotel/checkout/<task_order_code>` | Poll a check-out application; `--watch` emits an NDJSON stream |
 | `hotel-redaug` | `list-orders` | Read | `GET /hotel/orders` | List hotel orders (pagination + status filter) |
 
-> Write commands (`ride-elife book` / `cancel`; `hotel-redaug book` / `cancel` / `checkout`) are subject to the idempotency-key rules (see [Idempotency-Key](#idempotency-key)).
+> Write commands (`ride-elife book` / `cancel`; `hotel-redaug create-order` / `pay-order` / `cancel` / `checkout`) are subject to the idempotency-key rules (see [Idempotency-Key](#idempotency-key)).
 > Read status verbs `get` / `get-checkout` support `--watch` for NDJSON status polling.
 > `ride-elife track` is not available — use `get --watch` for order-status polling.
 
@@ -102,9 +103,10 @@ agenzo-merchant-cli ride-elife cancel --api-key "$API_KEY" --yes \
 
 ### Hotel booking end-to-end example
 
-The core Agent loop is `search → quote → book → get`. Amounts are decimal currency
-units (e.g. `320.00` = 320.00 yuan), and `hotel-redaug` settles on account
-(monthly_settlement only — no `--payment-order-id`).
+The core Agent loop is `search → quote → create-order → pay-order → get`. Amounts are decimal currency
+units (e.g. `320.00` = 320.00 yuan). `hotel-redaug` supports two billing paths:
+- **monthly_settlement**: deducted from the monthly-settlement account (no `--merchant-trans-id`).
+- **Active_Payment**: user pays via shared EVO parameters, then passes `--merchant-trans-id` to confirm.
 
 ```bash
 # 1. Search hotels by coordinates + stay dates (or use --destination-id from find-destination).
@@ -120,35 +122,51 @@ agenzo-merchant-cli hotel-redaug quote --api-key "$API_KEY" \
   --check-in 2026-02-10 --check-out 2026-02-12 \
   --adults 2 --room-num 1 --nationality CN
 
-# 3. Book the chosen rate (write op: --yes auto-confirms + --idempotency-key required).
-#    --total-amount / --price-items[].sale_price are DECIMAL units paired with --currency.
-#    No --payment-order-id: hotel-redaug is monthly_settlement only.
-agenzo-merchant-cli hotel-redaug book --api-key "$API_KEY" --yes \
+# 3. Create Order (write op: locks rate, no charge; returns order_id + payable amount).
+agenzo-merchant-cli hotel-redaug create-order --api-key "$API_KEY" --yes \
   --product-token "$PRODUCT_TOKEN" \
   --total-amount 640.00 --currency CNY \
   --price-items '[{"sale_date":"2026-02-10","sale_price":320.00,"breakfast_num":2},{"sale_date":"2026-02-11","sale_price":320.00,"breakfast_num":2}]' \
   --check-in 2026-02-10 --check-out 2026-02-12 \
   --guest-name "Zhang San" --contact-name "Zhang San" \
   --contact-phone "13800138000" --contact-country-code 86 \
-  --idempotency-key "hotel-book-$(date +%s)"
+  --idempotency-key "hotel-create-$(date +%s)"
 
-# 4. Query / poll status. book returns order_status=PROCESSING; poll get until CONFIRMED.
-#    --watch emits a line-by-line NDJSON stream (no envelope).
+# 4a. Pay Order — monthly_settlement path (on-account, no merchant-trans-id needed)
+agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
+  --order-id "$ORDER_ID" \
+  --idempotency-key "hotel-pay-$(date +%s)"
+
+# 4b. Pay Order — Active_Payment path (user already paid via EVO; pass merchant_trans_id)
+agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
+  --order-id "$ORDER_ID" \
+  --merchant-trans-id "$MERCHANT_TRANS_ID" \
+  --idempotency-key "hotel-pay-$(date +%s)"
+
+# 4c. Pay Order — Active_Payment with --watch (polls until PAID or timeout)
+agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
+  --order-id "$ORDER_ID" \
+  --merchant-trans-id "$MERCHANT_TRANS_ID" \
+  --idempotency-key "hotel-pay-$(date +%s)" \
+  --watch --watch-interval 5 --watch-timeout 120
+
+# 5. Query / poll status. create-order returns order_status=AWAITING_PAYMENT;
+#    after pay-order succeeds, status becomes PAID; poll get until CONFIRMED.
 agenzo-merchant-cli hotel-redaug get --api-key "$API_KEY" --order-id "$ORDER_ID"
 agenzo-merchant-cli hotel-redaug get --api-key "$API_KEY" --order-id "$ORDER_ID" \
   --watch --watch-interval 5 --watch-timeout 600
 
-# 5. List orders (pagination + optional status filter)
+# 6. List orders (pagination + optional status filter)
 agenzo-merchant-cli hotel-redaug list-orders --api-key "$API_KEY" \
   --status CONFIRMED --page 1 --page-size 20
 
-# 6. Cancel a whole order (write op). Acceptance is NOT proof — poll get until CANCELLED.
+# 7. Cancel a whole order (write op). Acceptance is NOT proof — poll get until CANCELLED.
 agenzo-merchant-cli hotel-redaug cancel --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" --fc-order-code "$FC_ORDER_CODE" \
   --reason "Change of plans" \
   --idempotency-key "hotel-cancel-$(date +%s)"
 
-# 7. Partial check-out / out-of-policy cancellation (write op, async).
+# 8. Partial check-out / out-of-policy cancellation (write op, async).
 #    Returns task_order_code; poll get-checkout for the refund outcome.
 agenzo-merchant-cli hotel-redaug checkout --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" --fc-order-code "$FC_ORDER_CODE" \
@@ -157,7 +175,7 @@ agenzo-merchant-cli hotel-redaug checkout --api-key "$API_KEY" --yes \
   --refund-type 1 \
   --idempotency-key "hotel-checkout-$(date +%s)"
 
-# 8. Poll the check-out application until a terminal refund status
+# 9. Poll the check-out application until a terminal refund status
 agenzo-merchant-cli hotel-redaug get-checkout --api-key "$API_KEY" \
   --task-order-code "$TASK_ORDER_CODE"
 agenzo-merchant-cli hotel-redaug get-checkout --api-key "$API_KEY" \
@@ -196,7 +214,7 @@ Exit codes:
 
 ## Idempotency-Key
 
-The write commands `ride-elife book` / `cancel` and `hotel-redaug book` / `cancel` / `checkout` accept `--idempotency-key`:
+The write commands `ride-elife book` / `cancel` and `hotel-redaug create-order` / `pay-order` / `cancel` / `checkout` accept `--idempotency-key`:
 
 - Format: `[A-Za-z0-9_-]{1,128}`.
 - **The CLI never auto-generates one**: `--yes` with a missing key → hard error `PARAM_IDEMPOTENCY_KEY_REQUIRED` (exit 1), and no request is sent; a missing key without `--yes` → requested interactively.
@@ -212,15 +230,22 @@ The write commands `ride-elife book` / `cancel` and `hotel-redaug book` / `cance
 
 The request body contains at most an optional `payment_order_id`.
 
-### hotel-redaug billing (monthly_settlement only)
+### hotel-redaug billing (create-order + pay-order, two billing paths)
 
-`hotel-redaug book` settles **exclusively on account** (monthly_settlement); there is **no pay_per_call path**. It **does not accept `--payment-order-id`** — supplying any non-empty value is rejected with `BILLING_MODE_MISMATCH` (exit 1) **before any request is sent**, and the value never enters the request body. The booking deducts from the developer's monthly-settlement account, and the response carries `payment_status=ON_ACCOUNT`.
+`hotel-redaug` uses a **two-step flow**: `create-order` (locks rate, no charge) then `pay-order` (settles).
 
-This contrasts with `ride-elife book`, which additionally supports an optional pay_per_call `--payment-order-id` pass-through; `hotel-redaug` exposes no such option.
+The `pay-order` step supports two billing paths based on the developer's `billing_mode`:
+
+- **monthly_settlement**: deducted from the monthly-settlement account; omit `--merchant-trans-id`. The response carries `payment_status=ON_ACCOUNT`.
+- **Active_Payment** (non-monthly-settlement): the user pays via shared EVO parameters out-of-band, then passes `--merchant-trans-id` to `pay-order`; the platform queries EVO to confirm payment before calling upstream `payOrder`. If EVO reports "not yet paid", the CLI receives `PAYMENT_NOT_COMPLETED` (exit 1) — use `--watch` to poll until confirmed.
+
+Cross-guards:
+- A monthly_settlement developer supplying `--merchant-trans-id` → `BILLING_MODE_MISMATCH` (exit 1).
+- An Active_Payment developer omitting `--merchant-trans-id` → `PARAM_MERCHANT_TRANS_ID_REQUIRED` (exit 1).
 
 ## Amount units (decimal currency)
 
-Both `ride-elife` and `hotel-redaug` express **every monetary amount in DECIMAL currency units** paired with an ISO 4217 `currency` code — `320.00` means 320.00 yuan, never `32000` minor units (cents/fen). This applies to inputs (`hotel-redaug book --total-amount`, each `--price-items[].sale_price`) and to every rendered amount (`quote` totals and `price_items`, `get` / `list-orders` prices, cancellation fees, and refunds). Amounts are forwarded and rendered **verbatim**, with no minor-unit conversion in either direction. This differs from `agenzo-token-cli` and `agenzo-payment-cli`, which use minor units.
+Both `ride-elife` and `hotel-redaug` express **every monetary amount in DECIMAL currency units** paired with an ISO 4217 `currency` code — `320.00` means 320.00 yuan, never `32000` minor units (cents/fen). This applies to inputs (`hotel-redaug create-order --total-amount`, each `--price-items[].sale_price`) and to every rendered amount (`quote` totals and `price_items`, `get` / `list-orders` prices, cancellation fees, and refunds). Amounts are forwarded and rendered **verbatim**, with no minor-unit conversion in either direction. This differs from `agenzo-token-cli` and `agenzo-payment-cli`, which use minor units.
 
 ## profile / host model
 
@@ -239,8 +264,9 @@ Every `ride-elife` and `hotel-redaug` verb supports `--help --format json`, emit
 agenzo-merchant-cli ride-elife quote --help --format json
 agenzo-merchant-cli ride-elife book --help --format json
 agenzo-merchant-cli hotel-redaug quote --help --format json
-agenzo-merchant-cli hotel-redaug book --help --format json     # write verb: error_recovery
-agenzo-merchant-cli hotel-redaug get --help --format json       # long-running: polling block
+agenzo-merchant-cli hotel-redaug create-order --help --format json   # write verb: error_recovery
+agenzo-merchant-cli hotel-redaug pay-order --help --format json      # write verb: error_recovery
+agenzo-merchant-cli hotel-redaug get --help --format json             # long-running: polling block
 ```
 
-For `hotel-redaug`, `book` / `cancel` / `checkout` are the write verbs that require `--idempotency-key`, and `get` / `get-checkout` are the long-running reads that support `--watch` NDJSON streaming (their schemas carry a `polling` block).
+For `hotel-redaug`, `create-order` / `pay-order` / `cancel` / `checkout` are the write verbs that require `--idempotency-key`, and `get` / `get-checkout` are the long-running reads that support `--watch` NDJSON streaming (their schemas carry a `polling` block).

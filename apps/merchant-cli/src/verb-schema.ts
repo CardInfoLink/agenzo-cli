@@ -488,7 +488,7 @@ export const hotelQuoteSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'quote',
   description:
-    'Get real-time room types and bookable rates for one hotel and stay. Returns rates each carrying an opaque product_token and per-night price_items that must be passed verbatim to book. Run immediately before booking — availability and prices change in real time',
+    'Get real-time room types and bookable rates for one hotel and stay. Returns rates each carrying an opaque product_token and per-night price_items that must be passed verbatim to create-order. Run immediately before create-order — availability and prices change in real time',
   flags: {
     'hotel-id': { type: 'string', required: true, description: 'Hotel chosen from search results (search.response.hotels[].hotel_id)' },
     'check-in': { type: 'string', required: true, description: 'Check-in date (match search)', constraints: 'YYYY-MM-DD' },
@@ -503,26 +503,26 @@ export const hotelQuoteSchema: VerbSchema = {
       type: 'array',
       description: 'Bookable room+rate options. Empty when the hotel has no rooms for these dates (treat as NO_AVAILABILITY: re-quote another hotel or change dates).',
       items: {
-        product_token: { type: 'string', description: 'Opaque token packing room/rate/supply identifiers. Pass verbatim to book --product-token. Do NOT interpret or reuse across quotes.' },
+        product_token: { type: 'string', description: 'Opaque token packing room/rate/supply identifiers. Pass verbatim to create-order --product-token. Do NOT interpret or reuse across quotes.' },
         room_name: { type: 'string', description: 'Room type name.' },
         rate_plan_name: { type: 'string|null', description: "Rate plan name (e.g. 'Breakfast included, free cancellation')." },
-        breakfast: { type: 'int|null', description: 'Breakfasts included per night (0 = room only).' },
+        breakfast: { type: 'int|null', description: 'Breakfast enum for the rate (-1=bed breakfast, 0=no breakfast, 1+=N breakfasts). Display only.' },
         free_cancellation: { type: 'bool|null', description: 'Whether this rate is currently in a free-cancellation window. Prefer when the user wants flexibility.' },
         total_price: {
           type: 'object',
           description: 'Total bookable price for the whole stay and room count.',
           properties: {
-            amount: { type: 'float', description: 'Total price in DECIMAL units. Pass verbatim to book --total-amount.' },
-            currency: { type: 'string', description: 'ISO 4217 currency code. Pass to book --currency.' },
+            amount: { type: 'float', description: 'Total price in DECIMAL units. Pass verbatim to create-order --total-amount.' },
+            currency: { type: 'string', description: 'ISO 4217 currency code. Pass to create-order --currency.' },
           },
         },
         price_items: {
           type: 'array',
-          description: 'Per-night price breakdown. Pass this array verbatim to book --price-items.',
+          description: 'Per-night price breakdown. Pass this array verbatim to create-order --price-items.',
           items: {
             sale_date: { type: 'string', description: 'Night date YYYY-MM-DD.' },
             sale_price: { type: 'float', description: 'Price for that night in DECIMAL units.' },
-            breakfast_num: { type: 'int', description: 'Breakfasts for that night.' },
+            breakfast_num: { type: 'int', description: 'Breakfast enum for that night (-1=bed breakfast, 0=no breakfast, 1+=N). Copy verbatim into create-order; never alter.' },
           },
         },
       },
@@ -530,8 +530,8 @@ export const hotelQuoteSchema: VerbSchema = {
   },
   example: {
     command:
-      'agenzo-merchant-cli hotel-redaug quote --hotel-id 10583772 --check-in 2026-07-04 --check-out 2026-07-05 --adults 2',
-    output_summary: 'Returns rates[]. Use rates[].product_token, total_price.amount/currency and price_items[] in hotel-redaug book.',
+      'agenzo-merchant-cli hotel-redaug quote --hotel-id 10583772 --check-in 2026-08-20 --check-out 2026-08-21 --adults 2',
+    output_summary: 'Returns rates[]. Use rates[].product_token, total_price.amount/currency and price_items[] in hotel-redaug create-order.',
   },
   error_recovery: {
     NO_AVAILABILITY: 'This hotel has no bookable rooms for these dates (upstream roomItems empty). Re-quote a different hotel from the search result, or re-search with other dates. Do NOT retry the same hotel/dates.',
@@ -540,77 +540,108 @@ export const hotelQuoteSchema: VerbSchema = {
   },
 };
 
-/** `hotel-redaug book` schema. Write op (W/Y) — monthly_settlement only. */
-export const hotelBookSchema: VerbSchema = {
+/** `hotel-redaug create-order` schema. Write op (W/Y) — lock inventory, no charge. */
+export const hotelCreateOrderSchema: VerbSchema = {
   cli: CLI_NAME,
   noun: HOTEL_NOUN,
-  verb: 'book',
+  verb: 'create-order',
   description:
-    'Create and pay for a hotel booking in one step (re-check + create + settle on account), using a product_token and price_items from a recent quote. check-in/check-out, guest counts, total-amount and price-items must match the quote',
+    'Create a hotel order WITHOUT charging any account (re-check availability + createOrder upstream), using a product_token and price_items from a recent quote. The order enters AWAITING_PAYMENT — no money is moved until pay-order. check-in/check-out, guest counts, total-amount and price-items must match the quote',
   flags: {
     'product-token': { type: 'string', required: true, description: 'Chosen rate token from quote (quote.response.rates[].product_token). Pass verbatim' },
-    'total-amount': { type: 'float', required: true, description: 'Total price for the stay (quote.response.rates[].total_price.amount)', constraints: 'DECIMAL units (NOT cents). Must equal the chosen rate total_price.amount' },
-    currency: { type: 'string', required: true, description: 'ISO 4217 currency code from the chosen rate (quote.response.rates[].total_price.currency)' },
-    'price-items': { type: 'string', required: true, description: 'Per-night price breakdown from quote, copied verbatim', constraints: 'JSON array of {sale_date, sale_price, breakfast_num}; else PARAM_INVALID' },
+    'total-amount': { type: 'float', required: true, description: 'Total price for the stay (quote.response.rates[].total_price.amount)', constraints: 'DECIMAL units (NOT cents), 0.01–999999999.99. Must equal the chosen rate total_price.amount' },
+    currency: { type: 'string', required: true, description: 'ISO 4217 currency code from the chosen rate (quote.response.rates[].total_price.currency)', constraints: 'Exactly 3 uppercase letters' },
+    'price-items': { type: 'string', required: true, description: 'Per-night price breakdown from quote, copied verbatim (including breakfast_num)', constraints: 'JSON array of {sale_date, sale_price, breakfast_num}; copy breakfast_num verbatim from quote (-1/0/1+ are distinct breakfast products, never alter); else PARAM_INVALID' },
     'check-in': { type: 'string', required: true, description: 'Check-in date (match quote)', constraints: 'YYYY-MM-DD' },
     'check-out': { type: 'string', required: true, description: 'Check-out date (match quote)', constraints: 'YYYY-MM-DD, strictly after check-in' },
     'room-num': { type: 'int', required: false, default: 1, description: 'Number of rooms (match quote)' },
-    adults: { type: 'int', required: false, default: 2, description: 'Adults per room (match quote)' },
-    children: { type: 'int', required: false, default: 0, description: 'Children per room (match quote)' },
+    adults: { type: 'int', required: false, default: 2, description: 'Adults per room (match quote)', constraints: '1-20' },
+    children: { type: 'int', required: false, default: 0, description: 'Children per room (match quote)', constraints: '0-10' },
     nationality: { type: 'string', required: false, default: 'CN', description: 'Guest nationality (match quote)' },
-    'guest-name': { type: 'string', required: true, description: 'Primary guest name', constraints: 'Use the name as the user gives it. If book returns NAME_FORMAT_INVALID, re-collect in Latin letters and retry' },
+    'guest-name': { type: 'string', required: true, description: 'Primary guest name', constraints: 'Use the name as the user gives it. If a supplier returns NAME_FORMAT_INVALID, re-collect in Latin letters and retry' },
     'contact-name': { type: 'string', required: true, description: 'Booking contact name (may equal guest-name)' },
-    'contact-phone': { type: 'string', required: true, description: 'Booking contact phone number', constraints: "Digits; collect country code separately in --contact-country-code" },
+    'contact-phone': { type: 'string', required: true, description: 'Booking contact phone number', constraints: 'Digits; collect country code separately in --contact-country-code' },
     'contact-country-code': { type: 'string', required: false, default: '86', description: "Phone country calling code without '+'" },
     'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
-    'payment-order-id': {
-      type: 'string',
-      required: false,
-      description: 'Do NOT use. Present only to give a precise error if mistakenly supplied',
-      constraints: 'Forbidden for hotel-redaug: it settles on account (monthly_settlement). Any non-empty value is rejected with BILLING_MODE_MISMATCH before any request',
-    },
     'idempotency-key': {
       type: 'string',
       required: true,
-      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(user_id + product_token + check_in)) and reuse the SAME key when retrying the same booking',
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(user_id + product_token + check_in)) and reuse the SAME key when retrying the same order creation',
       constraints: '1-128 chars [A-Za-z0-9_-]',
     },
   },
   response: {
-    order_id: { type: 'string', description: 'Our order reference (coOrderCode). Use as --order-id in get / cancel.' },
+    order_id: { type: 'string', description: 'Our order reference (coOrderCode). Use as --order-id in pay-order / get / cancel.' },
     fc_order_code: { type: 'string', description: 'Supplier order reference. Needed as --fc-order-code in cancel and checkout.' },
-    order_status: { type: 'string', description: "Order status right after booking, as a STRING — typically 'PROCESSING' (order_status_code 2). Poll get until 'CONFIRMED' (3). There is no order_status_std field." },
-    rooms: {
-      type: 'array',
-      description: 'The booked rooms, in order. Use these to drive a partial checkout: take room_index and guest_name from here.',
-      items: {
-        room_index: { type: 'string', description: '1-based room sequence number. Pass to checkout --checkout-rooms[].room_index to identify which room to drop.' },
-        guest_name: { type: 'string', description: 'Primary guest assigned to this room. Pass to checkout --checkout-rooms[].guest_name.' },
-      },
-    },
-    pay_status: { type: 'string|null', description: 'Payment/settlement status (e.g. paid / on_account).' },
-    price: { type: 'object', description: 'Amount charged for the stay { amount, currency } in DECIMAL units.' },
-    payment_status: { type: 'string', description: "'ON_ACCOUNT' (monthly_settlement)." },
-    provider: { type: 'string', description: "'redaug'." },
-    billing_entry_id: { type: 'string|absent', description: 'Settlement billing entry id (monthly_settlement).' },
+    total_amount: { type: 'float', description: 'Amount to be paid in pay-order (DECIMAL units). The order is locked in AWAITING_PAYMENT — no charge has been made.' },
+    currency: { type: 'string', description: 'ISO 4217 currency code for the payment.' },
   },
   example: {
     command:
-      `agenzo-merchant-cli hotel-redaug book --product-token <tok> --total-amount 320.00 --currency CNY --price-items '[{"sale_date":"2026-07-04","sale_price":320.00,"breakfast_num":0}]' --check-in 2026-07-04 --check-out 2026-07-05 --guest-name "San Zhang" --contact-name "San Zhang" --contact-phone 13800000000 --idempotency-key book-h1n2`,
-    output_summary: 'Returns order_id and fc_order_code. Poll hotel-redaug get --order-id <order_id> until order_status=CONFIRMED (order_status_code 3).',
+      `agenzo-merchant-cli hotel-redaug create-order --product-token <tok> --total-amount 10.00 --currency CNY --price-items '[{"sale_date":"2026-08-20","sale_price":10.00,"breakfast_num":0}]' --check-in 2026-08-20 --check-out 2026-08-21 --adults 2 --guest-name "Zhang San" --contact-name "Zhang San" --contact-phone 13800138000 --idempotency-key create-h1n2`,
+    output_summary: 'Returns {order_id, fc_order_code, total_amount, currency}. The order is AWAITING_PAYMENT (no charge). Use order_id as --order-id in pay-order to settle.',
   },
   error_recovery: {
-    NO_AVAILABILITY: 'Availability vanished between quote and book. Re-quote the same hotel; if still empty, quote another hotel or change dates. Use a NEW idempotency-key for the new product_token.',
-    PRICE_CHANGED: 'The price/price_items no longer match upstream. Re-quote to get fresh total_price and price_items, confirm the new price with the user, then book with the new values and a NEW idempotency-key.',
-    BILLING_MODE_MISMATCH: 'A --payment-order-id was supplied but hotel-redaug settles on account. Remove it and retry with the SAME idempotency-key.',
-    ACCOUNT_INSUFFICIENT_BALANCE: 'Settlement credit is insufficient (check via admin-cli accounts get). Direct the user to top up offline. Optionally offer a cheaper rate from the original quote.',
-    ACCOUNT_NOT_FOUND: 'Developer has no settlement account. Direct the user to complete contract signing; cannot book until provisioned.',
-    BOOKING_FAILED: 'Upstream rejected the booking. Do NOT auto-retry. Surface any reference id for reconciliation; re-quote before any new attempt.',
-    NAME_FORMAT_INVALID: 'The supplier requires the guest name in a specific format (commonly Latin first/last name for international properties). Re-collect guest-name (and contact-name if needed) in Latin letters and retry with the SAME idempotency-key.',
+    NO_AVAILABILITY: 'Availability vanished between quote and create-order. Re-quote the same hotel; if still empty, quote another hotel or change dates. Use a NEW idempotency-key for the new product_token.',
+    PRICE_CHANGED: 'The price/price_items no longer match upstream. Re-quote to get fresh total_price and price_items, confirm the new price with the user, then create-order with the new values and a NEW idempotency-key.',
+    NAME_FORMAT_INVALID: 'The supplier requires the guest name in a specific format (commonly Latin first/last name for international properties). Re-collect guest-name in Latin letters and retry with the SAME idempotency-key.',
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key derived from business intent and retry.',
     PARAM_IDEMPOTENCY_KEY_CONFLICT: 'The same idempotency-key was used with different parameters. Retry with the original parameters, or generate a NEW key for the new parameters.',
+    UPSTREAM_ERROR: 'Transient upstream error during checkBooking or createOrder. Retry once after ~2s backoff with the SAME idempotency-key.',
+  },
+};
+
+/** `hotel-redaug pay-order` schema. Write op (W/Y) — settle a created order. */
+export const hotelPayOrderSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'pay-order',
+  description:
+    'Settle an existing AWAITING_PAYMENT order created by create-order. Two billing paths: monthly_settlement (omit --merchant-trans-id) deducts from the developer credit account then confirms with the supplier; Active_Payment (pass --merchant-trans-id) verifies the user EVO payment matches the order amount/currency exactly before confirming. On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id)' },
+    'merchant-trans-id': { type: 'string', required: false, description: 'EVO merchant transaction ID from the user offline payment. Pass to trigger the Active_Payment path; omit to use the developer default billing path (monthly_settlement)', constraints: '1-128 characters' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(order_id + attempt)) and reuse the SAME key when retrying the same payment',
+      constraints: '1-128 chars [A-Za-z0-9_-]',
+    },
+    watch: { type: 'bool', required: false, default: false, description: 'Poll automatically on PAYMENT_NOT_COMPLETED until PAID or timeout. Each iteration emits one NDJSON line' },
+    'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between poll attempts in --watch mode' },
+    'watch-timeout': { type: 'int', required: false, default: 300, description: 'Total seconds before giving up in --watch mode' },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Order reference.' },
+    settlement_path: { type: 'string', description: "Which billing path was used: 'monthly_settlement' or 'active_payment'." },
+    amount: { type: 'float', description: 'Settled amount in DECIMAL units.' },
+    currency: { type: 'string', description: 'ISO 4217 currency code of the settlement.' },
+    pay_status: { type: 'int', description: 'Upstream pay status (1 = paid). The order internal status is now PAID.' },
+    settled_at: { type: 'string', description: 'ISO 8601 settlement timestamp. On idempotent replay, the original first settled_at is returned unchanged.' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli hotel-redaug pay-order --order-id hho_01KWC63Z5CD6CKBM33Q7SC2ZDT --idempotency-key pay-h1n2',
+    output_summary: 'Monthly settlement: deducts from the credit account, confirms with the supplier. Returns {order_id, settlement_path:"monthly_settlement", amount, currency, pay_status:1, settled_at}. Order becomes PAID. For Active_Payment add --merchant-trans-id <evo_txn_id>.',
+  },
+  error_recovery: {
+    PAYMENT_NOT_COMPLETED: 'Active_Payment only: EVO has not yet confirmed the payment. Retry with the SAME idempotency-key and --merchant-trans-id after a delay, or use --watch to poll automatically until PAID.',
+    PAYMENT_NOT_FOUND: 'No EVO transaction for the given merchant_trans_id. Verify the ID with the user; do NOT retry blindly.',
+    PAYMENT_AMOUNT_MISMATCH: 'The EVO-confirmed amount/currency does not match the order. The user must pay the exact order amount in the exact currency. Do NOT retry with the same merchant_trans_id.',
+    PAYMENT_QUERY_FAILED: 'EVO gateway query failed (transport/timeout). Retry once after ~5s with the SAME idempotency-key.',
+    BILLING_MODE_MISMATCH: 'A monthly_settlement developer supplied --merchant-trans-id, or an Active_Payment developer omitted it. Remove or add --merchant-trans-id to match the developer billing_mode.',
+    PARAM_MERCHANT_TRANS_ID_REQUIRED: 'Active_Payment developer must supply --merchant-trans-id (the EVO transaction reference). Ask the user for it.',
+    INVALID_ORDER_STATE: 'The order is not in AWAITING_PAYMENT (it may already be PAID or CANCELLED). Check status via get; do NOT retry pay-order.',
+    ORDER_NOT_FOUND: 'No order for this --order-id. Verify it is the order_id returned by create-order. Do NOT retry.',
+    ACCOUNT_INSUFFICIENT_BALANCE: 'Settlement credit is insufficient (check via admin-cli accounts get). Direct the user to top up offline.',
+    ACCOUNT_NOT_FOUND: 'Developer has no settlement account. Direct the user to complete contract signing.',
+    ACCOUNT_SUSPENDED: 'The settlement account is suspended. Direct the user to contact support; do NOT retry.',
+    PAYORDER_FAILED: 'Upstream payOrder failed after a successful deduction; the deduction was reversed and the order stays AWAITING_PAYMENT. Retry with the SAME idempotency-key after a delay.',
+    PAYORDER_FAILED_AFTER_PAYMENT: 'EVO payment confirmed but upstream payOrder failed. The order is recoverable (the merchant_trans_id is preserved). Contact support for reconciliation; do NOT retry automatically.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key and retry.',
+    PARAM_IDEMPOTENCY_KEY_CONFLICT: 'Same idempotency-key used with different parameters. Use the original parameters, or generate a NEW key.',
   },
 };
 

@@ -1,6 +1,6 @@
 # merchant-cli — Merchant Fulfillment (`agenzo-merchant-cli`)
 
-`@agenzo/merchant-cli` — the merchant-fulfillment CLI: Agents use it to fulfill real-world commerce services on the Agenzo platform. Each fulfillment capability is exposed as a **noun**, and the set of capabilities grows over time — run `services list` to discover what is currently available. The capability available today is ride-hailing (`ride-elife`). **API Key** auth (`--api-key`; the key must have `merchant` scope — see [admin-cli](admin-cli.md) `keys create --scope`).
+`@agenzo/merchant-cli` — the merchant-fulfillment CLI: Agents use it to fulfill real-world commerce services on the Agenzo platform. Each fulfillment capability is exposed as a **noun**, and the set of capabilities grows over time — run `services list` to discover what is currently available. The capabilities available today are ride-hailing (`ride-elife`) and hotel booking (`hotel-redaug`). **API Key** auth (`--api-key`; the key must have `merchant` scope — see [admin-cli](admin-cli.md) `keys create --scope`).
 
 See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exit codes, idempotency).
 
@@ -17,6 +17,12 @@ API-Key auth (`--api-key`). `services` discovers the available capabilities; the
 | `ride-elife` | `get` | Read | Retrieve a ride order status by id (`--order-id` = the **ride_id**); `--watch` streams status as NDJSON. |
 | `ride-elife` | `cancel` | Write | Cancel a ride order (`--order-id` = the **ride_id**); may incur a cancellation fee. |
 | `ride-elife` | `list-orders` | Read | List previously placed ride orders. |
+| `hotel-redaug` | `create-order` | Write | Create a hotel order without charging (lock inventory). Returns `order_id`. |
+| `hotel-redaug` | `pay-order` | Write | Settle an existing hotel order (depends on `create-order`'s `order_id`). |
+| `hotel-redaug` | `quote` | Read | Real-time pricing for a hotel + room + dates. |
+| `hotel-redaug` | `get` | Read | Retrieve hotel order status; `--watch` streams as NDJSON. |
+| `hotel-redaug` | `cancel` | Write | Cancel a hotel order (policy-permitting). |
+| `hotel-redaug` | `search` | Read | Search hotels by destination / coordinates. |
 
 > New fulfillment capabilities are added as new nouns over time — run `services list` to see the current set.
 > For `ride-elife`, `get` / `cancel` take `--order-id` = the `ride_id` returned by `book`, NOT the `rio_...` order_id. This is a common mistake.
@@ -65,14 +71,14 @@ agenzo-merchant-cli ride-elife list-orders --api-key <key>
 | `--order-id` | For `get` / `cancel`: the **ride_id** from `book` (NOT the `rio_...` order_id). |
 | `--idempotency-key` | MUST be supplied by the caller for `book` / `cancel`; the CLI never auto-generates one. Prompts interactively if omitted (required under `--yes`). |
 
-## Billing modes (how a booking is paid)
+## Billing modes — ride-elife (how a ride booking is paid)
 
-A booking is paid according to the developer's `billing_mode` (set at [admin-cli](admin-cli.md) `developers create --billing-mode`):
+A ride booking is paid according to the developer's `billing_mode` (set at [admin-cli](admin-cli.md) `developers create --billing-mode`):
 
 - **`monthly_settlement`**: the fare is deducted from the developer's settlement account balance. `book` returns `payment_status: ON_ACCOUNT` and a `billing_entry_id`; do NOT pass `--payment-order-id`. The settlement account must be funded — check `agenzo-admin-cli accounts get --developer-id <dev>`. A `cancel` refunds the fare back to the balance.
 - **`pay_per_call`**: each booking references a separately-paid payment order via `--payment-order-id`.
 
-## Other notable flags (book)
+## Other notable flags (ride-elife book)
 
 Beyond the core ride fields, `book` also accepts: `--passenger-email`, `--luggage-count`, `--special-requests`, `--meet-and-greet` / `--meet-and-greet-price` / `--welcome-sign`, `--child-seat-count` / `--infant-seat-count` / `--toddler-seat-count`, and arrival/departure flight info (`--arrival-flight-no`, `--arrival-airline`, `--departure-flight-no`, `--departure-airline`). Run `agenzo-merchant-cli ride-elife book --help` for the full list.
 
@@ -94,6 +100,120 @@ The `add_service_unit_price` object is returned in the `quote` response. If it's
 
 `quote` accepts `--children-count`, `--infant-count`, and `--toddler-count` to inform eLife about the passenger breakdown. These affect the `add_service_unit_price` returned and may influence vehicle recommendations.
 
+## hotel-redaug
+
+Hotel booking — the booking flow is split into two independent, ordered steps:
+
+```
+quote → create-order → pay-order → get (poll until CONFIRMED)
+```
+
+`create-order` locks inventory and returns an `order_id`. `pay-order` settles the order and requires that `order_id`. There is no combined "book" verb.
+
+### create-order
+
+Creates a hotel order without charging any account. Calls upstream `checkBooking` + `createOrder` and returns the platform `order_id`. The order enters `AWAITING_PAYMENT` status.
+
+```bash
+agenzo-merchant-cli --yes hotel-redaug create-order \
+  --api-key <key> \
+  --product-token <token_from_quote> \
+  --total-amount 320.00 \
+  --currency CNY \
+  --price-items '[{"saleDate":"2026-07-04","salePrice":320.00,"breakfastNum":0}]' \
+  --check-in 2026-07-04 \
+  --check-out 2026-07-05 \
+  --adults 2 --children 0 --nationality CN \
+  --guest-name "张三" \
+  --contact-name "张三" --contact-phone "13800000000" --contact-country-code 86 \
+  --idempotency-key idem_hotel_create_001
+```
+
+On success (exit 0), stdout prints:
+
+```
+Order ID       ord_abc123
+FC Order Code  FC1750000000
+Total amount   320.00 CNY
+Order status   AWAITING_PAYMENT
+```
+
+### pay-order
+
+Settles an existing order created by `create-order`. Requires `--order-id` (the `order_id` returned by `create-order`).
+
+Two billing paths, determined by the developer's `billing_mode`:
+
+| Path | Flag | Behavior |
+|------|------|----------|
+| **Monthly settlement** | omit `--merchant-trans-id` | Debits settlement account balance → calls upstream `payOrder`. |
+| **Active Payment** | `--merchant-trans-id <id>` | Verifies payment via EVO → calls upstream `payOrder`. |
+
+```bash
+# Monthly settlement (default path — no --merchant-trans-id)
+agenzo-merchant-cli --yes hotel-redaug pay-order \
+  --api-key <key> \
+  --order-id ord_abc123 \
+  --idempotency-key idem_hotel_pay_001
+
+# Active Payment path (user paid via EVO, pass their merchant_trans_id)
+agenzo-merchant-cli --yes hotel-redaug pay-order \
+  --api-key <key> \
+  --order-id ord_abc123 \
+  --merchant-trans-id EVO_TXN_98765 \
+  --idempotency-key idem_hotel_pay_001
+
+# Active Payment with --watch (polls until PAID or timeout)
+agenzo-merchant-cli --yes hotel-redaug pay-order \
+  --api-key <key> \
+  --order-id ord_abc123 \
+  --merchant-trans-id EVO_TXN_98765 \
+  --idempotency-key idem_hotel_pay_001 \
+  --watch --watch-interval 5 --watch-timeout 300
+```
+
+On success (exit 0), prints settlement result (order_status = PAID).
+
+### Active Payment `merchant_trans_id` flow
+
+The `merchant_trans_id` originates from an **offline** EVO payment made by the end-user:
+
+1. Developer creates a hotel order via `create-order` → receives `order_id`, `total_amount`, `currency`.
+2. End-user pays the exact `total_amount` + `currency` through EVO using the shared merchant parameters (obtained through offline onboarding with EVO — NOT returned by `create-order`).
+3. EVO produces a `merchant_trans_id` for the successful transaction.
+4. Developer (or Agent) calls `pay-order --order-id <id> --merchant-trans-id <evo_txn_id>`.
+5. Platform queries EVO once per call:
+   - Payment confirmed + amount/currency match → upstream `payOrder` → order becomes `PAID`.
+   - Payment not yet confirmed → `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to retry automatically.
+   - Amount/currency mismatch → `PAYMENT_AMOUNT_MISMATCH` (exit 1).
+   - Transaction not found → `PAYMENT_NOT_FOUND` (exit 1).
+
+### Parameters to ask for (hotel-redaug)
+
+| Parameter | Ask rule |
+|-----------|----------|
+| `--api-key` | Reuse the `merchant`-scoped key (do not ask again if already known). |
+| `--product-token` | From `quote` response — the chosen rate's `product_token`. |
+| `--total-amount` / `--currency` | From `quote` response — the chosen rate's price. |
+| `--price-items` | From `quote` — per-night price breakdown JSON array. |
+| `--check-in` / `--check-out` | MUST ask if not inferred from context. |
+| `--guest-name` | MUST ask (primary guest). |
+| `--contact-name` / `--contact-phone` | MUST ask (booking contact). |
+| `--order-id` | For `pay-order` / `get` / `cancel`: use `order_id` from `create-order`. |
+| `--merchant-trans-id` | For `pay-order` Active Payment: the EVO transaction ID. MUST ask if billing mode is Active Payment. |
+| `--idempotency-key` | MUST be supplied for `create-order` / `pay-order` / `cancel`. |
+
+### hotel-redaug billing modes
+
+| Mode | `--merchant-trans-id` | Behavior |
+|------|----------------------|----------|
+| `monthly_settlement` | omit | Balance deducted → upstream `payOrder`. |
+| Active Payment (non-monthly) | required | EVO verification → upstream `payOrder`. If not yet paid → `PAYMENT_NOT_COMPLETED`. |
+
+Cross-guard errors:
+- Passing `--merchant-trans-id` for a monthly-settlement developer → `BILLING_MODE_MISMATCH` (exit 1).
+- Omitting `--merchant-trans-id` for an Active Payment developer → `PARAM_MERCHANT_TRANS_ID_REQUIRED` (exit 1).
+
 ## Merchant-specific errors
 
 | Error | Cause | Fix |
@@ -105,3 +225,11 @@ The `add_service_unit_price` object is returned in the `quote` response. If it's
 | `BOOKING_FAILED` | The provider rejected the booking | Re-quote and retry; verify passenger details |
 | `CANCELLATION_NOT_ALLOWED` | The ride is past the cancellable state | The ride can no longer be cancelled |
 | `PARAM_IDEMPOTENCY_KEY_REQUIRED` | `--idempotency-key` missing for a write under `--yes` | Supply a unique `--idempotency-key` |
+| `INVALID_ORDER_STATE` | Hotel order is not in `AWAITING_PAYMENT` state | Check order status with `get`; only `AWAITING_PAYMENT` orders can be paid |
+| `PARAM_MERCHANT_TRANS_ID_REQUIRED` | Active Payment developer did not pass `--merchant-trans-id` | Supply `--merchant-trans-id` with the EVO transaction ID |
+| `BILLING_MODE_MISMATCH` | Passed `--merchant-trans-id` for a monthly-settlement developer (or vice versa) | Match the flag to the developer's billing mode |
+| `PAYMENT_NOT_COMPLETED` | EVO payment not yet confirmed | Retry later or use `--watch` to poll automatically |
+| `PAYMENT_NOT_FOUND` | No EVO transaction found for the given `merchant_trans_id` | Verify the `merchant_trans_id` is correct |
+| `PAYMENT_AMOUNT_MISMATCH` | EVO payment amount/currency does not match the order | User must pay the exact `total_amount` in the exact `currency` |
+| `NO_AVAILABILITY` | Hotel room is no longer available | Re-run `quote` and try a different rate |
+| `PRICE_CHANGED` | Price has changed since quote | Re-run `quote` for updated pricing |
