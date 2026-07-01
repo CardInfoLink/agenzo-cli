@@ -19,13 +19,13 @@ import { CliError } from '@agenzo/cli-core';
 import type { ApiClient } from '@agenzo/cli-core';
 
 // Direct pure-function imports for Property 3
-import { parsePriceItems } from '../src/hotel-redaug/book.js';
+import { parsePriceItems } from '../src/hotel-redaug/create-order.js';
 import { parseCheckoutRooms } from '../src/hotel-redaug/checkout.js';
 
 // Command registrars for Properties 1, 2, 5, 11
 import { registerHotelSearchCommand } from '../src/hotel-redaug/search.js';
 import { registerHotelQuoteCommand } from '../src/hotel-redaug/quote.js';
-import { registerHotelBookCommand } from '../src/hotel-redaug/book.js';
+import { registerHotelCreateOrderCommand } from '../src/hotel-redaug/create-order.js';
 import { registerHotelGetCommand } from '../src/hotel-redaug/get.js';
 import { registerHotelCancelCommand } from '../src/hotel-redaug/cancel.js';
 import { registerHotelCheckoutCommand } from '../src/hotel-redaug/checkout.js';
@@ -63,7 +63,7 @@ function hotelProgram(apiClient: Mock) {
   const deps = { apiClient: apiClient as unknown as ApiClient };
   registerHotelSearchCommand(hotel, deps);
   registerHotelQuoteCommand(hotel, deps);
-  registerHotelBookCommand(hotel, deps);
+  registerHotelCreateOrderCommand(hotel, deps);
   registerHotelGetCommand(hotel, deps);
   registerHotelCancelCommand(hotel, deps);
   registerHotelCheckoutCommand(hotel, deps);
@@ -496,7 +496,7 @@ describe('PBT — Property 5: Required-flag validation halts before any request'
       baseArgs: ['--hotel-id', 'h1', '--check-in', '2026-06-01', '--check-out', '2026-06-03'],
     },
     {
-      verb: 'book',
+      verb: 'create-order',
       requiredFlags: ['--product-token', '--total-amount', '--currency', '--price-items', '--check-in', '--check-out', '--guest-name', '--contact-name', '--contact-phone'],
       baseArgs: [
         '--product-token', 'tok1', '--total-amount', '100', '--currency', 'USD',
@@ -800,18 +800,20 @@ describe('PBT — Property 4: Request assembly is correct and uniform across ver
     );
   });
 
-  it('book → POST /hotel/book with Idempotency-Key header NOT in body', async () => {
+  it('create-order → POST /hotel/create-order with Idempotency-Key header NOT in body', async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/),
+        // Exclude keys starting with '-' which commander would interpret as an
+        // option flag when passed via argv.
+        fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/).filter((s) => !s.startsWith('-')),
         async (idempKey) => {
-          const api = mockApiClient({ '/hotel/book': { order_id: 'o1', fc_order_code: 'fc1', order_status: 'PROCESSING', rooms: [], payment_status: 'ON_ACCOUNT', provider: 'redaug' } });
+          const api = mockApiClient({ '/hotel/create-order': { order_id: 'o1', fc_order_code: 'fc1', order_status: 'AWAITING_PAYMENT', total_amount: 500, currency: 'CNY', rooms: [] } });
           const program = hotelProgram(api);
           captureStdout();
           captureStderr();
 
           await program.parseAsync([
-            ...BASE, 'book',
+            ...BASE, 'create-order',
             '--api-key', 'bkey',
             '--product-token', 'tok1',
             '--total-amount', '500',
@@ -831,7 +833,7 @@ describe('PBT — Property 4: Request assembly is correct and uniform across ver
           expect(api.get).not.toHaveBeenCalled();
 
           const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, unknown>, Record<string, string>];
-          expect(path).toBe('/hotel/book');
+          expect(path).toBe('/hotel/create-order');
           expect(auth).toEqual({ type: 'api-key', key: 'bkey' });
 
           // Idempotency-Key in header, NOT in body
@@ -963,12 +965,12 @@ describe('PBT — Property 6: Amounts are forwarded and rendered as decimal unit
     );
   });
 
-  it('book body total_amount equals --total-amount exactly (no minor-unit conversion)', async () => {
+  it('create-order body total_amount equals --total-amount exactly (no minor-unit conversion)', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.double({ min: 0.01, max: 99999.99, noNaN: true, noDefaultInfinity: true }),
         async (amount) => {
-          const api = mockApiClient({ '/hotel/book': { order_id: 'o1', fc_order_code: 'fc1', order_status: 'PROCESSING', rooms: [], payment_status: 'ON_ACCOUNT', provider: 'redaug' } });
+          const api = mockApiClient({ '/hotel/create-order': { order_id: 'o1', fc_order_code: 'fc1', order_status: 'AWAITING_PAYMENT', total_amount: amount, currency: 'CNY', rooms: [] } });
           const program = hotelProgram(api);
           captureStdout();
           captureStderr();
@@ -977,7 +979,7 @@ describe('PBT — Property 6: Amounts are forwarded and rendered as decimal unit
           const priceItems = JSON.stringify([{ sale_date: '2026-07-01', sale_price: salePrice, breakfast_num: 0 }]);
 
           await program.parseAsync([
-            ...BASE, 'book',
+            ...BASE, 'create-order',
             '--api-key', 'k',
             '--product-token', 'tok1',
             '--total-amount', String(amount),
@@ -1007,59 +1009,11 @@ describe('PBT — Property 6: Amounts are forwarded and rendered as decimal unit
 });
 
 // ============================================================
-// Feature: merchant-cli-hotel-redaug, Property 7: payment-order-id rejected before any request
-// Validates: Requirements 4.6
 // ============================================================
-
-describe('PBT — Property 7: payment-order-id is rejected before any request', () => {
-  /**
-   * For any non-empty --payment-order-id string passed to book, the command
-   * throws BILLING_MODE_MISMATCH and the MockApiClient records 0 calls.
-   */
-
-  it('any non-empty --payment-order-id → BILLING_MODE_MISMATCH + 0 API calls', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.string({ minLength: 1, maxLength: 100 }),
-        async (paymentOrderId) => {
-          const api = mockApiClient();
-          const program = hotelProgram(api);
-          captureStdout();
-          captureStderr();
-
-          let caught: unknown;
-          try {
-            await program.parseAsync([
-              ...BASE, 'book',
-              '--api-key', 'k',
-              '--product-token', 'tok1',
-              '--total-amount', '100',
-              '--currency', 'CNY',
-              '--price-items', '[{"sale_date":"2026-07-01","sale_price":100,"breakfast_num":0}]',
-              '--check-in', '2026-07-01',
-              '--check-out', '2026-07-02',
-              '--guest-name', 'Test',
-              '--contact-name', 'Test',
-              '--contact-phone', '1234567890',
-              '--payment-order-id', paymentOrderId,
-              '--idempotency-key', 'key1',
-              '--yes',
-              '--format', 'json',
-            ]);
-          } catch (e) {
-            caught = e;
-          }
-
-          expect(caught).toBeInstanceOf(CliError);
-          expect((caught as CliError).code).toBe('BILLING_MODE_MISMATCH');
-          expect(api.post).not.toHaveBeenCalled();
-          expect(api.get).not.toHaveBeenCalled();
-        },
-      ),
-      { numRuns: 100 },
-    );
-  });
-});
+// Feature: merchant-cli-hotel-redaug, Property 7: payment-order-id guard removed (no longer applicable)
+// The --payment-order-id flag existed only on the old book verb which has been
+// replaced by create-order (no payment-order-id flag). Property 7 is obsolete.
+// ============================================================
 
 // ============================================================
 // Feature: merchant-cli-hotel-redaug, Property 8: Idempotency-key resolution safe + never fabricated
@@ -1080,13 +1034,13 @@ describe('PBT — Property 8: Idempotency-key resolution is safe and never fabri
         // commander would interpret as an option flag when passed via argv.
         fc.stringMatching(/^[A-Za-z0-9_-]{1,128}$/).filter((s) => !s.startsWith('-')),
         async (validKey) => {
-          const api = mockApiClient({ '/hotel/book': { order_id: 'o1', fc_order_code: 'fc1', order_status: 'PROCESSING', rooms: [], payment_status: 'ON_ACCOUNT', provider: 'redaug' } });
+          const api = mockApiClient({ '/hotel/create-order': { order_id: 'o1', fc_order_code: 'fc1', order_status: 'AWAITING_PAYMENT', total_amount: 100, currency: 'CNY', rooms: [] } });
           const program = hotelProgram(api);
           captureStdout();
           captureStderr();
 
           await program.parseAsync([
-            ...BASE, 'book',
+            ...BASE, 'create-order',
             '--api-key', 'k',
             '--product-token', 'tok1',
             '--total-amount', '100',
@@ -1138,7 +1092,7 @@ describe('PBT — Property 8: Idempotency-key resolution is safe and never fabri
         let caught: unknown;
         try {
           await program.parseAsync([
-            ...BASE, 'book',
+            ...BASE, 'create-order',
             '--api-key', 'k',
             '--product-token', 'tok1',
             '--total-amount', '100',
@@ -1167,7 +1121,7 @@ describe('PBT — Property 8: Idempotency-key resolution is safe and never fabri
   });
 
   it('--yes without --idempotency-key → PARAM_IDEMPOTENCY_KEY_REQUIRED + 0 API calls', async () => {
-    // This tests with arbitrary book parameters (valid ones) but missing the key
+    // This tests with arbitrary create-order parameters (valid ones) but missing the key
     await fc.assert(
       fc.asyncProperty(
         fc.double({ min: 1, max: 9999, noNaN: true, noDefaultInfinity: true }),
@@ -1180,7 +1134,7 @@ describe('PBT — Property 8: Idempotency-key resolution is safe and never fabri
           let caught: unknown;
           try {
             await program.parseAsync([
-              ...BASE, 'book',
+              ...BASE, 'create-order',
               '--api-key', 'k',
               '--product-token', 'tok1',
               '--total-amount', String(amount),

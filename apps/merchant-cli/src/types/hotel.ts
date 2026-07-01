@@ -81,7 +81,7 @@ export interface QuoteHotelResponse {
   rates: HotelRate[];
 }
 
-// ---- book ----  (order_mapping.format_book)
+// ---- book / create-order ----  (order_mapping.format_book / format_create_order)
 
 export interface BookedRoom {
   room_index: string;
@@ -101,6 +101,31 @@ export interface BookHotelResponse {
   /** "redaug". */
   provider: string;
   billing_entry_id?: string;
+}
+
+// ---- create-order ----  (create-then-pay step 1: lock inventory, no charge)
+
+export interface CreateHotelOrderResponse {
+  order_id: string;
+  fc_order_code: string;
+  order_status: string;
+  total_amount: number;
+  currency: string;
+  rooms?: BookedRoom[];
+}
+
+// ---- pay-order ----  (create-then-pay step 2: settle the order)
+
+export interface PayHotelOrderResponse {
+  order_id: string;
+  order_status: string;
+  settlement_path?: string;
+  pay_status?: string;
+  total_amount?: number;
+  currency?: string;
+  billing_entry_id?: string;
+  merchant_trans_id?: string;
+  [key: string]: unknown;
 }
 
 // ---- get ----  (order_mapping.format_provider_status / format_local_status)

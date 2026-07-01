@@ -26,7 +26,8 @@ import { registerServiceGetCommand } from './services/get.js';
 // hotel-redaug commands (injection-style register, D6)
 import { registerHotelSearchCommand } from './hotel-redaug/search.js';
 import { registerHotelQuoteCommand } from './hotel-redaug/quote.js';
-import { registerHotelBookCommand } from './hotel-redaug/book.js';
+import { registerHotelCreateOrderCommand } from './hotel-redaug/create-order.js';
+import { registerHotelPayOrderCommand } from './hotel-redaug/pay-order.js';
 import { registerHotelGetCommand } from './hotel-redaug/get.js';
 import { registerHotelCancelCommand } from './hotel-redaug/cancel.js';
 import { registerHotelCheckoutCommand } from './hotel-redaug/checkout.js';
@@ -111,9 +112,9 @@ async function main() {
   registerServicesListCommand(servicesCmd, { discoveryClient, program });
   registerServiceGetCommand(servicesCmd, { discoveryClient, program });
 
-  // hotel-redaug command group (Redaug hotel booking) — 12 verbs
+  // hotel-redaug command group (Redaug hotel booking) — 13 verbs
   const hotelCmd = program.command('hotel-redaug').description(
-    `Hotel booking (Redaug) — international hotel search, quote, book, cancel, and check-out.
+    `Hotel booking (Redaug) — international hotel search, quote, create-order, pay-order, cancel, and check-out.
 
 Workflow (typical order):
   1. find-destination  Resolve a place name → coordinates (or destination_id via list-cities)
@@ -121,24 +122,27 @@ Workflow (typical order):
   3. search            Search hotels by coordinates OR destination_id, with date/guest/filter params
   4. hotel-detail      (optional) View hotel info: address, facilities, images
   5. quote             Get real-time room rates for a hotel + dates → product_token + price_items
-  6. book              Book using product_token from quote (--yes for automation, needs idempotency-key)
-  7. get               Poll order status until CONFIRMED (or use --watch for NDJSON stream)
-  8. cancel            Cancel an order (whole-order, within policy)
-  9. checkout          Apply for partial check-out / out-of-policy cancellation (async)
- 10. get-checkout      Poll checkout application status
- 11. list-orders       List developer's hotel orders
+  6. create-order      Create order using product_token from quote (lock inventory, no charge)
+  7. pay-order         Settle the order (monthly_settlement or Active_Payment via --merchant-trans-id)
+  8. get               Poll order status until CONFIRMED (or use --watch for NDJSON stream)
+  9. cancel            Cancel an order (whole-order, within policy)
+ 10. checkout          Apply for partial check-out / out-of-policy cancellation (async)
+ 11. get-checkout      Poll checkout application status
+ 12. list-orders       List developer's hotel orders
 
 Key notes:
   • search has two location branches: --destination-id OR --lat/--lng (exactly one required)
-  • book requires monthly_settlement billing mode; currency must match the settlement account
-  • book is async: order_status starts as PROCESSING → poll with "get" until CONFIRMED
+  • create-order locks inventory without charging; order enters AWAITING_PAYMENT
+  • pay-order settles the order: omit --merchant-trans-id for monthly_settlement,
+    supply it for Active_Payment (EVO); use --watch to poll until PAID
   • All amounts are DECIMAL (e.g. 10.00 = ten yuan), never minor units (cents)
-  • product_token from quote is opaque — pass it unchanged to book
-  • price_items from quote must be copied verbatim as --price-items JSON array to book`,
+  • product_token from quote is opaque — pass it unchanged to create-order
+  • price_items from quote must be copied verbatim as --price-items JSON array to create-order`,
   );
   registerHotelSearchCommand(hotelCmd, deps);
   registerHotelQuoteCommand(hotelCmd, deps);
-  registerHotelBookCommand(hotelCmd, deps);
+  registerHotelCreateOrderCommand(hotelCmd, deps);
+  registerHotelPayOrderCommand(hotelCmd, deps);
   registerHotelGetCommand(hotelCmd, deps);
   registerHotelCancelCommand(hotelCmd, deps);
   registerHotelCheckoutCommand(hotelCmd, deps);
