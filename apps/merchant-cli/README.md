@@ -34,7 +34,7 @@ More fulfillment capabilities are added as new nouns over time; `services list` 
 | `hotel-redaug` | `find-destination` | Read | `POST /hotel/find-destination` | Resolve free-text to destinations (destination_id + coordinates) |
 | `hotel-redaug` | `hotel-filters` | Read | `POST /hotel/filters` | Get available filter options for a location (codes → search flags) |
 | `hotel-redaug` | `list-cities` | Read | `POST /hotel/cities` | List cities for a country (destination_id + coordinates) |
-| `hotel-redaug` | `hotel-detail` | Read | `POST /hotel/detail` | Hotel detail with facilities and images |
+| `hotel-redaug` | `hotel-detail` | Read | `POST /hotel/detail` | Hotel detail with facilities/images AND `rooms[]` (area/floor/beds/photos) — call before quote |
 | `hotel-redaug` | `quote` | Read | `POST /hotel/quote` | Real-time rooms/rates for one hotel (`product_token` + `price_items`) |
 | `hotel-redaug` | `create-order` | Write/Y | `POST /hotel/create-order` | Create a hotel order without charging (locks rate + returns `order_id` + payable amount) |
 | `hotel-redaug` | `pay-order` | Write/Y | `POST /hotel/{order_id}/pay` | Pay for a created order; `--merchant-trans-id` triggers Active_Payment path, omit for monthly_settlement |

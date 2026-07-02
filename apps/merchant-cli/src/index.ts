@@ -120,8 +120,12 @@ Workflow (typical order):
   1. find-destination  Resolve a place name → coordinates (or destination_id via list-cities)
   2. hotel-filters     (optional) Get filter options for a location (star/brand/facility codes)
   3. search            Search hotels by coordinates OR destination_id, with date/guest/filter params
-  4. hotel-detail      (optional) View hotel info: address, facilities, images
-  5. quote             Get real-time room rates for a hotel + dates → product_token + price_items
+  4. hotel-detail      View hotel + rooms[] (area/floor/beds/photos). Call it for the chosen/
+                       shortlisted hotel BEFORE quote — quote's room_name alone has no detail,
+                       and the user should see real room info before picking a rate at step 5.
+  5. quote             Get real-time room rates for a hotel + dates → product_token + price_items.
+                       Pair each rate with hotel-detail's rooms[] (match by room_name) before
+                       presenting options to the user.
   6. create-order      Create order using product_token from quote (lock inventory, no charge)
   7. pay-order         Settle the order (monthly_settlement or Active_Payment via --merchant-trans-id)
   8. get               Poll order status until CONFIRMED (or use --watch for NDJSON stream)
@@ -132,6 +136,8 @@ Workflow (typical order):
 
 Key notes:
   • search has two location branches: --destination-id OR --lat/--lng (exactly one required)
+  • hotel-detail's rooms[] is the actual room info (area/beds/photos) — quote's room_name is
+    just a bare label; show both together before asking the user to pick a rate
   • create-order locks inventory without charging; order enters AWAITING_PAYMENT
   • pay-order settles the order: omit --merchant-trans-id for monthly_settlement,
     supply it for Active_Payment (EVO); use --watch to poll until PAID

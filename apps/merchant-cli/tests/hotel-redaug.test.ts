@@ -97,6 +97,15 @@ const LIST_CITIES_RESP = {
 
 const HOTEL_DETAIL_RESP = {
   hotel_id: 'h1', hotel_name: 'Grand Hotel', hotel_eng_name: 'Grand Hotel', star: 5, address: '1 Main St', intro: 'A fine hotel', telephone: '123456', country_name: 'China', province_name: 'Shanghai', city_name: 'Shanghai', district_name: 'Pudong', business_name: 'Lujiazui', lat: 31.23, lng: 121.47, check_in_time: '14:00', check_out_time: '12:00', room_num: 200, facilities: [{ name: 'WiFi', type: 'hotel' }], images: [{ url: 'http://img.jpg', is_main: true }],
+  rooms: [
+    {
+      room_id: 1, room_name: 'Deluxe King', area_sqm: '35', floor: '10-15',
+      max_person: 2, max_adults: 2, max_child: 0, allow_smoking: false,
+      beds: [{ name: 'King Bed', width: '180', num: '1' }],
+      living_room_beds: [],
+      images: [{ url: 'http://img/room1.jpg', is_main: true, type: 1 }],
+    },
+  ],
 };
 
 // ============================================================
@@ -678,6 +687,23 @@ describe('hotel-redaug hotel-detail', () => {
     expect(auth).toEqual({ type: 'api-key', key: 'k' });
     expect(body.hotel_id).toBe('h1');
     expect(body.with_images).toBe(true);
+  });
+
+  it('--format table renders per-room static info (area/floor/beds), not just a one-line room_name', async () => {
+    const api = mockApiClient({ '/hotel/detail': HOTEL_DETAIL_RESP });
+    const program = hotelProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1', '--format', 'table',
+    ]);
+
+    const text = out.text();
+    expect(text).toContain('Deluxe King');
+    expect(text).toContain('35'); // area_sqm
+    expect(text).toContain('10-15'); // floor
+    expect(text).toContain('King Bed');
   });
 
   it('missing --hotel-id throws PARAM_INVALID', async () => {
