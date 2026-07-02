@@ -65,13 +65,15 @@ describe('hotel-redaug schema: pay-order verb (Req 7.7)', () => {
     expect(verbs).toHaveProperty('pay-order');
   });
 
-  it('pay-order has flags including --order-id and --merchant-trans-id', () => {
+  it('pay-order has flags including --order-id and --idempotency-key, and no merchant-transaction-id flag', () => {
     const verb = verbs['pay-order'] as Record<string, unknown>;
     expect(verb).toHaveProperty('flags');
     const flags = verb.flags as Record<string, unknown>;
     expect(flags).toHaveProperty('order-id');
-    expect(flags).toHaveProperty('merchant-trans-id');
     expect(flags).toHaveProperty('idempotency-key');
+    // The settlement path is chosen server-side by billing_mode — there is no
+    // caller-supplied merchant transaction id.
+    expect(flags).not.toHaveProperty('merchant-trans-id');
   });
 
   it('pay-order has response', () => {
@@ -168,7 +170,7 @@ describe('hotel-redaug schema: workflow describes create-then-pay (Req 7.7, 10.1
     const prereqs = schema.workflow.prerequisites as Array<{ when: string; before_verb: string }>;
     expect(prereqs.length).toBeGreaterThanOrEqual(2);
     const monthlyPrereq = prereqs.find((p) => p.when.includes('monthly_settlement'));
-    const activePrereq = prereqs.find((p) => p.when.includes('Active_Payment'));
+    const activePrereq = prereqs.find((p) => p.when.includes('pay_per_call'));
     expect(monthlyPrereq).toBeDefined();
     expect(activePrereq).toBeDefined();
     expect(monthlyPrereq!.before_verb).toBe('pay-order');
@@ -182,10 +184,10 @@ describe('hotel-redaug schema: description and selection_hints (Req 10.1)', () =
     expect(summary.toLowerCase()).toContain('create-then-pay');
   });
 
-  it('summary mentions both billing paths', () => {
+  it('summary mentions both billing modes', () => {
     const summary = schema.summary as string;
-    expect(summary.toLowerCase()).toContain('monthly settlement');
-    expect(summary.toLowerCase()).toContain('active payment');
+    expect(summary).toContain('monthly_settlement');
+    expect(summary).toContain('pay_per_call');
   });
 
   it('selection_hints.key_features describes two-step booking', () => {
@@ -194,11 +196,13 @@ describe('hotel-redaug schema: description and selection_hints (Req 10.1)', () =
     expect(twoStepFeature).toBeDefined();
   });
 
-  it('conventions.billing_paths documents both settlement paths', () => {
+  it('conventions.billing_paths documents both settlement paths and the order_id binding', () => {
     expect(schema.conventions).toHaveProperty('billing_paths');
     const billingPaths = schema.conventions.billing_paths as string;
     expect(billingPaths).toContain('monthly_settlement');
-    expect(billingPaths).toContain('Active_Payment');
-    expect(billingPaths).toContain('merchant-trans-id');
+    expect(billingPaths).toContain('pay_per_call');
+    // Settlement is chosen server-side; there is no merchant-transaction-id flag.
+    expect(billingPaths).toContain('no merchant-transaction-id flag');
+    expect(billingPaths).toContain('order_id');
   });
 });

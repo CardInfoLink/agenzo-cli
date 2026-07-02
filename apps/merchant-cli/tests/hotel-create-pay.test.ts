@@ -3,8 +3,9 @@
  *
  * Task 15.1 — covers:
  *   - create-order success → exit 0 + order_id in stdout (Req 9.1)
- *   - pay-order default path (no merchant-trans-id) → success (Req 9.2, 9.4)
- *   - pay-order --merchant-trans-id → active payment path (Req 9.3)
+ *   - pay-order monthly_settlement path → success (Req 9.2, 9.4)
+ *   - pay-order active_payment path (server-decided by billing_mode, same
+ *     request shape — no merchant-transaction-id flag) → success (Req 9.3)
  *   - PAYMENT_NOT_COMPLETED → exit 1 + error in stderr (Req 9.6)
  *   - --watch mode polling until PAID / timeout (Req 9.5)
  *
@@ -199,11 +200,12 @@ describe('hotel-redaug pay-order (default path)', () => {
 });
 
 // ============================================================
-// pay-order — active payment path (with --merchant-trans-id)
+// pay-order — active payment path (billing_mode decides server-side; the CLI
+// request is identical to the monthly_settlement path — only --order-id)
 // ============================================================
 
 describe('hotel-redaug pay-order (active payment path)', () => {
-  it('--merchant-trans-id → active payment path, merchant_trans_id in body (Req 9.3)', async () => {
+  it('order with pay_per_call billing_mode → active payment path in response, no extra flags sent (Req 9.3)', async () => {
     const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_ACTIVE_RESP });
     const program = hotelProgram(api);
     const out = captureStdout();
@@ -212,7 +214,6 @@ describe('hotel-redaug pay-order (active payment path)', () => {
     await program.parseAsync([
       ...BASE, 'pay-order', '--api-key', 'k',
       '--order-id', 'ord_new1',
-      '--merchant-trans-id', 'evo_tx_123',
       '--idempotency-key', 'pay-2',
       '--yes', '--format', 'json',
     ]);
@@ -221,7 +222,8 @@ describe('hotel-redaug pay-order (active payment path)', () => {
     const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, any>, Record<string, string>];
     expect(path).toBe('/hotel/ord_new1/pay');
     expect(auth).toEqual({ type: 'api-key', key: 'k' });
-    expect(body.merchant_trans_id).toBe('evo_tx_123');
+    // pay-order sends no body params — the server decides the path from billing_mode.
+    expect(body).toEqual({});
     expect(headers).toEqual({ 'Idempotency-Key': 'pay-2' });
 
     const payload = parseJsonOutput(out.text()) as Record<string, any>;
@@ -255,7 +257,6 @@ describe('hotel-redaug pay-order (PAYMENT_NOT_COMPLETED)', () => {
       program.parseAsync([
         ...BASE, 'pay-order', '--api-key', 'k',
         '--order-id', 'ord_new1',
-        '--merchant-trans-id', 'evo_tx_456',
         '--idempotency-key', 'pay-3',
         '--yes', '--format', 'json',
       ]),
@@ -298,7 +299,6 @@ describe('hotel-redaug pay-order --watch mode', () => {
     const parsePromise = program.parseAsync([
       ...BASE, 'pay-order', '--api-key', 'k',
       '--order-id', 'ord_new1',
-      '--merchant-trans-id', 'evo_tx_789',
       '--idempotency-key', 'pay-watch-1',
       '--watch',
       '--watch-interval', '1',
@@ -382,7 +382,6 @@ describe('hotel-redaug pay-order --watch mode', () => {
     await program.parseAsync([
       ...BASE, 'pay-order', '--api-key', 'k',
       '--order-id', 'ord_new1',
-      '--merchant-trans-id', 'evo_tx_timeout',
       '--idempotency-key', 'pay-watch-3',
       '--watch',
       '--watch-interval', '999',

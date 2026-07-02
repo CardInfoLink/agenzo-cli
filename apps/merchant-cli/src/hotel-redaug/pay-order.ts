@@ -31,6 +31,7 @@ export interface PayHotelOrderResponse {
   total_amount?: number;
   currency?: string;
   billing_entry_id?: string;
+  /** For the active_payment settlement path, this echoes the order_id (the EVO merchantTransID). */
   merchant_trans_id?: string;
   [key: string]: unknown;
 }
@@ -83,22 +84,20 @@ function isPaymentTerminal(record: unknown): boolean {
 
 /**
  * `hotel-redaug pay-order` — settle an existing hotel order created via
- * `create-order`. Calls `POST /hotel/{order_id}/pay` with `Idempotency-Key`
- * header and optional `PayHotelOrderRequest` body.
+ * `create-order`. Calls `POST /hotel/{order_id}/pay` with an `Idempotency-Key`
+ * header and an empty body.
  *
- * - `--order-id` (required): the order to pay.
- * - `--merchant-trans-id` (optional): normally OMITTED. The settlement path is
- *   decided server-side by billing_mode, not by this flag. For Active_Payment
- *   (现结) the EVO merchantTransID is the order_id (the user pays via EVO under
- *   the order_id), so the platform derives it; if supplied it must equal the
- *   order_id, else MERCHANT_TRANS_ID_INVALID.
+ * - `--order-id` (required): the order to pay. This is the ONLY identifier the
+ *   command needs — the settlement path is decided server-side by the order's
+ *   billing_mode. For the pay_per_call mode the EVO merchantTransID IS the
+ *   order_id (the user pays via EVO under the order_id), so the platform
+ *   verifies that payment itself; there is no merchant-transaction-id flag.
  * - `--idempotency-key` (required): forwarded as header.
  * - `--watch` / `--watch-interval` / `--watch-timeout`: polling mode that
  *   retries on PAYMENT_NOT_COMPLETED until PAID or timeout.
  *
  * This is the step that actually moves money, so the non-`--yes` path MUST
- * confirm (naming the billing path — monthly settlement vs. Active Payment)
- * before the write; `--yes` skips it. A declined confirm maps to
+ * confirm before the write; `--yes` skips it. A declined confirm maps to
  * `CLIENT_ABORTED` (exit 5). Applies to both the single-shot and `--watch`
  * paths (the confirm happens once, before polling begins).
  *
@@ -109,10 +108,9 @@ function isPaymentTerminal(record: unknown): boolean {
 export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('pay-order')
-    .description('Settle an existing hotel order (path decided by billing_mode: monthly_settlement or Active_Payment/现结)')
+    .description('Settle an existing hotel order (path decided by billing_mode: monthly_settlement or pay_per_call)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--order-id <id>', 'Order ID to pay (from create-order response)')
-    .option('--merchant-trans-id <id>', 'Optional; if supplied MUST equal --order-id. Normally omit — for Active_Payment the platform verifies the EVO payment made under the order_id')
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -147,11 +145,6 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
       throw new CliError('PARAM_INVALID', 'Missing required --order-id.');
     }
 
-    // Optional: --merchant-trans-id. Normally omitted — for Active_Payment the
-    // platform derives the EVO merchantTransID from the order_id (the user pays
-    // via EVO under the order_id). If supplied it must equal the order_id.
-    const merchantTransId = opts.merchantTransId as string | undefined;
-
     // Idempotency key resolution
     const idempotencyKey = await resolveIdempotencyKey(opts.idempotencyKey as string | undefined, {
       yes: isYes,
@@ -163,23 +156,18 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     const watchInterval = resolveSeconds(opts.watchInterval as string, DEFAULT_PAY_WATCH_INTERVAL_SECONDS);
     const watchTimeout = resolveSeconds(opts.watchTimeout as string, DEFAULT_PAY_WATCH_TIMEOUT_SECONDS);
 
-    // Build request body
+    // Pay-order sends no body params — settlement is routed server-side by the
+    // order's billing_mode.
     const body: Record<string, unknown> = {};
-    if (merchantTransId !== undefined) {
-      body.merchant_trans_id = merchantTransId;
-    }
 
     // Confirm before the write unless --yes. This is the step that actually
-    // moves money (settlement account debit, or EVO verification), so the
-    // prompt is explicit about which billing path applies. The prompt goes to
-    // stderr; declining maps to CLIENT_ABORTED (exit 5) via the top-level
-    // envelope.
+    // moves money (settlement account debit for monthly_settlement, or EVO
+    // verification for pay_per_call), decided server-side by billing_mode. The
+    // prompt goes to stderr; declining maps to CLIENT_ABORTED (exit 5) via the
+    // top-level envelope.
     if (!isYes) {
-      const billingPath = merchantTransId !== undefined
-        ? `Active Payment (verifying EVO transaction ${merchantTransId})`
-        : 'monthly settlement (deducting from your settlement account)';
       const confirmed = await confirm({
-        message: `Settle hotel order ${orderId} via ${billingPath}? This will move money.`,
+        message: `Settle hotel order ${orderId}? This moves money via the order's configured billing mode (monthly_settlement or pay_per_call).`,
         default: false,
       });
       if (!confirmed) {

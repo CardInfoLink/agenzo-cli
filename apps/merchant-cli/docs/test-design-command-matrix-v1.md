@@ -554,7 +554,7 @@ Code review item-by-item verification (comparing against cli-design §4.4 + exis
 
 ## 10. `hotel-redaug` Command Matrix
 
-> The `hotel-redaug` noun adds **13 thin verbs** over the platform `/hotel/*` endpoints, mirroring the `ride-elife` patterns: per-command `--api-key` → `X-Api-Key`, `--format json` default, `Idempotency-Key` **header** (never body) on write verbs, and NDJSON `--watch` on the status/pay reads. All monetary amounts are **DECIMAL currency units** (e.g. `320.00` = 320.00 yuan), never minor units, always paired with a currency. Booking is a create-then-pay split (`create-order` locks inventory without charging, `pay-order` settles it) supporting both `monthly_settlement` and `Active_Payment` (via `--merchant-trans-id`); there is no combined `book` verb. Order status on the wire is the STRING `order_status` (PROCESSING/CONFIRMED/CANCELLED/COMPLETED) plus an integer `order_status_code` (2/3/4/5) on the provider path. Response types: `src/types/hotel.ts`; verb schemas: `src/verb-schema.ts`; watch engine: `src/hotel-redaug/watch.ts`.
+> The `hotel-redaug` noun adds **13 thin verbs** over the platform `/hotel/*` endpoints, mirroring the `ride-elife` patterns: per-command `--api-key` → `X-Api-Key`, `--format json` default, `Idempotency-Key` **header** (never body) on write verbs, and NDJSON `--watch` on the status/pay reads. All monetary amounts are **DECIMAL currency units** (e.g. `320.00` = 320.00 yuan), never minor units, always paired with a currency. Booking is a create-then-pay split (`create-order` locks inventory without charging, `pay-order` settles it) supporting both `monthly_settlement` and `pay_per_call` billing modes, chosen server-side (`pay-order` takes only `--order-id`, no merchant-transaction-id flag); there is no combined `book` verb. Order status on the wire is the STRING `order_status` (PROCESSING/CONFIRMED/CANCELLED/COMPLETED) plus an integer `order_status_code` (2/3/4/5) on the provider path. Response types: `src/types/hotel.ts`; verb schemas: `src/verb-schema.ts`; watch engine: `src/hotel-redaug/watch.ts`.
 
 ### 10.1 Verb → endpoint map
 
@@ -616,15 +616,15 @@ Code review item-by-item verification (comparing against cli-design §4.4 + exis
 
 | Case | Scenario | Expected |
 |---|---|---|
-| TC-HPAY-01 | Monthly settlement (`--yes`, no `--merchant-trans-id`) | `POST /hotel/<order_id>/pay` (`X-Api-Key` + `Idempotency-Key` header); body has no `merchant_trans_id`; renders `settlement_path=monthly_settlement`/`pay_status`/`order_status=PAID`; exit 0 |
-| TC-HPAY-02 | Active Payment (`--merchant-trans-id <id>`) | body.`merchant_trans_id` present; renders `settlement_path=active_payment`; exit 0 |
-| TC-HPAY-03 | `PAYMENT_NOT_COMPLETED` (Active Payment, EVO not yet confirmed) | String code preserved; exit 1; order/payment state unchanged |
+| TC-HPAY-01 | Order with `monthly_settlement` billing_mode, `--yes` | `POST /hotel/<order_id>/pay` (`X-Api-Key` + `Idempotency-Key` header); body is empty (no request params); renders `settlement_path=monthly_settlement`/`pay_status`/`order_status=PAID`; exit 0 |
+| TC-HPAY-02 | Order with `pay_per_call` billing_mode, same command (no extra flag) | body is identical/empty; platform queries EVO for the `order_id`; renders `settlement_path=active_payment`; exit 0 |
+| TC-HPAY-03 | `PAYMENT_NOT_COMPLETED` (pay_per_call, EVO not yet confirmed for this order_id) | String code preserved; exit 1; order/payment state unchanged |
 | TC-HPAY-04 | `--watch` polling | Retries on `PAYMENT_NOT_COMPLETED` at `--watch-interval`; one NDJSON line per attempt; stops on `PAID` or `--watch-timeout` (final line `{watch_status:'timeout',...}`) |
 | TC-HPAY-05 | Missing `--order-id` | `PARAM_INVALID`; no request; exit 1 |
 | TC-HPAY-06 | `--yes` missing `--idempotency-key` | `PARAM_IDEMPOTENCY_KEY_REQUIRED`; no request; exit 1 |
 | TC-HPAY-07 | Idem key location | Sent as `Idempotency-Key` header; never in body |
 | TC-HPAY-08 | Confirm declined (no `--yes`) | `CLIENT_ABORTED`; no request; exit 5 |
-| TC-HPAY-09 | `BILLING_MODE_MISMATCH` / `PARAM_MERCHANT_TRANS_ID_REQUIRED` | String code preserved (exit 1) when `--merchant-trans-id` doesn't match the developer's billing mode |
+| TC-HPAY-09 | `BILLING_MODE_MISMATCH` | String code preserved (exit 1) when the order's `billing_mode` is neither `monthly_settlement` nor `pay_per_call` |
 | TC-HPAY-10 | `INVALID_ORDER_STATE` (order not `AWAITING_PAYMENT`) | String code preserved (exit 1); no settlement attempted |
 
 ### 10.6 `hotel-redaug get` (R, `GET /hotel/<id>/status`; `--watch` → NDJSON)
