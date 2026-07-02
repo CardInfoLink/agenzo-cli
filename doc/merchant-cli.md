@@ -144,51 +144,52 @@ Order status   AWAITING_PAYMENT
 
 Settles an existing order created by `create-order`. Requires `--order-id` (the `order_id` returned by `create-order`).
 
-Two billing paths, determined by the developer's `billing_mode`:
+Two billing paths, determined by the developer's `billing_mode` (NOT by a flag):
 
-| Path | Flag | Behavior |
+| Path | `--merchant-trans-id` | Behavior |
 |------|------|----------|
-| **Monthly settlement** | omit `--merchant-trans-id` | Debits settlement account balance → calls upstream `payOrder`. |
-| **Active Payment** | `--merchant-trans-id <id>` | Verifies payment via EVO → calls upstream `payOrder`. |
+| **Monthly settlement** (`monthly_settlement`) | omit | Debits settlement account balance → calls upstream `payOrder`. |
+| **Active Payment / 现结** (`pay_per_call`) | omit (normally) | Platform queries EVO for the **order_id** (the merchantTransID the user paid under) → verifies exact amount/currency → calls upstream `payOrder`. |
 
 ```bash
-# Monthly settlement (default path — no --merchant-trans-id)
+# Monthly settlement
 agenzo-merchant-cli --yes hotel-redaug pay-order \
   --api-key <key> \
-  --order-id ord_abc123 \
+  --order-id hho_abc123 \
   --idempotency-key idem_hotel_pay_001
 
-# Active Payment path (user paid via EVO, pass their merchant_trans_id)
+# Active Payment / 现结 — user already paid via EVO USING the order_id as the
+# EVO merchantTransID. No --merchant-trans-id needed; the platform verifies by
+# querying EVO for the order_id.
 agenzo-merchant-cli --yes hotel-redaug pay-order \
   --api-key <key> \
-  --order-id ord_abc123 \
-  --merchant-trans-id EVO_TXN_98765 \
+  --order-id hho_abc123 \
   --idempotency-key idem_hotel_pay_001
 
 # Active Payment with --watch (polls until PAID or timeout)
 agenzo-merchant-cli --yes hotel-redaug pay-order \
   --api-key <key> \
-  --order-id ord_abc123 \
-  --merchant-trans-id EVO_TXN_98765 \
+  --order-id hho_abc123 \
   --idempotency-key idem_hotel_pay_001 \
   --watch --watch-interval 5 --watch-timeout 300
 ```
 
 On success (exit 0), prints settlement result (order_status = PAID).
 
-### Active Payment `merchant_trans_id` flow
+### Active Payment / 现结 flow (the EVO merchantTransID IS the order_id)
 
-The `merchant_trans_id` originates from an **offline** EVO payment made by the end-user:
+The end-user pays **out-of-band via EVO**, and the payment is bound to the order by using our `order_id` as the EVO `merchantTransID`:
 
 1. Developer creates a hotel order via `create-order` → receives `order_id`, `total_amount`, `currency`.
-2. End-user pays the exact `total_amount` + `currency` through EVO using the shared merchant parameters (obtained through offline onboarding with EVO — NOT returned by `create-order`).
-3. EVO produces a `merchant_trans_id` for the successful transaction.
-4. Developer (or Agent) calls `pay-order --order-id <id> --merchant-trans-id <evo_txn_id>`.
-5. Platform queries EVO once per call:
+2. End-user pays the exact `total_amount` + `currency` through EVO (shared merchant parameters obtained through offline EVO onboarding — NOT returned by `create-order`), **using the `order_id` as the EVO `merchantTransID`**.
+3. Developer (or Agent) calls `pay-order --order-id <order_id>` (no `--merchant-trans-id`).
+4. Platform queries EVO **for that `order_id`** once per call:
    - Payment confirmed + amount/currency match → upstream `payOrder` → order becomes `PAID`.
    - Payment not yet confirmed → `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to retry automatically.
    - Amount/currency mismatch → `PAYMENT_AMOUNT_MISMATCH` (exit 1).
    - Transaction not found → `PAYMENT_NOT_FOUND` (exit 1).
+
+**Why the order_id (anti-fraud):** querying by the platform-owned `order_id` binds the EVO payment to this exact order. A caller cannot present some *other* already-paid EVO transaction of the same amount to settle a booking for free. If `--merchant-trans-id` is supplied it MUST equal the `order_id` (otherwise `MERCHANT_TRANS_ID_INVALID`); normally it is omitted.
 
 ### Parameters to ask for (hotel-redaug)
 
