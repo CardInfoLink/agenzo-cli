@@ -10,6 +10,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { PaymentMethod } from '../types/api.js';
+import { attachSchemaHelp, pmGetSchema } from '../verb-schema.js';
 
 /**
  * `payment-methods get <pm_id>` — show a single payment method (§3.4.0.3).
@@ -23,6 +24,8 @@ export function registerGetCommand(parent: Command, deps: { apiClient: ApiClient
     .command('get <pm_id>')
     .description('Get a payment method by ID')
     .option('--api-key <key>', 'API key for authentication');
+
+  attachSchemaHelp(cmd, pmGetSchema);
 
   cmd.action(async (pmId: string) => {
     const opts = cmd.optsWithGlobals();

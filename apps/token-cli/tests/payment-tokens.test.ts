@@ -577,3 +577,202 @@ describe('payment-tokens create', () => {
     expect(apiClient.post).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// payment-tokens create — unionpay rail (FIX 6, task 15.2)
+// ============================================================
+
+describe('payment-tokens create — unionpay rail', () => {
+  it('PENDING unionpay response: payment_method_id selection, correct body fields, and flat PENDING output', async () => {
+    const unionpayPendingResponse = {
+      id: 'ptk_union_001',
+      type: 'network_token',
+      status: 'PENDING',
+      payment_brand: 'unionpay',
+      checkout_url: 'https://checkout.unionpay.example/abc123',
+      correlation_id: 'corr_abc123',
+    };
+    const apiClient = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods/pm_unionpay_1') {
+          return Promise.resolve({
+            success: true,
+            data: { id: 'pm_unionpay_1', status: 'ACTIVE', payment_brand: 'unionpay', brand: 'UnionPay', last4: '9999' },
+          });
+        }
+        if (path === '/payment-tokens/ptk_union_001') {
+          return Promise.resolve({
+            success: true,
+            data: { ...unionpayPendingResponse, status: 'ACTIVE', network_token: { cryptogram: 'abc', value: '1234' } },
+          });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+      post: vi.fn().mockResolvedValue({ success: true, data: unionpayPendingResponse }),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerCreateCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-tokens', 'create',
+      '--api-key', 'sk_key',
+      '--type', 'network-token',
+      '--payment-method-id', 'pm_unionpay_1',
+      '--recipient-first-name', 'John',
+      '--recipient-last-name', 'Doe',
+      '--recipient-email', 'john@test.com',
+      '--unionpay-amount', '174.58',
+      '--idempotency-key', 'idem_1',
+    ]);
+
+    // Verify it looked up the PM's rail
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/payment-methods/pm_unionpay_1',
+      { type: 'api-key', key: 'sk_key' },
+    );
+
+    // Verify POST body contains recipient/intent fields, and not evo/x402-only fields
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-tokens/create',
+      { type: 'api-key', key: 'sk_key' },
+      expect.objectContaining({
+        type: 'network_token',
+        payment_method_id: 'pm_unionpay_1',
+        recipient_first_name: 'John',
+        recipient_last_name: 'Doe',
+        recipient_email: 'john@test.com',
+        unionpay_amount: '174.58',
+      }),
+      { 'Idempotency-Key': 'idem_1' },
+    );
+    const body = apiClient.post.mock.calls[0][2];
+    expect(body).not.toHaveProperty('fee');
+    expect(body).not.toHaveProperty('amount');
+
+    const stderrText = err.text();
+    expect(stderrText).toContain('Payment token created');
+
+    const output = out.text();
+    expect(output).toContain('PENDING');
+    expect(output).toContain('https://checkout.unionpay.example/abc123');
+    expect(output).toContain('Correlation ID');
+    expect(output).toContain('corr_abc123');
+  });
+
+  it('--card selecting a unionpay card is rejected (only --payment-method-id allowed)', async () => {
+    const apiClient = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods') {
+          return Promise.resolve({
+            success: true,
+            data: [{ id: 'pm_union_last4', status: 'ACTIVE', payment_brand: 'unionpay', last4: '9999' }],
+          });
+        }
+        if (path === '/payment-methods/pm_union_last4') {
+          return Promise.resolve({
+            success: true,
+            data: { id: 'pm_union_last4', status: 'ACTIVE', payment_brand: 'unionpay', last4: '9999' },
+          });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+      post: vi.fn(),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'create',
+        '--api-key', 'sk_key',
+        '--type', 'network-token',
+        '--card', '9999',
+        '--recipient-first-name', 'John',
+        '--recipient-last-name', 'Doe',
+        '--recipient-email', 'john@test.com',
+        '--unionpay-amount', '174.58',
+        '--idempotency-key', 'idem_2',
+      ]),
+    ).rejects.toThrow('--payment-method-id');
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('--yes mode missing --unionpay-amount errors without posting', async () => {
+    const apiClient = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods/pm_unionpay_2') {
+          return Promise.resolve({ success: true, data: { id: 'pm_unionpay_2', status: 'ACTIVE', payment_brand: 'unionpay' } });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+      post: vi.fn(),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'create',
+        '--api-key', 'sk_key',
+        '--type', 'network-token',
+        '--payment-method-id', 'pm_unionpay_2',
+        '--recipient-first-name', 'John',
+        '--recipient-last-name', 'Doe',
+        '--recipient-email', 'john@test.com',
+        '--idempotency-key', 'idem_3',
+      ]),
+    ).rejects.toThrow();
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('--yes mode missing recipient-email and recipient-phone errors without posting', async () => {
+    const apiClient = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods/pm_unionpay_3') {
+          return Promise.resolve({ success: true, data: { id: 'pm_unionpay_3', status: 'ACTIVE', payment_brand: 'unionpay' } });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+      post: vi.fn(),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'create',
+        '--api-key', 'sk_key',
+        '--type', 'network-token',
+        '--payment-method-id', 'pm_unionpay_3',
+        '--recipient-first-name', 'John',
+        '--recipient-last-name', 'Doe',
+        '--unionpay-amount', '174.58',
+        '--idempotency-key', 'idem_4',
+      ]),
+    ).rejects.toThrow(/recipient-email or --recipient-phone/);
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+});

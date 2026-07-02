@@ -10,6 +10,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { PaymentMethod } from '../types/api.js';
+import { attachSchemaHelp, pmListSchema } from '../verb-schema.js';
 
 /**
  * `payment-methods list` — list payment methods (§3.4.0.2).
@@ -25,6 +26,8 @@ export function registerListCommand(parent: Command, deps: { apiClient: ApiClien
     .description('List payment methods')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--member <member_id>', 'Filter by member ID');
+
+  attachSchemaHelp(cmd, pmListSchema);
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();

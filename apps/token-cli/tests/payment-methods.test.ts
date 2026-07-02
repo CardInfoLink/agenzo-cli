@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { CliError } from '@agenzo/cli-core';
 import { registerListCommand } from '../src/payment-methods/list.js';
 import { registerGetCommand } from '../src/payment-methods/get.js';
 import { registerDisableCommand } from '../src/payment-methods/disable.js';
@@ -375,6 +376,205 @@ describe('payment-methods add', () => {
     ).rejects.toThrow('--idempotency-key');
 
     expect(apiClient.post).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// payment-methods add --payment-brand unionpay (Requirement 1.x / 2.x)
+// ============================================================
+
+describe('payment-methods add --payment-brand unionpay', () => {
+  it('rejects an unknown --payment-brand without calling the API', async () => {
+    const apiClient = mockApiClient();
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', 'payment-methods', 'add',
+        '--api-key', 'sk_key', '--payment-brand', 'bogus',
+      ]),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('rejects --payment-brand unionpay without --member, before calling the API', async () => {
+    const apiClient = mockApiClient();
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    // With --payment-brand unionpay but no --member in --yes mode, the CLI
+    // cannot prompt and should error. We pass --yes to skip interactive prompt.
+    await expect(
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-methods', 'add',
+        '--api-key', 'sk_key', '--payment-brand', 'unionpay', '--email', 'user@example.com',
+      ]),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('happy path: POST create(payment_brand=unionpay, member_id), prints enroll_url, polls until ACTIVE', async () => {
+    const unionpayPm = {
+      id: 'pm_upi_1',
+      type: 'card',
+      status: 'PENDING',
+      payment_brand: 'unionpay',
+      enroll_url: 'https://upi.example.com/enroll/abc',
+      correlation_id: 'corr_123',
+    };
+    const activatedPm = {
+      id: 'pm_upi_1',
+      type: 'card',
+      status: 'ACTIVE',
+      payment_brand: 'unionpay',
+      brand: 'UnionPay',
+      first6: '625094',
+      last4: '0105',
+    };
+    const apiClient = mockApiClient({ '/payment-methods/create': unionpayPm });
+    // Mock GET for polling — returns ACTIVE immediately
+    apiClient.get = vi.fn().mockResolvedValue({ success: true, data: activatedPm });
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--payment-brand', 'unionpay',
+      '--member', 'mem_123',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/create',
+      { type: 'api-key', key: 'sk_key' },
+      { type: 'card', payment_brand: 'unionpay', member_id: 'mem_123', email: 'user@example.com' },
+    );
+
+    // Polls GET /payment-methods/{id} at least once
+    expect(apiClient.get).toHaveBeenCalled();
+
+    const errText = err.text();
+    expect(errText).toContain('Card binding initiated');
+    expect(errText).toContain('Payment method activated');
+  });
+
+  it('does not require --idempotency-key even in --yes mode', async () => {
+    const unionpayPm = {
+      id: 'pm_upi_2',
+      status: 'PENDING',
+      payment_brand: 'unionpay',
+      enroll_url: 'https://upi.example.com/enroll/xyz',
+      correlation_id: 'corr_456',
+    };
+    const apiClient = mockApiClient({ '/payment-methods/create': unionpayPm });
+    apiClient.get = vi.fn().mockResolvedValue({ success: true, data: { ...unionpayPm, status: 'ACTIVE', brand: 'UnionPay' } });
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-methods', 'add',
+      '--payment-brand', 'unionpay',
+      '--member', 'mem_456',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    // Reached the API call instead of throwing IdempotencyKeyRequiredError,
+    // and no Idempotency-Key header was sent.
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/create',
+      { type: 'api-key', key: 'sk_key' },
+      { type: 'card', payment_brand: 'unionpay', member_id: 'mem_456', email: 'user@example.com' },
+    );
+  });
+
+  it('--format json: stdout carries id/status/rail/enroll_url/correlation_id', async () => {
+    const unionpayPm = {
+      id: 'pm_upi_3',
+      type: 'card',
+      status: 'PENDING',
+      payment_brand: 'unionpay',
+      enroll_url: 'https://upi.example.com/enroll/json',
+      correlation_id: 'corr_789',
+    };
+    const activatedPm = {
+      id: 'pm_upi_3',
+      type: 'card',
+      status: 'ACTIVE',
+      payment_brand: 'unionpay',
+      brand: 'UnionPay',
+      first6: '625094',
+      last4: '0105',
+    };
+    const apiClient = mockApiClient({ '/payment-methods/create': unionpayPm });
+    apiClient.get = vi.fn().mockResolvedValue({ success: true, data: activatedPm });
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--format', 'json', 'payment-methods', 'add',
+      '--payment-brand', 'unionpay',
+      '--member', 'mem_789',
+      '--api-key', 'sk_key',
+      '--email', 'user@example.com',
+    ]);
+
+    // In json mode, the final activated PM is output
+    const lines = out.text().trim().split('\n').filter(Boolean);
+    const parsed = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+    expect(parsed.id).toBe('pm_upi_3');
+    expect(parsed.status).toBe('ACTIVE');
+  });
+
+  it('propagates upstream failure via CliError.fromApi (e.g. missing member_id server-side)', async () => {
+    const apiClient = {
+      get: vi.fn(),
+      post: vi.fn().mockResolvedValue({
+        success: false,
+        statusCode: 400,
+        data: null,
+      }),
+    };
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', 'payment-methods', 'add',
+        '--payment-brand', 'unionpay',
+        '--member', 'mem_err',
+        '--api-key', 'sk_key',
+        '--email', 'user@example.com',
+      ]),
+    ).rejects.toBeInstanceOf(CliError);
   });
 });
 

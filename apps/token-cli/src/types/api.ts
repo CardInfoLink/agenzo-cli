@@ -18,6 +18,12 @@ export interface PaymentMethod {
   magic_link_token?: string;
   expires_at?: string;
   created_at: string;
+  /** Payment brand: 'evo' (default, existing 3DS/Drop-in binding) | 'unionpay'. */
+  payment_brand?: string;
+  /** UnionPay only: present when payment_brand === 'unionpay' and status === 'PENDING'. */
+  enroll_url?: string;
+  /** UnionPay only: enrollment correlation id, present when payment_brand === 'unionpay'. */
+  correlation_id?: string;
 }
 
 // ---- Drop-in session (payment-methods add --mode dropin) ----
