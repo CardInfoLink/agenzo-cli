@@ -599,10 +599,9 @@ export const hotelPayOrderSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'pay-order',
   description:
-    'Settle an existing AWAITING_PAYMENT order created by create-order. Two billing paths: monthly_settlement (omit --merchant-trans-id) deducts from the developer credit account then confirms with the supplier; Active_Payment (pass --merchant-trans-id) verifies the user EVO payment matches the order amount/currency exactly before confirming. On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
+    'Settle an existing AWAITING_PAYMENT order created by create-order. Takes only --order-id; the billing path is decided server-side by the order billing_mode. monthly_settlement deducts from the developer credit account then confirms with the supplier; pay_per_call verifies the user EVO payment — the EVO merchantTransID IS the order_id (the user pays via EVO under the order_id), so the platform queries EVO for that order_id and requires an exact amount/currency match before confirming (the response settlement_path is then "active_payment"). On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
   flags: {
-    'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id)' },
-    'merchant-trans-id': { type: 'string', required: false, description: 'EVO merchant transaction ID from the user offline payment. Pass to trigger the Active_Payment path; omit to use the developer default billing path (monthly_settlement)', constraints: '1-128 characters' },
+    'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id). For pay_per_call this is also the EVO merchantTransID the user paid under.' },
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -624,22 +623,21 @@ export const hotelPayOrderSchema: VerbSchema = {
   example: {
     command:
       'agenzo-merchant-cli hotel-redaug pay-order --order-id hho_01KWC63Z5CD6CKBM33Q7SC2ZDT --idempotency-key pay-h1n2',
-    output_summary: 'Monthly settlement: deducts from the credit account, confirms with the supplier. Returns {order_id, settlement_path:"monthly_settlement", amount, currency, pay_status:1, settled_at}. Order becomes PAID. For Active_Payment add --merchant-trans-id <evo_txn_id>.',
+    output_summary: 'Settlement path is chosen server-side by billing_mode. monthly_settlement: deducts from the credit account, confirms with the supplier. Returns {order_id, settlement_path:"monthly_settlement", amount, currency, pay_status:1, settled_at}. Order becomes PAID. For pay_per_call the user must have already paid via EVO using the order_id as the merchantTransID; the same command settles it (settlement_path:"active_payment").',
   },
   error_recovery: {
-    PAYMENT_NOT_COMPLETED: 'Active_Payment only: EVO has not yet confirmed the payment. Retry with the SAME idempotency-key and --merchant-trans-id after a delay, or use --watch to poll automatically until PAID.',
-    PAYMENT_NOT_FOUND: 'No EVO transaction for the given merchant_trans_id. Verify the ID with the user; do NOT retry blindly.',
-    PAYMENT_AMOUNT_MISMATCH: 'The EVO-confirmed amount/currency does not match the order. The user must pay the exact order amount in the exact currency. Do NOT retry with the same merchant_trans_id.',
+    PAYMENT_NOT_COMPLETED: 'pay_per_call only: EVO has not yet confirmed the payment for this order_id. Retry with the SAME idempotency-key after a delay, or use --watch to poll automatically until PAID.',
+    PAYMENT_NOT_FOUND: 'No EVO transaction found for this order_id. Confirm the user paid via EVO using the order_id as the merchantTransID; do NOT retry blindly.',
+    PAYMENT_AMOUNT_MISMATCH: 'The EVO-confirmed amount/currency does not match the order. The user must pay the exact order amount in the exact currency under the order_id. Do NOT retry until corrected.',
     PAYMENT_QUERY_FAILED: 'EVO gateway query failed (transport/timeout). Retry once after ~5s with the SAME idempotency-key.',
-    BILLING_MODE_MISMATCH: 'A monthly_settlement developer supplied --merchant-trans-id, or an Active_Payment developer omitted it. Remove or add --merchant-trans-id to match the developer billing_mode.',
-    PARAM_MERCHANT_TRANS_ID_REQUIRED: 'Active_Payment developer must supply --merchant-trans-id (the EVO transaction reference). Ask the user for it.',
+    BILLING_MODE_MISMATCH: 'The order billing_mode is not a recognized settlement mode (only monthly_settlement and pay_per_call are valid). Check the developer billing_mode; do NOT retry blindly.',
     INVALID_ORDER_STATE: 'The order is not in AWAITING_PAYMENT (it may already be PAID or CANCELLED). Check status via get; do NOT retry pay-order.',
     ORDER_NOT_FOUND: 'No order for this --order-id. Verify it is the order_id returned by create-order. Do NOT retry.',
     ACCOUNT_INSUFFICIENT_BALANCE: 'Settlement credit is insufficient (check via admin-cli accounts get). Direct the user to top up offline.',
     ACCOUNT_NOT_FOUND: 'Developer has no settlement account. Direct the user to complete contract signing.',
     ACCOUNT_SUSPENDED: 'The settlement account is suspended. Direct the user to contact support; do NOT retry.',
     PAYORDER_FAILED: 'Upstream payOrder failed after a successful deduction; the deduction was reversed and the order stays AWAITING_PAYMENT. Retry with the SAME idempotency-key after a delay.',
-    PAYORDER_FAILED_AFTER_PAYMENT: 'EVO payment confirmed but upstream payOrder failed. The order is recoverable (the merchant_trans_id is preserved). Contact support for reconciliation; do NOT retry automatically.',
+    PAYORDER_FAILED_AFTER_PAYMENT: 'EVO payment confirmed but upstream payOrder failed. The order is recoverable (the EVO payment under the order_id is preserved). Contact support for reconciliation; do NOT retry automatically.',
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key and retry.',
     PARAM_IDEMPOTENCY_KEY_CONFLICT: 'Same idempotency-key used with different parameters. Use the original parameters, or generate a NEW key.',
   },

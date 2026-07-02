@@ -127,7 +127,7 @@ Workflow (typical order):
                        Pair each rate with hotel-detail's rooms[] (match by room_name) before
                        presenting options to the user.
   6. create-order      Create order using product_token from quote (lock inventory, no charge)
-  7. pay-order         Settle the order (monthly_settlement or Active_Payment via --merchant-trans-id)
+  7. pay-order         Settle the order by --order-id (path chosen server-side by billing_mode)
   8. get               Poll order status until CONFIRMED (or use --watch for NDJSON stream)
   9. cancel            Cancel an order (whole-order, within policy)
  10. checkout          Apply for partial check-out / out-of-policy cancellation (async)
@@ -139,8 +139,9 @@ Key notes:
   • hotel-detail's rooms[] is the actual room info (area/beds/photos) — quote's room_name is
     just a bare label; show both together before asking the user to pick a rate
   • create-order locks inventory without charging; order enters AWAITING_PAYMENT
-  • pay-order settles the order: omit --merchant-trans-id for monthly_settlement,
-    supply it for Active_Payment (EVO); use --watch to poll until PAID
+  • pay-order settles the order by --order-id; the path is chosen server-side by
+    billing_mode. For pay_per_call the user pays via EVO using the order_id
+    as the merchantTransID first; use --watch to poll until PAID
   • All amounts are DECIMAL (e.g. 10.00 = ten yuan), never minor units (cents)
   • product_token from quote is opaque — pass it unchanged to create-order
   • price_items from quote must be copied verbatim as --price-items JSON array to create-order`,

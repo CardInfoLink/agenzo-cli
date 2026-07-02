@@ -37,7 +37,7 @@ More fulfillment capabilities are added as new nouns over time; `services list` 
 | `hotel-redaug` | `hotel-detail` | Read | `POST /hotel/detail` | Hotel detail with facilities/images AND `rooms[]` (area/floor/beds/photos) — call before quote |
 | `hotel-redaug` | `quote` | Read | `POST /hotel/quote` | Real-time rooms/rates for one hotel (`product_token` + `price_items`) |
 | `hotel-redaug` | `create-order` | Write/Y | `POST /hotel/create-order` | Create a hotel order without charging (locks rate + returns `order_id` + payable amount) |
-| `hotel-redaug` | `pay-order` | Write/Y | `POST /hotel/{order_id}/pay` | Pay for a created order; `--merchant-trans-id` triggers Active_Payment path, omit for monthly_settlement |
+| `hotel-redaug` | `pay-order` | Write/Y | `POST /hotel/{order_id}/pay` | Pay for a created order (takes only `--order-id`); billing path (`monthly_settlement` or `pay_per_call`) is chosen server-side |
 | `hotel-redaug` | `get` | Read | `GET /hotel/<id>/status` | Query order status; `--watch` emits an NDJSON polling stream |
 | `hotel-redaug` | `cancel` | Write/Y | `POST /hotel/<id>/cancel` | Cancel a whole order (acceptance ≠ proof; poll `get`) |
 | `hotel-redaug` | `checkout` | Write/Y | `POST /hotel/<id>/checkout` | Partial check-out / out-of-policy cancellation (async) |
@@ -104,9 +104,10 @@ agenzo-merchant-cli ride-elife cancel --api-key "$API_KEY" --yes \
 ### Hotel booking end-to-end example
 
 The core Agent loop is `search → quote → create-order → pay-order → get`. Amounts are decimal currency
-units (e.g. `320.00` = 320.00 yuan). `hotel-redaug` supports two billing paths:
-- **monthly_settlement**: deducted from the monthly-settlement account (no `--merchant-trans-id`).
-- **Active_Payment**: user pays via shared EVO parameters, then passes `--merchant-trans-id` to confirm.
+units (e.g. `320.00` = 320.00 yuan). `pay-order` takes only `--order-id`; the billing path is chosen
+server-side by the developer's `billing_mode`:
+- **monthly_settlement**: deducted from the monthly-settlement account.
+- **pay_per_call**: the user pays via shared EVO parameters using the `order_id` as the EVO merchantTransID; the platform verifies that payment for the same `order_id` before confirming.
 
 ```bash
 # 1. Search hotels by coordinates + stay dates (or use --destination-id from find-destination).
@@ -132,21 +133,20 @@ agenzo-merchant-cli hotel-redaug create-order --api-key "$API_KEY" --yes \
   --contact-phone "13800138000" --contact-country-code 86 \
   --idempotency-key "hotel-create-$(date +%s)"
 
-# 4a. Pay Order — monthly_settlement path (on-account, no merchant-trans-id needed)
+# 4a. Pay Order — monthly_settlement path (on-account)
 agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" \
   --idempotency-key "hotel-pay-$(date +%s)"
 
-# 4b. Pay Order — Active_Payment path (user already paid via EVO; pass merchant_trans_id)
+# 4b. Pay Order — pay_per_call path (user already paid via EVO using order_id
+#     as the EVO merchantTransID). Same command, no other flag.
 agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" \
-  --merchant-trans-id "$MERCHANT_TRANS_ID" \
   --idempotency-key "hotel-pay-$(date +%s)"
 
-# 4c. Pay Order — Active_Payment with --watch (polls until PAID or timeout)
+# 4c. Pay Order — pay_per_call with --watch (polls until PAID or timeout)
 agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" \
-  --merchant-trans-id "$MERCHANT_TRANS_ID" \
   --idempotency-key "hotel-pay-$(date +%s)" \
   --watch --watch-interval 5 --watch-timeout 120
 
@@ -230,18 +230,17 @@ The write commands `ride-elife book` / `cancel` and `hotel-redaug create-order` 
 
 The request body contains at most an optional `payment_order_id`.
 
-### hotel-redaug billing (create-order + pay-order, two billing paths)
+### hotel-redaug billing (create-order + pay-order, two billing modes)
 
 `hotel-redaug` uses a **two-step flow**: `create-order` (locks rate, no charge) then `pay-order` (settles).
 
-The `pay-order` step supports two billing paths based on the developer's `billing_mode`:
+`pay-order` takes only `--order-id`; there is no merchant-transaction-id flag. The billing path is
+chosen server-side by the developer's `billing_mode`:
 
-- **monthly_settlement**: deducted from the monthly-settlement account; omit `--merchant-trans-id`. The response carries `payment_status=ON_ACCOUNT`.
-- **Active_Payment** (non-monthly-settlement): the user pays via shared EVO parameters out-of-band, then passes `--merchant-trans-id` to `pay-order`; the platform queries EVO to confirm payment before calling upstream `payOrder`. If EVO reports "not yet paid", the CLI receives `PAYMENT_NOT_COMPLETED` (exit 1) — use `--watch` to poll until confirmed.
+- **monthly_settlement**: deducted from the monthly-settlement account. The response carries `payment_status=ON_ACCOUNT`.
+- **pay_per_call**: the user pays via shared EVO parameters out-of-band using the create-order `order_id` as the EVO merchantTransID; the platform queries EVO for that same `order_id` to confirm payment before calling upstream `payOrder` (response `settlement_path` is `active_payment`). If EVO reports "not yet paid", the CLI receives `PAYMENT_NOT_COMPLETED` (exit 1) — use `--watch` to poll until confirmed.
 
-Cross-guards:
-- A monthly_settlement developer supplying `--merchant-trans-id` → `BILLING_MODE_MISMATCH` (exit 1).
-- An Active_Payment developer omitting `--merchant-trans-id` → `PARAM_MERCHANT_TRANS_ID_REQUIRED` (exit 1).
+If the order's `billing_mode` is neither of the two values above, `pay-order` returns `BILLING_MODE_MISMATCH` (exit 1).
 
 ## Amount units (decimal currency)
 

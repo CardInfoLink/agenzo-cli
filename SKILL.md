@@ -23,9 +23,9 @@ Agenzo provides three command-line tools, split by product area:
 The `hotel-redaug` capability splits booking into two independent steps:
 
 1. **`create-order`** — creates a hotel order (calls upstream `checkBooking` + `createOrder`) without charging any account. Returns `order_id`, `fc_order_code`, `total_amount`, and `currency`. The order enters `AWAITING_PAYMENT` status.
-2. **`pay-order`** — settles an existing order created by `create-order`. Requires `--order-id` (the `order_id` output from `create-order`). Two billing paths:
-   - **Monthly settlement** (`monthly_settlement`): omit `--merchant-trans-id`; the developer's settlement account balance is debited and upstream `payOrder` is called.
-   - **Active Payment** (non-monthly): pass `--merchant-trans-id <evo_transaction_id>` — the merchant transaction ID produced when the user paid offline via EVO. The platform verifies the payment amount/currency against EVO, then calls upstream `payOrder`.
+2. **`pay-order`** — settles an existing order created by `create-order`. Requires only `--order-id` (the `order_id` output from `create-order`); there is no merchant-transaction-id flag. The billing path is chosen server-side by the developer's `billing_mode`:
+   - **`monthly_settlement`**: the developer's settlement account balance is debited and upstream `payOrder` is called.
+   - **`pay_per_call`**: the user pays offline via EVO using the `order_id` as the EVO merchant transaction ID; the platform verifies the payment amount/currency against EVO for that same `order_id`, then calls upstream `payOrder`.
 
 `pay-order` depends on `create-order`'s output `order_id`. The two verbs MUST be called in sequence: `create-order` first, then `pay-order`.
 
