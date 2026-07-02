@@ -84,11 +84,13 @@ Beyond the core ride fields, `book` also accepts: `--passenger-email`, `--luggag
 
 ## hotel-redaug
 
-Hotel booking — the booking flow is split into two independent, ordered steps:
+Hotel booking — full flow: `search` → `hotel-detail` → `quote` → `create-order` → `pay-order` → `get` (poll). The booking (create+pay) portion is split into two independent, ordered steps:
 
 ```
-quote → create-order → pay-order → get (poll until CONFIRMED)
+hotel-detail → quote → create-order → pay-order → get (poll until CONFIRMED)
 ```
+
+`hotel-detail` returns the hotel plus `rooms[]` (per-room-type area/floor/beds/photos) — call it for the chosen/shortlisted hotel BEFORE `quote`. `quote`'s `rates[].room_name` is only a bare one-line label with no room detail; pair it with `hotel-detail`'s `rooms[]` (match by `room_name`) so the user picks a rate with real room info in front of them, not just a name and a price.
 
 `create-order` locks inventory and returns an `order_id`. `pay-order` settles the order and requires that `order_id`. There is no combined "book" verb.
 

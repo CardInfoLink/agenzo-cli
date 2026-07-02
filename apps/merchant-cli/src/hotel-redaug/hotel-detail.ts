@@ -93,6 +93,41 @@ function formatHotelDetail(data: HotelDetailResponse): string {
     lines.push(Formatter.status('info', 'No images available'));
   }
 
+  // Rooms table — static room-type info (area/floor/beds/occupancy) + a
+  // per-room image count. room_id is the SAME id space as quote's
+  // roomItems[].roomId, so this can be related to quote's live rates.
+  const rooms = data.rooms ?? [];
+  if (rooms.length > 0) {
+    lines.push('');
+    lines.push('Rooms:');
+    const roomHeaders = ['Room ID', 'Room Name', 'Area', 'Floor', 'Max Person', 'Beds', 'Images'];
+    const roomRows = rooms.map((r) => {
+      const bedsStr = (r.beds ?? [])
+        .map((b) => `${b.name ?? '-'}${b.num ? ` x${b.num}` : ''}`)
+        .join(', ') || '-';
+      return [
+        String(r.room_id ?? '-'),
+        String(r.room_name ?? '-'),
+        String(r.area_sqm ?? '-'),
+        String(r.floor ?? '-'),
+        String(r.max_person ?? '-'),
+        bedsStr,
+        String((r.images ?? []).length),
+      ];
+    });
+    lines.push(Formatter.table(roomHeaders, roomRows));
+    lines.push(
+      '',
+      Formatter.status(
+        'info',
+        'room_id matches quote\'s roomItems[].roomId — use it to relate a room here to its live rate in quote.',
+      ),
+    );
+  } else {
+    lines.push('');
+    lines.push(Formatter.status('info', 'No room-type details available'));
+  }
+
   return lines.join('\n');
 }
 

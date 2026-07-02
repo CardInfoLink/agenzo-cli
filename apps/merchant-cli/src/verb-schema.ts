@@ -1027,17 +1027,58 @@ export const hotelDetailSchema: VerbSchema = {
     },
     images: {
       type: 'array',
-      description: 'Hotel images. Empty array when --with-images false.',
+      description: 'Hotel-level images. Empty array when --with-images false.',
       items: {
         url: { type: 'string', description: 'Image URL.' },
         is_main: { type: 'bool', description: 'Whether this is the main image.' },
         type: { type: 'int|null', description: 'Image type/category.' },
       },
     },
+    rooms: {
+      type: 'array',
+      description: "Room types with STATIC info only (area/floor/beds/max occupancy/images) — NOT live rates. room_id is the SAME id space as quote's roomItems[].roomId, so relate a room here to its live rate/price/product_token by matching room_id to quote's rates. ALWAYS use quote for price/availability/product_token; this verb never has them. Present this alongside quote's rate options so the user sees what the room actually looks like (area, beds, photos) before picking a rate, not just the one-line room_name from quote.",
+      items: {
+        room_id: { type: 'int|string|null', description: "Room type id. Matches quote's roomItems[].roomId — use to relate this room's detail to a specific quoted rate." },
+        room_name: { type: 'string|null', description: 'Room type name.' },
+        area_sqm: { type: 'string|null', description: 'Room area (upstream unit, commonly square meters), as a string.' },
+        floor: { type: 'string|null', description: 'Floor(s) this room type is on (may be a range, e.g. "10-15").' },
+        max_person: { type: 'int|null', description: 'Max total occupancy.' },
+        max_adults: { type: 'int|null', description: 'Max adults.' },
+        max_child: { type: 'int|null', description: 'Max children.' },
+        allow_smoking: { type: 'bool|null', description: 'Whether smoking is allowed in this room type.' },
+        beds: {
+          type: 'array',
+          description: 'Bed configuration for the room area.',
+          items: {
+            name: { type: 'string|null', description: 'Bed type name (e.g. "King Bed").' },
+            width: { type: 'string|null', description: 'Bed width, upstream unit.' },
+            num: { type: 'string|null', description: 'Number of this bed type.' },
+          },
+        },
+        living_room_beds: {
+          type: 'array',
+          description: 'Bed configuration for a separate living-room area, when the room type has one. Same shape as beds.',
+          items: {
+            name: { type: 'string|null', description: 'Bed type name.' },
+            width: { type: 'string|null', description: 'Bed width, upstream unit.' },
+            num: { type: 'string|null', description: 'Number of this bed type.' },
+          },
+        },
+        images: {
+          type: 'array',
+          description: 'Photos of this specific room type. Empty when --with-images false, or when upstream has none for this room.',
+          items: {
+            url: { type: 'string', description: 'Image URL.' },
+            is_main: { type: 'bool', description: 'Whether this is the main image for the room.' },
+            type: { type: 'int|null', description: 'Image type/category.' },
+          },
+        },
+      },
+    },
   },
   example: {
     command: 'agenzo-merchant-cli hotel-redaug hotel-detail --hotel-id 10583772',
-    output_summary: 'Returns full hotel details including facilities and images. Use to present hotel info before quoting.',
+    output_summary: "Returns full hotel details including facilities, hotel images, AND rooms[] (per-room-type static info + photos). Use to present both the hotel and its room types before quoting — rooms[].room_id matches quote's roomItems[].roomId so the two can be shown together.",
   },
   error_recovery: {
     UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',

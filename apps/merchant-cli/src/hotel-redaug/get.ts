@@ -109,7 +109,7 @@ export function registerHotelGetCommand(parent: Command, deps: { apiClient: ApiC
     .command('get')
     .description('Retrieve a hotel order status by id (repeatable for polling)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
-    .option('--order-id <id>', 'Our order reference (coOrderCode) returned by `hotel-redaug book`')
+    .option('--order-id <id>', 'Our order reference (coOrderCode) returned by `hotel-redaug create-order`')
     .option('--watch', 'Poll until a terminal status, emitting one NDJSON line per update')
     .option(
       '--watch-interval <seconds>',

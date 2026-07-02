@@ -37,17 +37,25 @@ run \`hotel-redaug <verb> --help\`.
    - MUST present the candidates to the user (name, address/distance, star/score if useful)
      and get an explicit pick — never auto-select by distance or price alone, even for an
      open-ended request like "book me something near the Bund"
-   - hotel-detail <hotel-id> is OPTIONAL (only when the user asks for more info or the
-     search fields aren't enough to describe the property) — it is NOT required, but
-     showing candidates and getting a pick IS required
+   - hotel-detail <hotel-id> for the shortlisted/chosen hotel is OPTIONAL AT THIS STEP for
+     the hotel-level info (address/intro/hotel photos) — the candidate list above is enough
+     to pick a HOTEL. But you WILL need hotel-detail's rooms[] at step 4 below to describe
+     ROOMS, so in practice call it once the user has picked (or shortlisted) a hotel, before
+     moving to quote — don't make two round trips when one will do
 
-4. Quote
+4. Quote + show room options (ALWAYS call hotel-detail here — this is the mandatory part)
    - quote the chosen hotel + same dates/guests → rates[]
    - Empty rates[] = no availability → stop, tell the user
    - Each rate carries the inputs for create-order: product_token, total_price, price_items
-   - MUST present the rate options (room_name, rate_plan_name, breakfast, free_cancellation,
-     total_price+currency) and get the user's explicit pick of which rate to book — same rule
-     as step 3, this is not optional just because hotel-detail is
+   - quote's rates[].room_name is only a bare one-line label with NO area/beds/photos. MUST
+     call hotel-detail on the same hotel_id (if not already called in step 3) and match its
+     rooms[] to quote's rates by room_name — do this proactively, BEFORE presenting rate
+     options, not only if the user asks for more detail. The room is the actual product being
+     booked, so the user picking a rate MUST see area_sqm, floor, beds, and images alongside
+     rate_plan_name/breakfast/free_cancellation/total_price+currency — never present rate
+     options as a bare list of room_name + price only.
+   - MUST present the combined rate+room options and get the user's explicit pick of which
+     rate to book — same rule as step 3, and now with real room detail attached, not optional
 
 5. Create order (lock inventory, no charge) — MUST NOT run until step 3+4 confirmation happened
    - create-order: forward quote outputs VERBATIM (product_token, amount, currency, price_items)

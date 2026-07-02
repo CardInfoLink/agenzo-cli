@@ -310,6 +310,35 @@ export interface HotelImage {
   type?: number | null;
 }
 
+export interface HotelRoomBed {
+  name?: string | null;
+  width?: string | null;
+  num?: string | null;
+}
+
+/**
+ * Static room-type info (area/floor/beds/max occupancy/images) from
+ * queryHotelInfo.roomInfos + queryHotelImage.roomImages. `room_id` is the
+ * SAME id space as quote's `roomItems[].roomId` — use it to relate a room's
+ * static description (this) to its live rate/product_token (quote).
+ * NOT a live rate: no price or availability here — always quote for that.
+ */
+export interface HotelRoom {
+  room_id: number | string | null;
+  room_name?: string | null;
+  /** Room area, upstream unit (commonly m^2), as a string. */
+  area_sqm?: string | null;
+  floor?: string | null;
+  max_person?: number | null;
+  max_adults?: number | null;
+  max_child?: number | null;
+  allow_smoking?: boolean | null;
+  beds: HotelRoomBed[];
+  living_room_beds: HotelRoomBed[];
+  /** Empty when --with-images false. */
+  images: HotelImage[];
+}
+
 export interface HotelDetailResponse {
   hotel_id: string | number;
   hotel_name?: string | null;
@@ -332,4 +361,6 @@ export interface HotelDetailResponse {
   facilities: HotelFacility[];
   /** Empty when --with-images false. */
   images: HotelImage[];
+  /** Room types with static info (area/floor/beds/occupancy/images). */
+  rooms: HotelRoom[];
 }
