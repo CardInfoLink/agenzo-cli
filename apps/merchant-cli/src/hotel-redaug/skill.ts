@@ -18,7 +18,7 @@ run \`hotel-redaug <verb> --help\`.
 - API key with merchant scope
 - Two billing paths supported:
   - **monthly_settlement**: developer has a settlement account with sufficient balance
-  - **Active_Payment** (non-monthly): user pays offline via shared EVO parameters, then passes back \`merchant_trans_id\`
+  - **Active_Payment** (现结, non-monthly): user pays via EVO using the create-order \`order_id\` as the EVO merchantTransID; the platform verifies by querying EVO for that order_id
 - BILLING_MODE_MISMATCH means the billing path and flags don't match — see cross-guards below
 - Pass --api-key <key> --format json on every call; add --yes on writes
 
@@ -63,17 +63,25 @@ run \`hotel-redaug <verb> --help\`.
    - Generate a unique idempotency-key
    - Response → save order_id + fc_order_code + total_amount + currency
    - Order status: AWAITING_PAYMENT (no money charged yet)
+   - FOR Active_Payment (现结): tell the user to pay total_amount+currency via EVO
+     USING THIS order_id as the EVO merchantTransID. The verification in step 6 works by
+     querying EVO for exactly this order_id, so paying under any other id will not settle.
 
 6. Pay order (settle the locked order) — MUST confirm with the user before calling this
    - Before calling: show the user total_amount + currency from create-order and which
      billing path applies, and get explicit go-ahead — pay-order is the step that actually
      moves money
-   - pay-order --order-id <order_id from create-order>
+   - pay-order --order-id <order_id from create-order>   (NO --merchant-trans-id needed)
    - Billing path determined by developer's billing_mode:
-     a) Monthly settlement (omit --merchant-trans-id):
+     a) Monthly settlement:
         - Platform deducts from settlement account → calls upstream payOrder
-     b) Active Payment (pass --merchant-trans-id <evo_txn_id>):
-        - Platform queries EVO to verify exact amount/currency match → calls upstream payOrder
+     b) Active Payment (现结):
+        - The user must have ALREADY paid via EVO using the order_id as the EVO
+          merchantTransID (see create-order step 5). Just call pay-order --order-id <id>;
+          the platform queries EVO for that order_id and verifies exact amount/currency.
+        - Do NOT pass --merchant-trans-id (the platform derives it = order_id). If you do
+          pass it, it MUST equal the order_id, else MERCHANT_TRANS_ID_INVALID. This is
+          deliberate: a foreign already-paid EVO transaction cannot be substituted.
         - If EVO not yet confirmed → PAYMENT_NOT_COMPLETED; use --watch to poll
    - On success → order status becomes PAID
 
@@ -92,7 +100,8 @@ run \`hotel-redaug <verb> --help\`.
 - price_items     : quote → create-order  (JSON array; copy exactly)
 - order_id        : create-order → pay-order / get / cancel
 - fc_order_code   : create-order → cancel / checkout
-- merchant_trans_id: user's EVO payment → pay-order (Active_Payment only)
+- order_id (again): for Active_Payment it IS the EVO merchantTransID — the user pays via
+  EVO under the order_id; pay-order needs no separate merchant_trans_id
 - task_order_code : checkout → get-checkout
 
 ## Billing paths & cross-guards
@@ -101,17 +110,20 @@ run \`hotel-redaug <verb> --help\`.
 |------------------------|---------------------|----------|
 | monthly_settlement     | omit                | Deducts settlement balance → payOrder |
 | monthly_settlement     | supplied            | ERROR: BILLING_MODE_MISMATCH |
-| non-monthly (Active)   | required            | EVO verification → payOrder |
-| non-monthly (Active)   | omit                | ERROR: PARAM_MERCHANT_TRANS_ID_REQUIRED |
+| non-monthly (Active/现结) | omit (recommended) | Platform queries EVO for the order_id → verify → payOrder |
+| non-monthly (Active/现结) | == order_id        | OK (same as omit) |
+| non-monthly (Active/现结) | != order_id        | ERROR: MERCHANT_TRANS_ID_INVALID (anti-fraud) |
 
-## Active Payment flow (merchant_trans_id)
+## Active Payment flow (现结) — the EVO merchantTransID IS the order_id
 
-1. create-order returns total_amount + currency (no EVO credentials in response)
-2. User pays offline via shared EVO merchant parameters (onboarded separately)
-3. EVO produces a merchant_trans_id for the successful payment
-4. Agent calls pay-order --merchant-trans-id <evo_txn_id>
-5. Platform queries EVO: confirmed + exact match → payOrder → PAID
-6. If not yet paid → PAYMENT_NOT_COMPLETED; use --watch to auto-poll
+1. create-order returns order_id + total_amount + currency (no EVO credentials in response)
+2. User pays total_amount+currency via EVO, USING the order_id as the EVO merchantTransID
+   (the shared EVO parameters are onboarded separately, out of band)
+3. Agent calls pay-order --order-id <order_id>   (no --merchant-trans-id)
+4. Platform queries EVO for that order_id: paid + exact amount/currency match → payOrder → PAID
+5. If not yet paid → PAYMENT_NOT_COMPLETED; use --watch to auto-poll
+6. Why order_id (not an arbitrary id): it binds the payment to this exact order, so a caller
+   cannot present some other already-paid EVO transaction of the same amount.
 
 ## Invariants
 
@@ -137,7 +149,7 @@ run \`hotel-redaug <verb> --help\`.
   geocode the place or already know its coordinates; otherwise ask the user for a city or a
   more specific landmark.
 - BILLING_MODE_MISMATCH            → billing path and flags don't match (see cross-guards)
-- PARAM_MERCHANT_TRANS_ID_REQUIRED → Active Payment dev must supply --merchant-trans-id
+- MERCHANT_TRANS_ID_INVALID       → --merchant-trans-id != order_id; omit it (platform uses order_id)
 - ACCOUNT_INSUFFICIENT_BALANCE     → settlement account needs top-up; inform user
 - PAYMENT_NOT_COMPLETED            → EVO not confirmed yet; retry (--watch) or wait
 - PAYMENT_NOT_FOUND                → no EVO transaction for that ID; verify with user

@@ -87,7 +87,11 @@ function isPaymentTerminal(record: unknown): boolean {
  * header and optional `PayHotelOrderRequest` body.
  *
  * - `--order-id` (required): the order to pay.
- * - `--merchant-trans-id` (optional): triggers Active_Payment path.
+ * - `--merchant-trans-id` (optional): normally OMITTED. The settlement path is
+ *   decided server-side by billing_mode, not by this flag. For Active_Payment
+ *   (现结) the EVO merchantTransID is the order_id (the user pays via EVO under
+ *   the order_id), so the platform derives it; if supplied it must equal the
+ *   order_id, else MERCHANT_TRANS_ID_INVALID.
  * - `--idempotency-key` (required): forwarded as header.
  * - `--watch` / `--watch-interval` / `--watch-timeout`: polling mode that
  *   retries on PAYMENT_NOT_COMPLETED until PAID or timeout.
@@ -105,10 +109,10 @@ function isPaymentTerminal(record: unknown): boolean {
 export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('pay-order')
-    .description('Settle an existing hotel order (monthly_settlement or Active_Payment via --merchant-trans-id)')
+    .description('Settle an existing hotel order (path decided by billing_mode: monthly_settlement or Active_Payment/现结)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--order-id <id>', 'Order ID to pay (from create-order response)')
-    .option('--merchant-trans-id <id>', 'EVO merchant transaction ID (triggers Active_Payment path)')
+    .option('--merchant-trans-id <id>', 'Optional; if supplied MUST equal --order-id. Normally omit — for Active_Payment the platform verifies the EVO payment made under the order_id')
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -143,7 +147,9 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
       throw new CliError('PARAM_INVALID', 'Missing required --order-id.');
     }
 
-    // Optional: --merchant-trans-id (triggers Active_Payment)
+    // Optional: --merchant-trans-id. Normally omitted — for Active_Payment the
+    // platform derives the EVO merchantTransID from the order_id (the user pays
+    // via EVO under the order_id). If supplied it must equal the order_id.
     const merchantTransId = opts.merchantTransId as string | undefined;
 
     // Idempotency key resolution
