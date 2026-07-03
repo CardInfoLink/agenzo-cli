@@ -17,7 +17,7 @@
 | `merchant-cli` | `@agenzo/merchant-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/merchant-cli.svg)](https://www.npmjs.com/package/@agenzo/merchant-cli) | `agenzo-merchant-cli` | API key | Implemented |
 
 - **admin-cli** — control plane: `auth` / `config` / `orgs` / `developers` / `keys` / `accounts`.
-- **token-cli** — `payment-methods` (add payment method + 3DS) and `payment-tokens` (VCN / Network Token / X402).
+- **token-cli** — `payment-methods` (add payment method: Evo 3DS or UnionPay enrollment) and `payment-tokens` (VCN / Network Token / X402).
 - **merchant-cli** — merchant fulfillment: `services` (discover capabilities), `ride-elife` (ride-hailing), and `hotel-redaug` (international hotel booking via Redaug).
 
 ## Conventions
@@ -53,6 +53,10 @@
 |---|---|
 | `payment-methods` | `add` / `list` / `get` / `disable` |
 | `payment-tokens` | `create` / `list` / `get` / `revoke` |
+
+**Payment brands** (selected via `--payment-brand` on `payment-methods add`):
+- `evo` (default): Evo 3DS card binding — user verifies via email/browser.
+- `unionpay`: UnionPay enrollment — user authenticates via passkey on a UnionPay-hosted page.
 
 ### merchant-cli (runtime plane / API key)
 

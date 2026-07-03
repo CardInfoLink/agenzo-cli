@@ -408,6 +408,40 @@ describe('ride-elife book', () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
+  it('TC-BOOK-06b: malformed --passenger-phone throws PARAM_INVALID and sends no request', async () => {
+    const api = mockApiClient({ '/ride/book': BOOK_RESP });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        ...BASE, 'book', '--api-key', 'k', '--yes', '--idempotency-key', 'k',
+        '--quote-id', 'qte_1', '--vehicle-class', 'Sedan', '--price-amount', '42.50',
+        '--passenger-name', 'Alice', '--passenger-phone', '12345',
+      ]),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('TC-BOOK-06c: --passenger-phone with spaces/dashes is normalized to E.164', async () => {
+    const api = mockApiClient({ '/ride/book': BOOK_RESP });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'book', '--api-key', 'test-key', '--yes', '--idempotency-key', 'book-123',
+      '--quote-id', 'qte_1', '--vehicle-class', 'Sedan', '--price-amount', '42.50',
+      '--passenger-name', 'Alice', '--passenger-phone', '+1 415-555-2671', '--format', 'json',
+    ]);
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(body.passenger_phone).toBe('+14155552671');
+  });
+
+
+
   it('TC-BOOK-07: seat count out of the 0-5 range throws PARAM_INVALID', async () => {
     const api = mockApiClient({ '/ride/book': BOOK_RESP });
     const program = rideProgram(api);

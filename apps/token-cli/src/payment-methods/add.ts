@@ -4,6 +4,7 @@ import {
   ConfigManager,
   PromptEngine,
   Formatter,
+  createSpinner,
   resolveFormat,
   notify,
   CliError,
@@ -13,6 +14,7 @@ import {
 import type { CommandResult, OutputFormat } from '@agenzo/cli-core';
 import type { DropinCreateResponse, PaymentMethod } from '../types/api.js';
 import { collectPaymentMethodParams } from './prompts.js';
+import { attachSchemaHelp, pmAddSchema } from '../verb-schema.js';
 
 // ============================================================
 // Constants
@@ -54,6 +56,16 @@ type AddDeps = { apiClient: ApiClient };
  *    the add-payment UI in their own front-end via the Drop-in SDK, then polls
  *    the same verification/status endpoint until ACTIVE / FAILED / EXPIRED /
  *    30-minute timeout. No card details / idempotency key are needed.
+ *
+ * Orthogonal to `--mode` is `--payment-brand`, selecting the payment brand:
+ *
+ *  - `evo` (default): the existing Evo 3DS binding flow above, fully unchanged.
+ *  - `unionpay`: dispatches to UPI Agent Pay enrollment. Requires `--member <id>`
+ *    (the end-user identity the card is bound to). POSTs /payment-methods/create
+ *    with `payment_brand=unionpay`, prints the returned `enroll_url` for the user to open
+ *    in a browser to complete card binding, then exits immediately — the CLI
+ *    does not poll for unionpay (the async result arrives via webhook; polling
+ *    for terminal state is done by the orchestrator, not the CLI).
  */
 export function registerAddCommand(parent: Command, deps: AddDeps): void {
   const cmd = parent
@@ -61,6 +73,15 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .description('Add a payment method (manual 3DS or Drop-in session)')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--type <type>', 'Payment method type (default: card)', 'card')
+    .option(
+      '--payment-brand <brand>',
+      'Payment brand: "evo" (default; existing 3DS/Drop-in binding) or "unionpay" (UPI Agent Pay enrollment)',
+      'evo',
+    )
+    .option(
+      '--member <id>',
+      'End-user member id (required when --payment-brand unionpay; identifies which end-user this card belongs to)',
+    )
     .option(
       '--mode <mode>',
       'Add mode: "manual" (default; CLI collects card details and polls 3DS) or "dropin" (mint a Drop-in session and poll until the user finishes adding the payment method in the browser)',
@@ -76,12 +97,31 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header (manual mode only)',
+    )
+    .option(
+      '--no-poll',
+      'Dropin mode: mint the session, print it, and exit immediately without polling verification status (for server/SDK-driven flows where the front-end completes the binding)',
     );
+
+  attachSchemaHelp(cmd, pmAddSchema);
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();
     const format = resolveFormat(opts.format as string | undefined);
     const isYes = Boolean(opts.yes);
+
+    const paymentBrand = String(opts.paymentBrand ?? 'evo').toLowerCase();
+    if (paymentBrand !== 'evo' && paymentBrand !== 'unionpay') {
+      throw new CliError(
+        'PARAM_INVALID',
+        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo" or "unionpay".`,
+      );
+    }
+
+    if (paymentBrand === 'unionpay') {
+      await handleUnionpayPaymentBrand(deps, opts, format);
+      return;
+    }
 
     const mode = String(opts.mode ?? 'manual').toLowerCase();
     if (mode !== 'manual' && mode !== 'dropin') {
@@ -254,6 +294,136 @@ async function handleManualMode(
 }
 
 // ============================================================
+// UnionPay payment brand (enrollment: POST create(payment_brand=unionpay) + print enroll_url)
+// ============================================================
+
+/**
+ * UnionPay payment brand: POST /payment-methods/create with `payment_brand=unionpay` +
+ * `member_id`, print the returned `enroll_url` for the user to open in a
+ * browser to complete card binding, then return immediately.
+ *
+ * No idempotency key is needed (unlike evo manual mode) — unionpay binding is
+ * a UPI-side enrollment, not a card charge/verification attempt. No polling
+ * happens here: the enrollment result arrives asynchronously via webhook, and
+ * terminal-state polling (if any) is done by the orchestrator via
+ * `payment-methods list`/`get`, not the CLI.
+ */
+async function handleUnionpayPaymentBrand(
+  deps: AddDeps,
+  opts: Record<string, unknown>,
+  format: OutputFormat,
+): Promise<void> {
+  const isYes = Boolean(opts.yes);
+
+  // In --yes (non-interactive) mode, --member is required as a flag.
+  let member: string;
+  if (opts.member) {
+    member = String(opts.member);
+  } else if (isYes) {
+    throw new CliError(
+      'PARAM_INVALID',
+      'Missing required --member <id> for --payment-brand unionpay (required in --yes mode)',
+    );
+  } else {
+    member = await PromptEngine.resolveInput(undefined, {
+      message: 'Member ID (end-user identity this card belongs to):',
+      validate: (v) => v.trim().length > 0 || 'Member ID is required for --payment-brand unionpay',
+    });
+  }
+
+  const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
+    message: 'API Key:',
+    type: 'password',
+  });
+
+  const email = await PromptEngine.resolveInput(opts.email as string | undefined, {
+    message: 'Email:',
+  });
+
+  const result = await deps.apiClient.post<PaymentMethod>(
+    '/payment-methods/create',
+    { type: 'api-key', key: apiKey },
+    { type: 'card', payment_brand: 'unionpay', member_id: member, email },
+  );
+
+  if (!result.success) {
+    throw CliError.fromApi(result, { auth: 'api-key' });
+  }
+
+  const pm = result.data;
+
+  notify(format, 'success', 'Card binding initiated');
+
+  const createdResult: CommandResult<PaymentMethod> = {
+    data: pm,
+    text: () =>
+      Formatter.keyValue([
+        ['ID', pm.id],
+        ['Status', pm.status],
+        ['Enroll URL', pm.enroll_url ?? '-'],
+        ['Correlation ID', pm.correlation_id ?? '-'],
+      ]),
+  };
+
+  const configManager = new ConfigManager();
+  await renderWithContext(createdResult, { format }, configManager);
+
+  notify(
+    format,
+    'info',
+    'Open the Enroll URL in a browser to complete card binding. Waiting for result...',
+  );
+
+  // Poll GET /payment-methods/{id} every 5s, up to 60s, waiting for ACTIVE/FAILED.
+  const UNIONPAY_POLL_INTERVAL_MS = 5000;
+  const UNIONPAY_POLL_TIMEOUT_MS = 60_000;
+  const startTime = Date.now();
+
+  const spinner = format !== 'json' ? createSpinner('Waiting for card binding result...') : null;
+
+  while (Date.now() - startTime < UNIONPAY_POLL_TIMEOUT_MS) {
+    await sleep(UNIONPAY_POLL_INTERVAL_MS);
+
+    const pollResult = await deps.apiClient.get<PaymentMethod>(
+      `/payment-methods/${pm.id}`,
+      { type: 'api-key', key: apiKey },
+    );
+
+    if (pollResult.success) {
+      const status = pollResult.data.status;
+      if (status === 'ACTIVE') {
+        spinner?.stop();
+        notify(format, 'success', 'Payment method activated');
+        const activatedPm = pollResult.data;
+        const activatedResult: CommandResult<PaymentMethod> = {
+          data: activatedPm,
+          text: () => {
+            const lines: [string, string][] = [
+              ['ID', activatedPm.id],
+              ['Type', activatedPm.type ?? 'card'],
+              ['Status', activatedPm.status],
+            ];
+            if (activatedPm.brand) lines.push(['Brand', activatedPm.brand]);
+            if (activatedPm.first6) lines.push(['First 6', activatedPm.first6]);
+            if (activatedPm.last4) lines.push(['Last 4', activatedPm.last4]);
+            return Formatter.keyValue(lines);
+          },
+        };
+        await renderWithContext(activatedResult, { format }, configManager);
+        return;
+      }
+      if (status === 'FAILED') {
+        spinner?.stop('error', 'Card binding failed.');
+        return;
+      }
+    }
+    // Still PENDING — continue polling
+  }
+
+  spinner?.stop('info', 'Timed out waiting for card binding result. Check status later with: payment-methods get ' + pm.id);
+}
+
+// ============================================================
 // Drop-in mode (mint Drop-in session + poll)
 // ============================================================
 
@@ -308,6 +478,13 @@ async function handleDropinMode(
     'info',
     'Use the Session ID to add the payment method in the browser via the Drop-in SDK',
   );
+
+  // --no-poll: server/SDK-driven flows finish the binding in the front-end, so
+  // the CLI mints + prints the session and exits immediately. The session id is
+  // already on stdout (clean JSON in --format json), so the caller can parse it.
+  if (opts.poll === false) {
+    return;
+  }
 
   // 3) Poll verification/status (same endpoint manual mode uses) until the PM
   // reaches a terminal status or we time out at 30 minutes.

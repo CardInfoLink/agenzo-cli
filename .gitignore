@@ -37,3 +37,11 @@ scripts/test-commands.sh
 
 # CodeGraph
 .codegraph/
+
+# GitNexus (code intelligence index)
+.gitnexus/
+
+# Claude/Cursor AI config (not Kiro)
+.claude/
+CLAUDE.md
+AGENTS.md

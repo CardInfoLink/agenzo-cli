@@ -11,6 +11,7 @@ import {
   IdempotencyKeyRequiredError,
 } from '@agenzo/cli-core';
 import type { CommandResult, DisableResult } from '@agenzo/cli-core';
+import { attachSchemaHelp, pmDisableSchema } from '../verb-schema.js';
 
 /**
  * `payment-methods disable <pm_id>` — disable a payment method (§3.4.0.4).
@@ -28,6 +29,8 @@ export function registerDisableCommand(parent: Command, deps: { apiClient: ApiCl
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
+
+  attachSchemaHelp(cmd, pmDisableSchema);
 
   cmd.action(async (pmId: string) => {
     const opts = cmd.optsWithGlobals();

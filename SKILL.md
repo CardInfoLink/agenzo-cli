@@ -15,7 +15,7 @@ Agenzo provides three command-line tools, split by product area:
 | `merchant-cli` | `@agenzo/merchant-cli` | `agenzo-merchant-cli` | API Key | [doc/merchant-cli.md](doc/merchant-cli.md) |
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
-- **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
+- **token-cli** — payment-methods (add payment method: Evo 3DS or UnionPay enrollment) and payment-tokens (VCN / Network Token / X402).
 - **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …).
 
 ### hotel-redaug: create-order → pay-order flow
@@ -69,6 +69,15 @@ Follow this order across CLIs — each step depends on the previous one:
 - Steps 4–5 (add payment method + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
 - Ride fulfillment (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md)
 - Hotel booking (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md#hotel-redaug)
+
+### UnionPay flow (requires user action in browser)
+
+When the payment brand is `unionpay`, both card binding and token creation require the user to **open a URL in a browser** and complete **passkey authentication** (fingerprint/face/PIN). The CLI prints the URL and polls for the result — the process must stay alive until the user completes the action or times out (60s).
+
+- **Card binding** (`payment-methods add --payment-brand unionpay`): prints an Enroll URL → user opens it → passkey auth → card becomes ACTIVE.
+- **Token creation** (`payment-tokens create` with a UnionPay card): prints a Checkout URL → user opens it → passkey auth → token becomes ACTIVE with cryptogram.
+
+⚠️ **IMPORTANT**: Always inform the user that they need to open the printed URL in a browser to complete the verification. The CLI will wait and show the result once done.
 
 ## Shared Conventions
 

@@ -80,7 +80,25 @@ A ride booking is paid according to the developer's `billing_mode` (set at [admi
 
 ## Other notable flags (ride-elife book)
 
-Beyond the core ride fields, `book` also accepts: `--passenger-email`, `--luggage-count`, `--special-requests`, `--meet-and-greet` / `--meet-and-greet-price` / `--welcome-sign`, child/infant/toddler seat counts, and arrival/departure flight info (`--arrival-flight-no`, `--arrival-airline`, `--departure-flight-no`, `--departure-airline`). Run `agenzo-merchant-cli ride-elife book --help` for the full list.
+Beyond the core ride fields, `book` also accepts: `--passenger-email`, `--luggage-count`, `--special-requests`, `--meet-and-greet` / `--meet-and-greet-price` / `--welcome-sign`, `--child-seat-count` / `--infant-seat-count` / `--toddler-seat-count`, and arrival/departure flight info (`--arrival-flight-no`, `--arrival-airline`, `--departure-flight-no`, `--departure-airline`). Run `agenzo-merchant-cli ride-elife book --help` for the full list.
+
+### Seat pricing
+
+When requesting child/infant/toddler seats, the `--price-amount` must include the seat addon costs:
+
+```
+total = base_vehicle_price
+      + infant_seat_count  × add_service_unit_price.infant.amount
+      + toddler_seat_count × add_service_unit_price.toddler.amount
+      + child_seat_count   × add_service_unit_price.children.amount
+      + meet_and_greet_price (if applicable)
+```
+
+The `add_service_unit_price` object is returned in the `quote` response. If it's absent (null), seats have no additional cost.
+
+### Passenger counts (quote)
+
+`quote` accepts `--children-count`, `--infant-count`, and `--toddler-count` to inform eLife about the passenger breakdown. These affect the `add_service_unit_price` returned and may influence vehicle recommendations.
 
 ## hotel-redaug
 

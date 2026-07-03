@@ -5,6 +5,7 @@ import {
   ConfigManager,
   PromptEngine,
   Formatter,
+  createSpinner,
   resolveFormat,
   notify,
   CliError,
@@ -23,6 +24,13 @@ const DEFAULT_NT_FEE_CENTS = 50;
 
 /** Smallest USDC unit (1 USDC = 1_000_000 micro-units). */
 const USDC_UNIT = 1_000_000;
+
+/**
+ * Decimal-amount format used by the `unionpay_amount` intent field.
+ * Server expects a plain positive decimal string (e.g. "174.58") — NOT
+ * cents. No conversion happens for this field, only format validation.
+ */
+const DECIMAL_AMOUNT_RE = /^\d+(\.\d+)?$/;
 
 // ============================================================
 // Helpers (token-domain-specific — stays in app per requirement 5.5)
@@ -167,14 +175,25 @@ export function formatPaymentToken(data: Record<string, unknown>): string {
     lines.push(['Currency', String(vcn.currency || 'USD')]);
     lines.push(['Status', String(vcn.status || data.status || '')]);
   } else if (type === 'network_token') {
-    const nt = data.network_token as Record<string, unknown> | undefined ?? data;
-    lines.push(['Payment Token ID', String(data.id || nt.id || '')]);
-    lines.push(['Type', 'Network Token']);
-    lines.push(['Brand', String(nt.payment_brand || nt.brand || '')]);
-    lines.push(['ECI', String(nt.eci || '')]);
-    lines.push(['Cryptogram', String(nt.token_cryptogram || nt.cryptogram || '')]);
-    lines.push(['Expiry', String(nt.expiry_date || nt.expiry || '')]);
-    lines.push(['Value', String(nt.value || '')]);
+    if (data.status === 'PENDING' && data.checkout_url) {
+      // UnionPay async PENDING response is flat (no `network_token` sub-object,
+      // no cryptogram yet — that arrives later via checkout webhook).
+      lines.push(['Payment Token ID', String(data.id || '')]);
+      lines.push(['Type', 'Network Token']);
+      lines.push(['Status', 'PENDING']);
+      lines.push(['Checkout URL', String(data.checkout_url || '')]);
+      lines.push(['Correlation ID', String(data.correlation_id || '')]);
+    } else {
+      const nt = data.network_token as Record<string, unknown> | undefined ?? data;
+      lines.push(['Payment Token ID', String(data.id || nt.id || '')]);
+      lines.push(['Type', 'Network Token']);
+      lines.push(['Brand', String(nt.payment_brand || nt.brand || '')]);
+      const eci = nt.eci || '';
+      if (eci) lines.push(['ECI', String(eci)]);
+      lines.push(['Cryptogram', String(nt.token_cryptogram || nt.cryptogram || '')]);
+      lines.push(['Expiry', String(nt.expiry_date || nt.expiry || '')]);
+      lines.push(['Token Number', String(nt.value || '')]);
+    }
   } else if (type === 'x402') {
     const x402 = data.x402 as Record<string, unknown> | undefined ?? data;
     lines.push(['Payment Token ID', String(data.id || x402.id || '')]);
@@ -197,6 +216,17 @@ function formatCentsToUsd(cents: number | undefined): string {
   const dollars = Math.floor(cents / 100);
   const remainder = cents % 100;
   return `${dollars}.${String(remainder).padStart(2, '0')}`;
+}
+
+/**
+ * Validate the `unionpay_amount` intent field: a positive decimal string
+ * (e.g. "174.58"). No cents conversion — the server expects the decimal
+ * string verbatim.
+ */
+function isValidUnionpayAmount(amountStr: string): boolean {
+  const trimmed = amountStr.trim();
+  if (!DECIMAL_AMOUNT_RE.test(trimmed)) return false;
+  return parseFloat(trimmed) > 0;
 }
 
 // ============================================================
@@ -223,6 +253,11 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     .option('--network <network>', 'Network (X402)')
     .option('--deadline <deadline>', 'Deadline (X402)')
     .option('--external-tx-id <id>', 'External transaction ID')
+    .option('--recipient-first-name <name>', 'UnionPay network token: recipient first name (order delivery details)')
+    .option('--recipient-last-name <name>', 'UnionPay network token: recipient last name (order delivery details)')
+    .option('--recipient-email <email>', 'UnionPay network token: recipient email (recipient-email or recipient-phone required)')
+    .option('--recipient-phone <phone>', 'UnionPay network token: recipient phone (recipient-email or recipient-phone required)')
+    .option('--unionpay-amount <amount>', 'UnionPay network token: intent amount as a decimal string, e.g. "174.58"')
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -257,6 +292,29 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
       card: opts.card as string | undefined,
       yes: isYes,
     });
+
+    // --- For network tokens, fetch the selected PM's `payment_brand` up front ---
+    // (needed to branch evo vs. unionpay below, and to enforce that unionpay
+    // cards may only be selected via --payment-method-id, never --card).
+    let selectedPmPaymentBrand: string | undefined;
+    if (serverType === 'network_token') {
+      const pmResult = await deps.apiClient.get<PaymentMethod>(
+        `/payment-methods/${paymentMethodId}`,
+        { type: 'api-key', key: apiKey },
+      );
+      if (!pmResult.success) {
+        throw CliError.fromApi(pmResult, { auth: 'api-key' });
+      }
+      selectedPmPaymentBrand = pmResult.data.payment_brand;
+
+      if (selectedPmPaymentBrand === 'unionpay' && opts.card && !opts.paymentMethodId) {
+        throw new CliError(
+          'PARAM_INVALID',
+          'UnionPay cards must be selected via --payment-method-id; --card (last4 matching) is not supported for unionpay payment brand.',
+        );
+      }
+    }
+    const isUnionpayNetworkToken = serverType === 'network_token' && selectedPmPaymentBrand === 'unionpay';
 
     // --- Resolve member ---
     let member: string | undefined = opts.member as string | undefined;
@@ -318,11 +376,72 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
         typeBody.currency = opts.currency as string;
       }
     } else if (serverType === 'network_token') {
-      // Network-token branch: fetch fee config (fallback to default)
-      feeCents = await fetchNetworkTokenFee(deps.apiClient, apiKey);
-      freezeAmountCents = feeCents;
-      feeDisplay = `$${formatCentsToUsd(feeCents)}`;
-      freezeDisplay = feeDisplay;
+      if (isUnionpayNetworkToken) {
+        // UnionPay branch: no fee/freeze concept here (fee bypass is a
+        // server-side concern — see task 15.3). Skip fee lookup entirely.
+        // Collect intent fields instead: recipient info + unionpay_amount.
+        const unionpayAmountStr = await PromptEngine.resolveInput(
+          opts.unionpayAmount as string | undefined,
+          {
+            message: 'UnionPay intent amount (USD, e.g. 174.58):',
+            validate: (v) => isValidUnionpayAmount(v) || 'Amount must be a positive decimal, e.g. "174.58"',
+          },
+        );
+        if (!isValidUnionpayAmount(unionpayAmountStr)) {
+          throw new CliError(
+            'PARAM_INVALID',
+            `Invalid --unionpay-amount "${unionpayAmountStr}". Expected a positive decimal string, e.g. "174.58".`,
+          );
+        }
+        typeBody.unionpay_amount = unionpayAmountStr.trim();
+
+        typeBody.recipient_first_name = await PromptEngine.resolveInput(
+          opts.recipientFirstName as string | undefined,
+          {
+            message: 'Recipient first name:',
+            validate: (v) => v.trim().length > 0 || 'Recipient first name is required',
+          },
+        );
+        typeBody.recipient_last_name = await PromptEngine.resolveInput(
+          opts.recipientLastName as string | undefined,
+          {
+            message: 'Recipient last name:',
+            validate: (v) => v.trim().length > 0 || 'Recipient last name is required',
+          },
+        );
+
+        let recipientEmail = opts.recipientEmail as string | undefined;
+        let recipientPhone = opts.recipientPhone as string | undefined;
+        if (!recipientEmail && !recipientPhone) {
+          if (isYes) {
+            throw new CliError(
+              'PARAM_INVALID',
+              '--recipient-email or --recipient-phone is required for unionpay network tokens.',
+            );
+          }
+          const emailInput = await PromptEngine.resolveInput(undefined, {
+            message: 'Recipient email (optional, press Enter to skip and enter phone instead):',
+            validate: () => true,
+          });
+          if (emailInput.trim()) {
+            recipientEmail = emailInput.trim();
+          } else {
+            const phoneInput = await PromptEngine.resolveInput(undefined, {
+              message: 'Recipient phone (required, since no email was given):',
+              validate: (v) => v.trim().length > 0 || 'Recipient email or phone is required',
+            });
+            recipientPhone = phoneInput.trim();
+          }
+        }
+        if (recipientEmail) typeBody.recipient_email = recipientEmail;
+        if (recipientPhone) typeBody.recipient_phone = recipientPhone;
+      } else {
+        // Evo branch (default): fetch fee config (fallback to default)
+        feeCents = await fetchNetworkTokenFee(deps.apiClient, apiKey);
+        freezeAmountCents = feeCents;
+        feeDisplay = `$${formatCentsToUsd(feeCents)}`;
+        freezeDisplay = feeDisplay;
+      }
     } else if (serverType === 'x402') {
       // X402 branch: USDC amount + fee
       const amountStr = await PromptEngine.resolveInput(opts.amount as string | undefined, {
@@ -374,11 +493,18 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
 
     // --- Confirmation (unless --yes) ---
     if (!isYes) {
-      const warningLines = [`Freeze: ${freezeDisplay}`, `Fee: ${feeDisplay}`];
-      notify(format, 'warning', warningLines.join(' | '));
+      if (freezeDisplay !== undefined && feeDisplay !== undefined) {
+        const warningLines = [`Freeze: ${freezeDisplay}`, `Fee: ${feeDisplay}`];
+        notify(format, 'warning', warningLines.join(' | '));
+      } else if (isUnionpayNetworkToken) {
+        notify(format, 'info', 'UnionPay: no fee (clearing network not yet enabled)');
+      }
 
+      const confirmMessage = isUnionpayNetworkToken
+        ? 'Proceed with UnionPay network token request?'
+        : 'Proceed with token creation?';
       const confirmed = await confirm({
-        message: 'Proceed with token creation?',
+        message: confirmMessage,
         default: true,
       });
       if (!confirmed) {
@@ -450,6 +576,51 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     };
 
     await renderWithContext(commandResult, { format }, configManager);
+
+    // UnionPay network tokens are async (PENDING at this point) — poll
+    // GET /payment-tokens/{id} every 5s up to 60s waiting for ACTIVE/FAILED.
+    if (isUnionpayNetworkToken) {
+      notify(
+        format,
+        'info',
+        'Open the Checkout URL to complete the UnionPay payment verification. Waiting for result...',
+      );
+
+      const UNIONPAY_TOKEN_POLL_INTERVAL_MS = 5000;
+      const UNIONPAY_TOKEN_POLL_TIMEOUT_MS = 60_000;
+      const pollStart = Date.now();
+      const tokenId = tokenData.id as string;
+
+      while (Date.now() - pollStart < UNIONPAY_TOKEN_POLL_TIMEOUT_MS) {
+        await new Promise((resolve) => setTimeout(resolve, UNIONPAY_TOKEN_POLL_INTERVAL_MS));
+
+        const pollResult = await deps.apiClient.get<Record<string, unknown>>(
+          `/payment-tokens/${tokenId}`,
+          { type: 'api-key', key: apiKey },
+        );
+
+        if (pollResult.success) {
+          const status = pollResult.data.status as string;
+          if (status === 'ACTIVE') {
+            notify(format, 'success', 'UnionPay network token activated!');
+            if (!pollResult.data.type) pollResult.data.type = serverType;
+            const activatedResult: CommandResult<Record<string, unknown>> = {
+              data: pollResult.data,
+              text: () => formatPaymentToken(pollResult.data),
+            };
+            await renderWithContext(activatedResult, { format }, configManager);
+            return;
+          }
+          if (status === 'FAILED') {
+            notify(format, 'error', 'UnionPay network token failed.');
+            return;
+          }
+        }
+        // Still PENDING — continue polling
+      }
+
+      notify(format, 'info', `Timed out waiting for token activation. Check status later with: payment-tokens get ${tokenId}`);
+    }
   });
 }
 
