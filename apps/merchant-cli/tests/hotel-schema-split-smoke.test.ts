@@ -14,7 +14,7 @@ import path from 'node:path';
 // Load the provider schema JSON
 const SCHEMA_PATH = path.resolve(
   __dirname,
-  '../../../../agenzo-providers/providers/redaug/schema/hotel-redaug.json',
+  '../../../../agenzo-providers/providers/redaug/redaug_provider/schema/hotel-redaug.json',
 );
 const schema = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf-8'));
 const verbs = schema.verbs as Record<string, unknown>;

@@ -9,6 +9,7 @@ import {
   renderWithContext,
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
+import { attachSchemaHelp, ptListSchema } from '../verb-schema.js';
 
 // ============================================================
 // getSummary — per-type summary for table rendering (§3.4.2)
@@ -68,6 +69,8 @@ export function registerListCommand(parent: Command, deps: { apiClient: ApiClien
     .option('--api-key <key>', 'API Key for authentication')
     .option('--type <type>', 'Filter by token type')
     .option('--member <member_id>', 'Filter by member ID');
+
+  attachSchemaHelp(cmd, ptListSchema);
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();

@@ -23,6 +23,10 @@ import { registerListOrdersCommand } from './ride-elife/list-orders.js';
 import { registerServicesListCommand } from './services/list.js';
 import { registerServiceGetCommand } from './services/get.js';
 
+// orders commands (unified cross-provider order index — GET /orders)
+import { registerOrdersListCommand } from './orders/list.js';
+import { registerOrdersGetCommand } from './orders/get.js';
+
 // hotel-redaug commands (injection-style register, D6)
 import { registerHotelSearchCommand } from './hotel-redaug/search.js';
 import { registerHotelQuoteCommand } from './hotel-redaug/quote.js';
@@ -111,6 +115,16 @@ async function main() {
   const servicesCmd = program.command('services').description('Merchant service discovery');
   registerServicesListCommand(servicesCmd, { discoveryClient, program });
   registerServiceGetCommand(servicesCmd, { discoveryClient, program });
+
+  // orders command group (unified cross-provider order index, GET /orders).
+  // Spans ride + hotel (+ future providers) in one call — use it for generic
+  // "my orders" requests; prefer the domain-specific list-orders/get once the
+  // business (ride vs hotel) is known.
+  const ordersCmd = program.command('orders').description(
+    'Unified cross-provider order index (spans ride + hotel). Use for generic "my orders" requests; use ride-elife/hotel-redaug commands once the business is known.',
+  );
+  registerOrdersListCommand(ordersCmd, deps);
+  registerOrdersGetCommand(ordersCmd, deps);
 
   // hotel-redaug command group (Redaug hotel booking) — 13 verbs
   const hotelCmd = program.command('hotel-redaug').description(

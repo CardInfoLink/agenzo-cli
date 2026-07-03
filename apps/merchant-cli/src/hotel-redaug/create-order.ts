@@ -182,6 +182,7 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--contact-email <email>', 'Booking contact email')
     .option('--arrive-time <time>', 'Expected arrival time (HH:mm, hotel local time)')
     .option('--special-requests <text>', 'Free-text special requests (non-binding)')
+    .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -236,6 +237,7 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.contactEmail !== undefined) body.contact_email = opts.contactEmail as string;
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
+    if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
 
     // Confirm before the write unless --yes. This locks inventory at the quoted
     // rate — the user must have already picked this hotel/rate (from search +

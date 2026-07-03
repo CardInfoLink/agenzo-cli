@@ -1085,3 +1085,87 @@ export const hotelDetailSchema: VerbSchema = {
     PARAM_INVALID: 'Ensure --hotel-id is a non-empty string, then retry.',
   },
 };
+
+// ============================================================
+// Unified cross-provider orders verb schemas ("orders" noun)
+// ============================================================
+//
+// Unlike ride-elife / hotel-redaug, `orders` has NO business logic of its own
+// — it is a thin read-only index spanning ALL providers (ride + hotel, and any
+// future ones). Use it when the user asks for "my orders" / "order history"
+// generically, without naming a specific business. Once you already know
+// which business the user means (or need domain-specific columns like
+// vehicle_class / hotel_name), prefer `ride-elife list-orders` /
+// `hotel-redaug list-orders` instead.
+
+export const ORDERS_NOUN = 'orders';
+
+/** `orders list` schema — cross-provider order list (`GET /orders`). Read-only. */
+export const unifiedOrdersListSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: ORDERS_NOUN,
+  verb: 'list',
+  description:
+    'List orders across ALL providers (ride + hotel) in one call. Use this for generic "my orders" / "order history" requests. Prefer ride-elife/hotel-redaug list-orders when the user names a specific business.',
+  flags: {
+    'order-type': { type: 'string', required: false, description: 'Filter by provider: ride | hotel' },
+    status: { type: 'string', required: false, description: 'Filter by NORMALIZED status (NOT the domain-specific status): PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
+    page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1' },
+  },
+  response: {
+    orders: {
+      type: 'array',
+      description: 'Slim cross-provider order-index items. For business-specific fields (vehicle_class, hotel_name, etc.), call `orders get --order-id <id>` or the domain-specific `get`.',
+      items: {
+        order_id: { type: 'string', description: 'Order id (rio_... for ride, hho_... for hotel). Pass to `orders get`.' },
+        order_type: { type: 'string', description: "'ride' or 'hotel'" },
+        status: { type: 'string', description: 'Normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
+        amount: { type: 'float|null', description: 'Order amount in DECIMAL currency units (NOT cents)' },
+        currency: { type: 'string|null', description: 'ISO 4217 currency code' },
+        created_at: { type: 'string|null', description: 'ISO 8601 datetime' },
+        updated_at: { type: 'string|null', description: 'ISO 8601 datetime' },
+      },
+    },
+    total: { type: 'int', description: 'Total matching orders across all providers' },
+    page: { type: 'int', description: 'Current page' },
+    page_size: { type: 'int', description: 'Items per page' },
+  },
+  example: {
+    command: 'agenzo-merchant-cli orders list --page 1 --page-size 10',
+    output_summary:
+      'Returns a paginated, cross-provider list of orders (both ride and hotel). If the user then asks about one order, use its order_id with `orders get`.',
+  },
+  error_recovery: {
+    INVALID_REQUEST: 'The --status value is not one of PENDING/CONFIRMED/COMPLETED/CANCELLED/FAILED. Fix and retry.',
+    INTERNAL_ERROR: 'Transient backend error. Retry once after a short delay.',
+    PARAM_INVALID: 'Ensure --page / --page-size are positive integers, then retry.',
+  },
+};
+
+/** `orders get` schema — cross-provider order detail (`GET /orders/{id}`). Read-only. */
+export const unifiedOrdersGetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: ORDERS_NOUN,
+  verb: 'get',
+  description:
+    'Get a single order detail by id, regardless of which provider (ride/hotel) it belongs to. The platform resolves order_id -> provider internally and returns that provider\'s own detail shape.',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Order id from `orders list` (rio_... for ride, hho_... for hotel)' },
+  },
+  response: {
+    '(varies by order_type)': {
+      type: 'object',
+      description:
+        'The response shape is delegated to the owning provider and therefore varies: a ride order returns the same shape as `ride-elife get`; a hotel order returns the same shape as `hotel-redaug get`. Treat the result as an opaque object and surface whatever fields it contains — do NOT assume a fixed schema.',
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli orders get --order-id hho_01K...',
+    output_summary: "Returns the order's detail, delegated to its owning provider (ride or hotel).",
+  },
+  error_recovery: {
+    ORDER_NOT_FOUND: 'The order_id does not exist or does not belong to this developer/org. Verify the id from `orders list`. Do NOT retry blindly.',
+    INTERNAL_ERROR: "The order's provider detail lookup is temporarily unavailable. Retry once after a short delay.",
+  },
+};

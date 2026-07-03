@@ -181,3 +181,28 @@ export interface ListOrdersResponse {
   page: number;
   page_size: number;
 }
+
+// ---- Unified cross-provider orders (GET /orders, GET /orders/{id}) ----
+
+/** Slim cross-provider order-index item — see `ap_orders_index`. */
+export interface UnifiedOrderListItem {
+  order_id: string;
+  /** 'ride' | 'hotel' | future provider types. */
+  order_type: string;
+  /** PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED (normalized, NOT the domain-specific status). */
+  status: string;
+  amount: number | null;
+  currency: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface UnifiedListOrdersResponse {
+  orders: UnifiedOrderListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** `GET /orders/{id}` response — delegated verbatim to the owning provider domain's detail shape. */
+export type UnifiedOrderDetailResponse = Record<string, unknown>;

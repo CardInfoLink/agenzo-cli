@@ -14,6 +14,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult, OutputFormat } from '@agenzo/cli-core';
 import type { PaymentMethod } from '../types/api.js';
+import { attachSchemaHelp, ptCreateSchema } from '../verb-schema.js';
 
 // ============================================================
 // Constants
@@ -262,6 +263,8 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
+
+  attachSchemaHelp(cmd, ptCreateSchema);
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();

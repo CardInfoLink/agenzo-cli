@@ -378,7 +378,7 @@ describe('§6.3 error mapping (CliError.fromApi + exitCodeFor)', () => {
     expect(exitCodeFor(err)).toBe(2);
   });
 
-  it('TC-ERR-14: json error envelope is { error:{ code, code_num, message, request_id? } }', () => {
+  it('TC-ERR-14: json error envelope is { error:{ code, code_num, message, request_id?, backend_message? } }', () => {
     const withReq = toErrorEnvelope(
       CliError.fromApi(apiError({ statusCode: 401, requestId: 'req-1' }), { auth: 'api-key' }),
     );
@@ -388,6 +388,9 @@ describe('§6.3 error mapping (CliError.fromApi + exitCodeFor)', () => {
         code_num: 1101,
         message: expect.any(String),
         request_id: 'req-1',
+        // apiError()'s errorMessage ('backend error') differs from the stable
+        // KEY_INVALID message, so it is surfaced as diagnostic backend_message.
+        backend_message: 'backend error',
       },
     });
 

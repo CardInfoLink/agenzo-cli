@@ -9,6 +9,7 @@ import {
   renderWithContext,
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
+import { attachSchemaHelp, ptGetSchema } from '../verb-schema.js';
 
 // ============================================================
 // Formatter — SEPARATE from create's `formatPaymentToken` (Property 7)
@@ -165,6 +166,8 @@ export function registerGetCommand(parent: Command, deps: { apiClient: ApiClient
     .description('Get a payment token by ID')
     .option('--api-key <key>', 'API key for authentication')
     .option('--reveal', 'Reveal full VCN card number and CVC in the output');
+
+  attachSchemaHelp(cmd, ptGetSchema);
 
   cmd.action(async (paymentTokenId: string) => {
     const opts = cmd.optsWithGlobals();

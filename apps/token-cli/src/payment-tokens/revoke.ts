@@ -12,6 +12,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { RevokeResult } from '../types/api.js';
+import { attachSchemaHelp, ptRevokeSchema } from '../verb-schema.js';
 
 /**
  * `payment-tokens revoke <payment_token_id>` — revoke a payment token (§3.4.4).
@@ -33,6 +34,8 @@ export function registerRevokeCommand(parent: Command, deps: { apiClient: ApiCli
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
+
+  attachSchemaHelp(cmd, ptRevokeSchema);
 
   cmd.action(async (paymentTokenId: string) => {
     const opts = cmd.optsWithGlobals();
