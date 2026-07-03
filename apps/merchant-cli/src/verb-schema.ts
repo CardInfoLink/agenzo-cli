@@ -599,7 +599,7 @@ export const hotelPayOrderSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'pay-order',
   description:
-    'Settle an existing AWAITING_PAYMENT order created by create-order. Takes only --order-id; the billing path is decided server-side by the order billing_mode. monthly_settlement deducts from the developer credit account then confirms with the supplier; pay_per_call verifies the user EVO payment — the EVO merchantTransID IS the order_id (the user pays via EVO under the order_id), so the platform queries EVO for that order_id and requires an exact amount/currency match before confirming (the response settlement_path is then "active_payment"). On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
+    'Settle an existing AWAITING_PAYMENT order created by create-order. Takes only --order-id; the billing path is decided server-side by the order billing_mode. monthly_settlement deducts from the developer credit account then confirms with the supplier; pay_per_call verifies the user EVO payment — the EVO merchantTransID IS the order_id (the user pays via EVO under the order_id), so the platform queries EVO for that order_id and requires an exact amount/currency match before confirming (the response settlement_path is then "pay_per_call"). On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id). For pay_per_call this is also the EVO merchantTransID the user paid under.' },
     'idempotency-key': {
@@ -614,7 +614,7 @@ export const hotelPayOrderSchema: VerbSchema = {
   },
   response: {
     order_id: { type: 'string', description: 'Order reference.' },
-    settlement_path: { type: 'string', description: "Which billing path was used: 'monthly_settlement' or 'active_payment'." },
+    settlement_path: { type: 'string', description: "Which billing path was used: 'monthly_settlement' or 'pay_per_call' (same tokens as billing_mode)." },
     amount: { type: 'float', description: 'Settled amount in DECIMAL units.' },
     currency: { type: 'string', description: 'ISO 4217 currency code of the settlement.' },
     pay_status: { type: 'int', description: 'Upstream pay status (1 = paid). The order internal status is now PAID.' },
@@ -623,7 +623,7 @@ export const hotelPayOrderSchema: VerbSchema = {
   example: {
     command:
       'agenzo-merchant-cli hotel-redaug pay-order --order-id hho_01KWC63Z5CD6CKBM33Q7SC2ZDT --idempotency-key pay-h1n2',
-    output_summary: 'Settlement path is chosen server-side by billing_mode. monthly_settlement: deducts from the credit account, confirms with the supplier. Returns {order_id, settlement_path:"monthly_settlement", amount, currency, pay_status:1, settled_at}. Order becomes PAID. For pay_per_call the user must have already paid via EVO using the order_id as the merchantTransID; the same command settles it (settlement_path:"active_payment").',
+    output_summary: 'Settlement path is chosen server-side by billing_mode. monthly_settlement: deducts from the credit account, confirms with the supplier. Returns {order_id, settlement_path:"monthly_settlement", amount, currency, pay_status:1, settled_at}. Order becomes PAID. For pay_per_call the user must have already paid via EVO using the order_id as the merchantTransID; the same command settles it (settlement_path:"pay_per_call").',
   },
   error_recovery: {
     PAYMENT_NOT_COMPLETED: 'pay_per_call only: EVO has not yet confirmed the payment for this order_id. Retry with the SAME idempotency-key after a delay, or use --watch to poll automatically until PAID.',

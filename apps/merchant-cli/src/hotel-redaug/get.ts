@@ -51,7 +51,13 @@ function need(value: string | undefined, flag: string): string {
  * present (the provider path carries it; the local-cache fallback omits it).
  * `hotel_confirm_no` is populated once the order reaches CONFIRMED (3) and is
  * null while PROCESSING (2). `total_amount` is a DECIMAL currency unit (NOT
- * cents) — printed verbatim.
+ * cents), always paired with `currency` (sourced from the local record on
+ * both the provider and local-cache paths) so an amount is never shown
+ * without its unit. `rooms` / `settlement_path` / `created_at` / `updated_at`
+ * plus the booking-detail fields (guest / contact / rooms booked / arrive
+ * time / special requests) surface the order detail persisted at create-order
+ * time — modeled on what a booking-confirmation view shows, not the raw
+ * create-order inputs (occupancy counts / nationality are excluded).
  */
 function formatGetOrder(data: GetHotelOrderResponse): string {
   const lines: [string, string][] = [
@@ -70,10 +76,31 @@ function formatGetOrder(data: GetHotelOrderResponse): string {
   if (data.check_in) lines.push(['Check-in', String(data.check_in)]);
   if (data.check_out) lines.push(['Check-out', String(data.check_out)]);
   if (data.total_amount !== undefined && data.total_amount !== null) {
-    lines.push(['Total amount', String(data.total_amount)]);
+    const currency = data.currency ? ` ${data.currency}` : '';
+    lines.push(['Total amount', `${String(data.total_amount)}${currency}`]);
   }
+  if (data.settlement_path) lines.push(['Settlement path', String(data.settlement_path)]);
+  if (data.rooms && data.rooms.length > 0) {
+    lines.push([
+      'Rooms',
+      data.rooms.map((r) => `${r.room_index}:${r.guest_name}`).join(', '),
+    ]);
+  }
+  if (data.room_num !== undefined && data.room_num !== null) {
+    lines.push(['Rooms booked', String(data.room_num)]);
+  }
+  if (data.guest?.name) lines.push(['Guest', String(data.guest.name)]);
+  if (data.contact?.name) {
+    const phone = data.contact.phone
+      ? ` (+${data.contact.country_code ?? ''} ${data.contact.phone})`
+      : '';
+    lines.push(['Contact', `${data.contact.name}${phone}`]);
+  }
+  if (data.arrive_time) lines.push(['Arrive time', String(data.arrive_time)]);
+  if (data.special_requests) lines.push(['Special requests', String(data.special_requests)]);
   if (data.channel_state) lines.push(['Channel state', String(data.channel_state)]);
-  if (data.source) lines.push(['Source', String(data.source)]);
+  if (data.created_at) lines.push(['Created at', String(data.created_at)]);
+  if (data.updated_at) lines.push(['Updated at', String(data.updated_at)]);
 
   return Formatter.keyValue(lines);
 }

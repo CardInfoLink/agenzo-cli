@@ -29,7 +29,7 @@ The `hotel-redaug` capability splits booking into two independent steps:
 
 `pay-order` depends on `create-order`'s output `order_id`. The two verbs MUST be called in sequence: `create-order` first, then `pay-order`.
 
-For Active_Payment, if EVO has not yet confirmed the payment, `pay-order` returns `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to poll until the payment is confirmed and the order reaches `PAID` status.
+For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` returns `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to poll until the payment is confirmed and the order reaches `PAID` status.
 
 ## Behavior Rules (all CLIs)
 

@@ -140,6 +140,15 @@ Total amount   320.00 CNY
 Order status   AWAITING_PAYMENT
 ```
 
+**Before calling `pay-order`, branch on your `billing_mode`:**
+
+- **`monthly_settlement`**: go straight to `pay-order --order-id <order_id>` — nothing else to do.
+- **`pay_per_call`**: do NOT call `pay-order` yet. First drive your own EVO payment integration
+  using this `order_id` as the EVO merchantTransID, and get the end-user to actually pay
+  `total_amount`+`currency` via EVO. Only once that payment is complete should you call
+  `pay-order --order-id <order_id>` — it verifies the EVO payment and settles the order; it
+  does not itself collect the payment.
+
 ### pay-order
 
 Settles an existing order created by `create-order`. Requires `--order-id` (the `order_id` returned by `create-order`).
@@ -150,7 +159,7 @@ determined server-side by the developer's `billing_mode`:
 | billing_mode | Behavior |
 |------|----------|
 | `monthly_settlement` | Debits settlement account balance → calls upstream `payOrder`. |
-| `pay_per_call` | Platform queries EVO for the **order_id** (the merchantTransID the user paid under) → verifies exact amount/currency → calls upstream `payOrder` (response `settlement_path` is `"active_payment"`). |
+| `pay_per_call` | Platform queries EVO for the **order_id** (the merchantTransID the user paid under) → verifies exact amount/currency → calls upstream `payOrder` (response `settlement_path` is `"pay_per_call"`). |
 
 ```bash
 # monthly_settlement — debits the settlement account

@@ -15,7 +15,7 @@
 
 - **`services`** (capability discovery): list what's currently available and how to call it — run this first to learn the current capability set.
 - **`ride-elife`** (ride-hailing): the full loop of quote → book → query/poll → cancel → list-orders.
-- **`hotel-redaug`** (hotel booking): search, find-destination, hotel-filters, list-cities, hotel-detail, quote, create-order, pay-order, get (status/poll), cancel, checkout, get-checkout, list-orders. Supports both **monthly_settlement** (on-account deduction) and **Active_Payment** (user pays via EVO, passes back `merchant_trans_id`).
+- **`hotel-redaug`** (hotel booking): search, find-destination, hotel-filters, list-cities, hotel-detail, quote, create-order, pay-order, get (status/poll), cancel, checkout, get-checkout, list-orders. Supports both **monthly_settlement** (on-account deduction) and **pay_per_call** (user pays via EVO using the order_id as the merchantTransID).
 
 More fulfillment capabilities are added as new nouns over time; `services list` always reflects the current set.
 
@@ -238,7 +238,7 @@ The request body contains at most an optional `payment_order_id`.
 chosen server-side by the developer's `billing_mode`:
 
 - **monthly_settlement**: deducted from the monthly-settlement account. The response carries `payment_status=ON_ACCOUNT`.
-- **pay_per_call**: the user pays via shared EVO parameters out-of-band using the create-order `order_id` as the EVO merchantTransID; the platform queries EVO for that same `order_id` to confirm payment before calling upstream `payOrder` (response `settlement_path` is `active_payment`). If EVO reports "not yet paid", the CLI receives `PAYMENT_NOT_COMPLETED` (exit 1) — use `--watch` to poll until confirmed.
+- **pay_per_call**: the user pays via shared EVO parameters out-of-band using the create-order `order_id` as the EVO merchantTransID; the platform queries EVO for that same `order_id` to confirm payment before calling upstream `payOrder` (response `settlement_path` is `pay_per_call`). If EVO reports "not yet paid", the CLI receives `PAYMENT_NOT_COMPLETED` (exit 1) — use `--watch` to poll until confirmed.
 
 If the order's `billing_mode` is neither of the two values above, `pay-order` returns `BILLING_MODE_MISMATCH` (exit 1).
 
