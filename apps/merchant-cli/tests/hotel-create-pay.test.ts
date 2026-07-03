@@ -4,7 +4,7 @@
  * Task 15.1 — covers:
  *   - create-order success → exit 0 + order_id in stdout (Req 9.1)
  *   - pay-order monthly_settlement path → success (Req 9.2, 9.4)
- *   - pay-order active_payment path (server-decided by billing_mode, same
+ *   - pay-order pay_per_call path (server-decided by billing_mode, same
  *     request shape — no merchant-transaction-id flag) → success (Req 9.3)
  *   - PAYMENT_NOT_COMPLETED → exit 1 + error in stderr (Req 9.6)
  *   - --watch mode polling until PAID / timeout (Req 9.5)
@@ -56,7 +56,7 @@ const PAY_ORDER_SUCCESS_RESP = {
 const PAY_ORDER_ACTIVE_RESP = {
   order_id: 'ord_new1',
   order_status: 'PAID',
-  settlement_path: 'active_payment',
+  settlement_path: 'pay_per_call',
   pay_status: 'success',
   total_amount: 640,
   currency: 'CNY',
@@ -229,7 +229,7 @@ describe('hotel-redaug pay-order (active payment path)', () => {
     const payload = parseJsonOutput(out.text()) as Record<string, any>;
     expect(payload.order_id).toBe('ord_new1');
     expect(payload.order_status).toBe('PAID');
-    expect(payload.settlement_path).toBe('active_payment');
+    expect(payload.settlement_path).toBe('pay_per_call');
     expect(payload.merchant_trans_id).toBe('evo_tx_123');
   });
 });

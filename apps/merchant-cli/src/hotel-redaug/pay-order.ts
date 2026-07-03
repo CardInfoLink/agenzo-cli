@@ -31,7 +31,7 @@ export interface PayHotelOrderResponse {
   total_amount?: number;
   currency?: string;
   billing_entry_id?: string;
-  /** For the active_payment settlement path, this echoes the order_id (the EVO merchantTransID). */
+  /** For the pay_per_call settlement path, this echoes the order_id (the EVO merchantTransID). */
   merchant_trans_id?: string;
   [key: string]: unknown;
 }

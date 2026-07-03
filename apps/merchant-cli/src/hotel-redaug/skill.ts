@@ -18,7 +18,7 @@ run \`hotel-redaug <verb> --help\`.
 - API key with merchant scope
 - Two billing modes supported (set on the developer, not chosen per-call):
   - **monthly_settlement**: developer has a settlement account with sufficient balance
-  - **pay_per_call**: developer collects payment from their end-user via EVO; the user pays using the create-order \`order_id\` as the EVO merchantTransID, and the platform verifies by querying EVO for that order_id (the pay-order response reports settlement_path "active_payment")
+  - **pay_per_call**: developer collects payment from their end-user via EVO; the user pays using the create-order \`order_id\` as the EVO merchantTransID, and the platform verifies by querying EVO for that order_id (the pay-order response reports settlement_path "pay_per_call")
 - BILLING_MODE_MISMATCH means the order billing_mode is not one of the two modes above
 - Pass --api-key <key> --format json on every call; add --yes on writes
 
@@ -63,32 +63,40 @@ run \`hotel-redaug <verb> --help\`.
    - Generate a unique idempotency-key
    - Response → save order_id + fc_order_code + total_amount + currency
    - Order status: AWAITING_PAYMENT (no money charged yet)
-   - FOR pay_per_call: tell the user to pay total_amount+currency via EVO
-     USING THIS order_id as the EVO merchantTransID. The verification in step 6 works by
-     querying EVO for exactly this order_id, so paying under any other id will not settle.
 
-6. Pay order (settle the locked order) — MUST confirm with the user before calling this
+6. BRANCH ON BILLING_MODE — decide THIS before calling pay-order, not inside it
+   - You (the developer/Agent) know your own billing_mode; the order does not expose it.
+   a) monthly_settlement → skip straight to step 7 (pay-order). Nothing to do here.
+   b) pay_per_call → STOP. Do NOT call pay-order yet.
+      - Drive YOUR OWN EVO payment integration now, using the order_id from step 5 AS THE
+        EVO merchantTransID (this is the id you pass to your EVO payment call — not a new
+        or random id).
+      - Wait for the end-user to actually complete that EVO payment for total_amount+currency.
+      - Only once EVO shows the payment as complete, proceed to step 7 — pay-order is what
+        tells the platform "go verify and settle this", it does NOT itself collect payment.
+
+7. Pay order (settle the locked order) — MUST confirm with the user before calling this
    - Before calling: show the user total_amount + currency from create-order and which
      billing path applies, and get explicit go-ahead — pay-order is the step that actually
-     moves money
+     moves money (for pay_per_call, confirm the EVO payment from step 6 was completed first)
    - pay-order --order-id <order_id from create-order>   (that's the only identifier needed)
    - Billing path determined server-side by developer's billing_mode:
      a) monthly_settlement:
         - Platform deducts from settlement account → calls upstream payOrder
      b) pay_per_call:
-        - The user must have ALREADY paid via EVO using the order_id as the EVO
-          merchantTransID (see create-order step 5). Just call pay-order --order-id <id>;
-          the platform queries EVO for that order_id and verifies exact amount/currency.
+        - Requires step 6 to have already happened (user paid via EVO under this order_id).
+          Calling pay-order now just makes the platform query EVO for that order_id and
+          verify exact amount/currency — it does NOT initiate the EVO payment itself.
           There is no merchant-transaction-id flag: the EVO key IS the order_id, so a
           foreign already-paid EVO transaction cannot be substituted.
         - If EVO not yet confirmed → PAYMENT_NOT_COMPLETED; use --watch to poll
    - On success → order status becomes PAID
 
-7. Confirm (upstream confirmation is async)
+8. Confirm (upstream confirmation is async)
    - Poll get --order-id until CONFIRMED (success) or CANCELLED (failed)
    - Do not report success before CONFIRMED
 
-8. Post-booking (only when the user asks)
+9. Post-booking (only when the user asks)
    - cancel: order_id + fc_order_code + reason
    - checkout: partial leave-early → then poll get-checkout with task_order_code
    - list-orders: view all orders
@@ -99,8 +107,9 @@ run \`hotel-redaug <verb> --help\`.
 - price_items     : quote → create-order  (JSON array; copy exactly)
 - order_id        : create-order → pay-order / get / cancel
 - fc_order_code   : create-order → cancel / checkout
-- order_id (again): for pay_per_call it IS the EVO merchantTransID — the user pays via
-  EVO under the order_id; pay-order takes no separate merchant-transaction-id
+- order_id (again): for pay_per_call it IS the EVO merchantTransID — YOU (the developer/Agent)
+  use it to drive your own EVO payment call BEFORE pay-order (see step 6); pay-order itself
+  takes no separate merchant-transaction-id, it only verifies the payment already made
 - task_order_code : checkout → get-checkout
 
 ## Billing modes (chosen server-side by billing_mode)
@@ -111,15 +120,18 @@ routes purely by the order's billing_mode:
 | Developer billing_mode | Behavior |
 |------------------------|----------|
 | monthly_settlement     | Deducts settlement balance → payOrder |
-| pay_per_call           | Platform queries EVO for the order_id → verify exact amount/currency → payOrder (response settlement_path is "active_payment") |
+| pay_per_call           | Platform queries EVO for the order_id → verify exact amount/currency → payOrder (response settlement_path is "pay_per_call") |
 | anything else          | ERROR: BILLING_MODE_MISMATCH (only the two modes above are valid) |
 
 ## pay_per_call flow — the EVO merchantTransID IS the order_id
 
 1. create-order returns order_id + total_amount + currency (no EVO credentials in response)
-2. User pays total_amount+currency via EVO, USING the order_id as the EVO merchantTransID
-   (the shared EVO parameters are onboarded separately, out of band)
-3. Agent calls pay-order --order-id <order_id>   (no other identifier)
+2. YOU drive your own EVO payment integration now, passing the order_id as the EVO
+   merchantTransID, and get the user to pay total_amount+currency
+   (the shared EVO parameters are onboarded separately, out of band — pay-order does not do
+   this step for you)
+3. ONLY once that EVO payment is complete, call pay-order --order-id <order_id>
+   (no other identifier)
 4. Platform queries EVO for that order_id: paid + exact amount/currency match → payOrder → PAID
 5. If not yet paid → PAYMENT_NOT_COMPLETED; use --watch to auto-poll
 6. Why order_id (not an arbitrary id): it binds the payment to this exact order, so a caller
@@ -136,7 +148,7 @@ routes purely by the order's billing_mode:
 - IMPORTANT: --yes only skips this CLI's own interactive TTY prompt (needed because the Agent
   runs non-interactively). It is NOT a substitute for showing the user the hotel/rate/price and
   getting their decision in the chat UI. Passing --yes does not remove the confirmation steps in
-  step 3/4 (choose hotel + rate) or step 6 (confirm before pay-order) above.
+  step 3/4 (choose hotel + rate) or step 7 (confirm before pay-order) above.
 - After a cancel call returns successfully (including the cancel_status='cancel_pending' shape),
   do NOT call cancel again for the same order — poll get instead. A pending acknowledgement is
   success, not failure.

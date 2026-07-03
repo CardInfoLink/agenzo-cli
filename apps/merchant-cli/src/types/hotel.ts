@@ -130,6 +130,19 @@ export interface PayHotelOrderResponse {
 
 // ---- get ----  (order_mapping.format_provider_status / format_local_status)
 
+/** Guest name persisted at create-order time (`{name: guest_name}` on the wire). */
+export interface HotelOrderGuest {
+  name?: string | null;
+}
+
+/** Booking contact persisted at create-order time. */
+export interface HotelOrderContact {
+  name?: string | null;
+  phone?: string | null;
+  country_code?: string | null;
+  email?: string | null;
+}
+
 export interface GetHotelOrderResponse {
   order_id: string;
   fc_order_code: string;
@@ -144,9 +157,22 @@ export interface GetHotelOrderResponse {
   check_in?: string | null;
   check_out?: string | null;
   total_amount?: number | null;
+  /** Currency for `total_amount`, sourced from the local record on both paths. */
+  currency?: string | null;
   /** Present on the local-cache fallback path (format_local_status). */
   price?: HotelMoney | null;
-  source?: 'provider' | 'local_cache';
+  /** Room/guest assignment persisted at create-order time. */
+  rooms?: BookedRoom[] | null;
+  /** "monthly_settlement" | "pay_per_call" — set once pay-order settles. */
+  settlement_path?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  // ---- booking detail shown on an order confirmation (persisted at create-order) ----
+  guest?: HotelOrderGuest | null;
+  contact?: HotelOrderContact | null;
+  room_num?: number | null;
+  arrive_time?: string | null;
+  special_requests?: string | null;
 }
 
 // ---- cancel ----  (format_cancel / format_cancel_pending)

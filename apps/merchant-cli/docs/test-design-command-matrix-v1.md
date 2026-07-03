@@ -617,7 +617,7 @@ Code review item-by-item verification (comparing against cli-design §4.4 + exis
 | Case | Scenario | Expected |
 |---|---|---|
 | TC-HPAY-01 | Order with `monthly_settlement` billing_mode, `--yes` | `POST /hotel/<order_id>/pay` (`X-Api-Key` + `Idempotency-Key` header); body is empty (no request params); renders `settlement_path=monthly_settlement`/`pay_status`/`order_status=PAID`; exit 0 |
-| TC-HPAY-02 | Order with `pay_per_call` billing_mode, same command (no extra flag) | body is identical/empty; platform queries EVO for the `order_id`; renders `settlement_path=active_payment`; exit 0 |
+| TC-HPAY-02 | Order with `pay_per_call` billing_mode, same command (no extra flag) | body is identical/empty; platform queries EVO for the `order_id`; renders `settlement_path=pay_per_call`; exit 0 |
 | TC-HPAY-03 | `PAYMENT_NOT_COMPLETED` (pay_per_call, EVO not yet confirmed for this order_id) | String code preserved; exit 1; order/payment state unchanged |
 | TC-HPAY-04 | `--watch` polling | Retries on `PAYMENT_NOT_COMPLETED` at `--watch-interval`; one NDJSON line per attempt; stops on `PAID` or `--watch-timeout` (final line `{watch_status:'timeout',...}`) |
 | TC-HPAY-05 | Missing `--order-id` | `PARAM_INVALID`; no request; exit 1 |
