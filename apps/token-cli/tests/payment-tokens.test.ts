@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { confirm } from '@inquirer/prompts';
 import { registerListCommand } from '../src/payment-tokens/list.js';
 import { registerGetCommand } from '../src/payment-tokens/get.js';
 import { registerRevokeCommand } from '../src/payment-tokens/revoke.js';
@@ -16,6 +17,11 @@ vi.mock('@inquirer/prompts', () => ({
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.AGENZO_FORMAT;
+  // vi.restoreAllMocks() strips the vi.fn() implementation set above (not a
+  // spy, so there's no "original" to restore to — it resets to a no-op
+  // returning undefined). Re-arm it so later interactive-mode tests in this
+  // file don't hit a spurious "cancelled by user" from a falsy confirm().
+  vi.mocked(confirm).mockResolvedValue(true);
 });
 
 // ============================================================
@@ -657,11 +663,71 @@ describe('payment-tokens create — unionpay rail', () => {
     const stderrText = err.text();
     expect(stderrText).toContain('Payment token created');
 
+    // member_id is derived server-side from the PM's own record — the CLI
+    // must not send it when the caller didn't pass --member.
+    expect(body).not.toHaveProperty('member_id');
+
     const output = out.text();
     expect(output).toContain('PENDING');
     expect(output).toContain('https://checkout.unionpay.example/abc123');
     expect(output).toContain('Correlation ID');
     expect(output).toContain('corr_abc123');
+  });
+
+  it('does not prompt for --member in interactive mode when the payment method rail is unionpay', async () => {
+    const unionpayPendingResponse = {
+      id: 'ptk_union_002',
+      type: 'network_token',
+      status: 'PENDING',
+      payment_brand: 'unionpay',
+      checkout_url: 'https://checkout.unionpay.example/def456',
+      correlation_id: 'corr_def456',
+    };
+    const apiClient = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path === '/payment-methods/pm_unionpay_2') {
+          return Promise.resolve({
+            success: true,
+            data: { id: 'pm_unionpay_2', status: 'ACTIVE', payment_brand: 'unionpay', brand: 'UnionPay', last4: '9998' },
+          });
+        }
+        if (path === '/payment-tokens/ptk_union_002') {
+          // Resolve immediately (ACTIVE) so the post-create poll loop doesn't
+          // run out the clock and time out this test.
+          return Promise.resolve({
+            success: true,
+            data: { ...unionpayPendingResponse, status: 'ACTIVE', network_token: { cryptogram: 'x', value: '5678' } },
+          });
+        }
+        return Promise.resolve({ success: true, data: {} });
+      }),
+      post: vi.fn().mockResolvedValue({ success: true, data: unionpayPendingResponse }),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    // Note: no --yes here — interactive mode. If the code prompted for
+    // --member it would hang/throw waiting on stdin; reaching completion
+    // proves the prompt was skipped for the unionpay rail.
+    await program.parseAsync([
+      'node', 'cli', 'payment-tokens', 'create',
+      '--api-key', 'sk_key',
+      '--type', 'network-token',
+      '--payment-method-id', 'pm_unionpay_2',
+      '--recipient-first-name', 'John',
+      '--recipient-last-name', 'Doe',
+      '--recipient-email', 'john@test.com',
+      '--unionpay-amount', '99.00',
+      '--idempotency-key', 'idem_2',
+    ]);
+
+    const body = apiClient.post.mock.calls[0][2];
+    expect(body).not.toHaveProperty('member_id');
   });
 
   it('--card selecting a unionpay card is rejected (only --payment-method-id allowed)', async () => {

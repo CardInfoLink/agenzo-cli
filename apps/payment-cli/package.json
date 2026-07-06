@@ -1,0 +1,28 @@
+{
+  "name": "@agenzo/payment-cli",
+  "version": "0.1.0",
+  "description": "Payment charge CLI for the Agenzo platform (pay a payment token)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "main": "dist/index.js",
+  "bin": {
+    "agenzo-payment-cli": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.4.2",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@agenzo/cli-core": "*"
+  }
+}

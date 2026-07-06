@@ -17,7 +17,8 @@
     "packages/*",
     "apps/admin-cli",
     "apps/token-cli",
-    "apps/merchant-cli"
+    "apps/merchant-cli",
+    "apps/payment-cli"
   ],
   "devDependencies": {
     "@types/node": "^22.0.0",
