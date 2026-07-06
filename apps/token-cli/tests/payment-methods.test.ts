@@ -543,14 +543,17 @@ describe('payment-methods add --payment-brand unionpay', () => {
       '--email', 'user@example.com',
     ]);
 
-    // In json mode, two pretty-printed JSON objects are written to stdout
-    // (created state, then activated state) — each spans multiple physical
-    // lines, so splitting on '\n' and taking the last line only grabs a
-    // trailing '}'. Split on the '}\n{' boundary between top-level objects
-    // instead, and parse the last one (the activated PM).
-    const text = out.text().trim();
-    const objects = text.split(/(?<=\})\s*(?=\{)/).filter(Boolean);
-    const parsed = JSON.parse(objects[objects.length - 1]) as Record<string, unknown>;
+    // In json mode, two JSON objects are emitted: created PM then activated PM.
+    // We want the last complete JSON object (the activated one).
+    const rawOutput = out.text().trim();
+    // Split on `}\n{` boundary to separate multiple JSON objects
+    const jsonObjects = rawOutput.split(/\}\s*\n\s*\{/).map((s, i, arr) => {
+      if (arr.length === 1) return s;
+      if (i === 0) return s + '}';
+      if (i === arr.length - 1) return '{' + s;
+      return '{' + s + '}';
+    });
+    const parsed = JSON.parse(jsonObjects[jsonObjects.length - 1]) as Record<string, unknown>;
     expect(parsed.id).toBe('pm_upi_3');
     expect(parsed.status).toBe('ACTIVE');
   });

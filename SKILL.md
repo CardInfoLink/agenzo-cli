@@ -17,7 +17,7 @@ Agenzo provides four command-line tools, split by product area:
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method: Evo 3DS or UnionPay enrollment) and payment-tokens (VCN / Network Token / X402).
-- **payment-cli** — charge a previously created payment token (`charge pay`). Amount / currency / fee are taken from the token, not passed at pay time.
+- **payment-cli** — capture (charge) a previously created payment token (`capture`). Amount / currency / fee are taken from the token; payment brand is auto-detected from the token record.
 - **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …).
 
 ### hotel-redaug: create-order → pay-order flow
@@ -57,7 +57,7 @@ For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` return
 |-------|-----|----------|-------------|
 | Control Plane | `agenzo-admin-cli` | `auth`, `orgs`, `developers`, `keys`, `accounts`, `config` | Bearer Token (via `auth login`) |
 | Runtime Plane | `agenzo-token-cli` | `payment-methods`, `payment-tokens` | API Key (`--api-key` flag) |
-| Runtime Plane | `agenzo-payment-cli` | `charge pay` | API Key (`--api-key` flag) |
+| Runtime Plane | `agenzo-payment-cli` | `capture` | API Key (`--api-key` flag) |
 | Runtime Plane | `agenzo-merchant-cli` | `ride-elife`, `hotel-redaug` | API Key (`--api-key` flag) |
 
 ## End-to-end Onboarding Flow
@@ -65,12 +65,12 @@ For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` return
 Follow this order across CLIs — each step depends on the previous one:
 
 ```
-[admin-cli] auth login → developers create → keys create → [token-cli] payment-methods add → payment-tokens create → [payment-cli] charge pay
+[admin-cli] auth login → developers create → keys create → [token-cli] payment-methods add → payment-tokens create → [payment-cli] capture
 ```
 
 - Steps 1–3 (login / create developer / create API key) → [admin-cli guide](doc/admin-cli.md)
 - Steps 4–5 (add payment method + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
-- Step 6 (charge the created token) → [payment-cli guide](doc/payment-cli.md)
+- Step 6 (capture the created token) → [payment-cli guide](doc/payment-cli.md)
 - Ride fulfillment (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md)
 - Hotel booking (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md#hotel-redaug)
 

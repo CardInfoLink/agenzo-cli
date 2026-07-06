@@ -14,10 +14,12 @@
 |---|---|---|---|---|---|
 | `admin-cli` | `@agenzo/admin-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/admin-cli.svg)](https://www.npmjs.com/package/@agenzo/admin-cli) | `agenzo-admin-cli` | Bearer token | Implemented |
 | `token-cli` | `@agenzo/token-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/token-cli.svg)](https://www.npmjs.com/package/@agenzo/token-cli) | `agenzo-token-cli` | API key | Implemented |
+| `payment-cli` | `@agenzo/payment-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/payment-cli.svg)](https://www.npmjs.com/package/@agenzo/payment-cli) | `agenzo-payment-cli` | API key | Implemented |
 | `merchant-cli` | `@agenzo/merchant-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/merchant-cli.svg)](https://www.npmjs.com/package/@agenzo/merchant-cli) | `agenzo-merchant-cli` | API key | Implemented |
 
 - **admin-cli** — control plane: `auth` / `config` / `orgs` / `developers` / `keys` / `accounts`.
 - **token-cli** — `payment-methods` (add payment method: Evo 3DS or UnionPay enrollment) and `payment-tokens` (VCN / Network Token / X402).
+- **payment-cli** — capture (charge) a previously created payment token (`capture pay`). Amount / currency / fee are taken from the token; payment brand is auto-detected.
 - **merchant-cli** — merchant fulfillment: `services` (discover capabilities), `ride-elife` (ride-hailing), and `hotel-redaug` (international hotel booking via Redaug).
 
 ## Conventions
@@ -58,6 +60,14 @@
 - `evo` (default): Evo 3DS card binding — user verifies via email/browser.
 - `unionpay`: UnionPay enrollment — user authenticates via passkey on a UnionPay-hosted page.
 
+### payment-cli (runtime plane / API key)
+
+| Noun | Verbs |
+|---|---|
+| `capture` | *(top-level command)* |
+
+Captures (charges) a previously created payment token. Amount / currency / fee are fixed at token creation time — `capture` only submits the charge. The platform auto-detects the payment brand (`evo` or `unionpay`) from the token record.
+
 ### merchant-cli (runtime plane / API key)
 
 | Noun | Verbs |
@@ -75,7 +85,7 @@
 | Plane | CLI | Auth |
 |---|---|---|
 | Control plane | `agenzo-admin-cli` | Bearer token (via `auth login`) |
-| Runtime plane | `agenzo-token-cli`, `agenzo-merchant-cli` | API key (`--api-key`) |
+| Runtime plane | `agenzo-token-cli`, `agenzo-payment-cli`, `agenzo-merchant-cli` | API key (`--api-key`) |
 
 The default API host is `https://agent.everonet.com` (production). To use the test environment, run `agenzo-admin-cli config set-host https://agent-dev.agenzo.com`.
 
@@ -84,7 +94,7 @@ The default API host is `https://agent.everonet.com` (production). To use the te
 Requires Node.js 22+. Install the CLIs from npm:
 
 ```bash
-npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/merchant-cli
+npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/payment-cli @agenzo/merchant-cli
 ```
 
 Then sign in, create a developer, and mint an API key — after which the runtime CLIs work with `--api-key`:
@@ -97,8 +107,12 @@ agenzo-admin-cli developers create --developer-name "my-bot" \
   --settlement-currency CNY \
   --idempotency-key <key>
 agenzo-admin-cli keys create --developer-id <dev_id> \
-  --key-name "Prod Key" --scope token,merchant --idempotency-key <key>
+  --key-name "Prod Key" --scope token,payment,merchant --idempotency-key <key>
 # the one-time key is shown once — save it, then:
+agenzo-token-cli payment-methods add --api-key <key> --payment-brand evo ...
+agenzo-token-cli payment-tokens create --api-key <key> --payment-method-id <pm_id> ...
+agenzo-payment-cli capture --api-key <key> --payment-token-id <ptk_id> \
+  --idempotency-key <unique> --yes
 agenzo-token-cli payment-methods list --api-key <key>
 agenzo-merchant-cli services list --api-key <key>
 agenzo-merchant-cli hotel-redaug find-destination --keyword "上海" --api-key <key>
@@ -112,4 +126,5 @@ Load [SKILL.md](SKILL.md) into the agent context. It covers the end-to-end onboa
 
 - [doc/admin-cli.md](doc/admin-cli.md)
 - [doc/token-cli.md](doc/token-cli.md)
+- [doc/payment-cli.md](doc/payment-cli.md)
 - [doc/merchant-cli.md](doc/merchant-cli.md)
