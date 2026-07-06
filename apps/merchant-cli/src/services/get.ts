@@ -13,35 +13,129 @@ import { findService } from './registry.js';
 import { buildLocalCapabilityMap, type LocalCapabilityMap } from './local-caps.js';
 
 /**
- * Render the full capability as a key/value block for table output. Heavy
- * detail (workflow, per-verb descriptions) is appended when present so the
- * human-facing table stays as informative as the JSON payload.
+ * One entry of the service-layer `verbs_summary` (doc/architecture-upgrade/v1/
+ * schema-standard.md §3.1): verb name + one-line description + read/write
+ * `annotations`. Deliberately excludes flags/response/example/error_recovery —
+ * that is capability-layer detail, fetched via `schema_ref.help_command` /
+ * `schema_ref.schema_url`, never inlined here.
  */
+interface VerbSummaryItem {
+  verb: string;
+  description: string;
+  annotations?: Record<string, unknown>;
+}
+
+/**
+ * Build `verbs_summary` from the (already noun/verb-gated) capability: verb
+ * list + one-line description + annotations. Descriptions prefer the backend's
+ * pre-truncated `verb_descriptions` map; when only the full schema is present
+ * (e.g. local-registry fallback lacks `verb_descriptions` for some verb), fall
+ * back to the capability layer's `description` field for that verb.
+ */
+function buildVerbsSummary(data: Record<string, unknown>): VerbSummaryItem[] {
+  const verbs = Array.isArray(data.verbs) ? (data.verbs as string[]) : [];
+  const verbDescriptions = (data.verb_descriptions as Record<string, string>) ?? {};
+  const schema = data.schema_content as Record<string, unknown> | undefined;
+  const schemaVerbs = schema?.verbs as Record<string, Record<string, unknown>> | undefined;
+
+  return verbs.map((verb) => {
+    const item: VerbSummaryItem = {
+      verb,
+      description: verbDescriptions[verb] ?? String(schemaVerbs?.[verb]?.description ?? ''),
+    };
+    const annotations = schemaVerbs?.[verb]?.annotations as Record<string, unknown> | undefined;
+    if (annotations) item.annotations = annotations;
+    return item;
+  });
+}
+
+/**
+ * Project a gated capability onto the **service layer** shape (doc/
+ * architecture-upgrade/v1/schema-standard.md §3): identity fields +
+ * `selection_hints` + `schema_ref` + `conventions` + the FULL `workflow`
+ * object (`description`/`steps`/`branches`/`standalone`/`prerequisites` — not
+ * the flattened verb-name array the discovery registry's top-level `workflow`
+ * carries) + `verbs_summary` + `cross_service_recovery`.
+ *
+ * This is deliberately NOT the capability layer: per-verb `flags`/`response`/
+ * `example`/`error_recovery` (the bulk of `schema_content`, tens of KB across
+ * a dozen verbs) are never copied into this view. An Agent that needs that
+ * detail follows `schema_ref.help_command` (`<noun> <verb> --help --format
+ * json`) or `schema_ref.schema_url` — the two capability-layer entry points
+ * the standard defines. `services get` does not add a third one.
+ *
+ * Degrades gracefully when `schema_content` is absent (the local-registry
+ * fallback has no schema_content): `selection_hints` / `conventions` /
+ * `cross_service_recovery` are simply omitted, and `workflow` falls back to a
+ * description-only object built from the registry's flat verb-sequence array.
+ */
+function toServiceLayerView(data: Record<string, unknown>): Record<string, unknown> {
+  const schema = data.schema_content as Record<string, unknown> | undefined;
+
+  const view: Record<string, unknown> = {
+    service_id: data.service_id,
+    cli_noun: data.cli_noun,
+    category: data.category,
+    name: data.name,
+    summary: data.description ?? schema?.summary,
+    status: data.status ?? 'available',
+    provider: data.provider,
+    version: data.version,
+  };
+
+  if (schema?.selection_hints) view.selection_hints = schema.selection_hints;
+
+  // schema_ref: the two capability-layer lookup paths. Prefer the schema's own
+  // schema_ref; degrade to the discovery hints the registry always carries.
+  const discovery = data.discovery as Record<string, unknown> | undefined;
+  view.schema_ref = schema?.schema_ref ?? {
+    help_command: discovery?.help_command,
+    ...(discovery?.schema_url ? { schema_url: discovery.schema_url } : {}),
+  };
+
+  if (schema?.conventions) view.conventions = schema.conventions;
+
+  if (schema?.workflow) {
+    view.workflow = schema.workflow;
+  } else if (Array.isArray(data.workflow)) {
+    view.workflow = { description: (data.workflow as string[]).join(' → ') };
+  }
+
+  view.verbs_summary = buildVerbsSummary(data);
+
+  if (schema?.cross_service_recovery) view.cross_service_recovery = schema.cross_service_recovery;
+
+  return view;
+}
+
+/** Render the service-layer view as a key/value + nested-block table for `--format table`. */
 function formatServiceGet(s: Record<string, unknown>): string {
   const lines: [string, string][] = [
     ['Service ID', String(s.service_id ?? '')],
-    ['Name', String(s.name ?? '')],
-    ['Description', String(s.description ?? s.summary ?? '')],
-    ['Category', String(s.category ?? '')],
-    ['Version', String(s.version ?? '')],
-    ['Provider', String(s.provider ?? '')],
     ['CLI Noun', String(s.cli_noun ?? '')],
-    ['Verbs', Array.isArray(s.verbs) ? (s.verbs as string[]).join(', ') : ''],
+    ['Category', String(s.category ?? '')],
+    ['Name', String(s.name ?? '')],
+    ['Summary', String(s.summary ?? '')],
+    ['Status', String(s.status ?? '')],
+    ['Provider', String(s.provider ?? '')],
+    ['Version', String(s.version ?? '')],
   ];
-  if (Array.isArray(s.workflow) && s.workflow.length > 0) {
-    lines.push(['Workflow', (s.workflow as string[]).join(' → ')]);
-  }
-
   const block = Formatter.keyValue(lines);
 
-  const verbDescriptions = s.verb_descriptions as Record<string, string> | undefined;
-  if (verbDescriptions && Object.keys(verbDescriptions).length > 0) {
-    const detail = Object.entries(verbDescriptions)
-      .map(([verb, desc]) => `  ${verb}: ${desc}`)
-      .join('\n');
-    return `${block}\n\nVerb descriptions:\n${detail}`;
+  const sections: string[] = [];
+  for (const key of [
+    'selection_hints',
+    'schema_ref',
+    'conventions',
+    'workflow',
+    'verbs_summary',
+    'cross_service_recovery',
+  ]) {
+    if (s[key] !== undefined) {
+      sections.push(`${key}:\n${JSON.stringify(s[key], null, 2)}`);
+    }
   }
-  return block;
+  return sections.length > 0 ? `${block}\n\n${sections.join('\n\n')}` : block;
 }
 
 /**
@@ -77,13 +171,16 @@ function gateCapability(
 }
 
 /**
- * `services get <service-id>` — retrieve a single capability's full metadata
- * including the complete schema_content (the Agent reads this to learn how to
- * use the service).
+ * `services get <service-id>` — return the **service layer** view (doc/
+ * architecture-upgrade/v1/schema-standard.md §3): enough for an Agent to
+ * understand the service and plan the call sequence (`workflow`), WITHOUT the
+ * full per-verb flags/response/example/error_recovery (the capability layer),
+ * which stays behind `schema_ref.help_command` / `schema_ref.schema_url`.
  *
  * Primary path: `GET /api/discovery/v1/catalog/<service-id>` → full schema, then
  * gated against the CLI command tree (noun must exist; verbs intersected).
- * Fallback: local registry (basic metadata, no schema_content).
+ * Fallback: local registry (no schema_content — service-layer view degrades
+ * gracefully, see `toServiceLayerView`).
  */
 export function registerServiceGetCommand(
   parent: Command,
@@ -91,7 +188,7 @@ export function registerServiceGetCommand(
 ): void {
   const cmd = parent
     .command('get <service-id>')
-    .description('Retrieve a single merchant service by id (includes full schema)')
+    .description('Retrieve a single merchant service (service-layer view: workflow + conventions + verbs_summary)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)');
 
   cmd.action(async (serviceId: string) => {
@@ -130,7 +227,7 @@ export function registerServiceGetCommand(
       );
     }
 
-    const resolved = data;
+    const resolved = toServiceLayerView(data);
     const configManager = new ConfigManager();
     const commandResult: CommandResult<Record<string, unknown>> = {
       data: resolved,

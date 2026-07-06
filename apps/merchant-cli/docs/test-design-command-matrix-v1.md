@@ -263,12 +263,14 @@ Corresponds to: Req 1.2, 1.3, 5.1; cli-design §4.4.1.2.
 | TC-SVC-GET-01 | Match found | `services get ride-elife` | data=full `ServiceCapability` (contains `verb_descriptions`/`workflow`/`discovery`); exit 0 |
 | TC-SVC-GET-02 | No match | `services get nope` | Throws `CliError('SERVICE_NOT_FOUND')` (code_num 4101, exit 1); message suggests `Run "services list"` |
 | TC-SVC-GET-03 | Missing positional argument | `services get` | Commander reports missing `<service-id>`; non-0 |
-| TC-SVC-GET-04 | table full view | `services get ride-elife --format table` | stdout keyValue contains `Workflow`/`Verb descriptions:` blocks; exit 0 |
+| TC-SVC-GET-04 | table full view | `services get ride-elife --format table` | stdout keyValue contains `workflow:`/`verbs_summary:` blocks; exit 0 |
 | TC-SVC-GET-05 | json envelope | `--format json` | stdout contains capability + `profile`/`endpoint`; stderr silent |
+| TC-SVC-GET-SERVICE-LAYER | backend-sourced capability | `services get svc_... --format json` | data projects onto the service-layer shape (`selection_hints`/`schema_ref`/`conventions`/`workflow`/`verbs_summary`/`cross_service_recovery`); per-verb `flags`/`response`/`example`/`error_recovery` never appear; `verbs_summary` gated to local verbs |
 
 ```bash
-agenzo-merchant-cli services get ride-elife --format json | jq '{service_id,verbs,workflow}'
+agenzo-merchant-cli services get ride-elife --format json | jq '{service_id,workflow,verbs_summary}'
 agenzo-merchant-cli services get nope 2>&1; echo "exit=$?"   # expect 1 (SERVICE_NOT_FOUND)
+agenzo-merchant-cli hotel-redaug search --help --format json | jq '{verb,flags}'  # capability layer, separate call
 ```
 
 ### 5.3 `ride-elife quote` (R, `POST /ride/quote`, no idem)

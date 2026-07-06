@@ -24,7 +24,7 @@ More fulfillment capabilities are added as new nouns over time; `services list` 
 | Noun | Verb | Type | HTTP | Description |
 |---|---|---|---|---|
 | `services` | `list` | Read | — (local) | List available merchant-fulfillment capabilities |
-| `services` | `get <service-id>` | Read | — (local) | View the full metadata of a single capability (miss → `SERVICE_NOT_FOUND`) |
+| `services` | `get <service-id>` | Read | — (local) | Service-layer view: `selection_hints` / `schema_ref` / `conventions` / `workflow` / `verbs_summary` (miss → `SERVICE_NOT_FOUND`); full per-verb flags/response schema is fetched separately via `schema_ref` |
 | `ride-elife` | `quote` | Read | `POST /ride/quote` | Point-to-point quote (`vehicle_classes[]` + meet-and-greet) |
 | `ride-elife` | `book` | Write/Y | `POST /ride/book` | Book against a quote (monthly_settlement-aware, see below) |
 | `ride-elife` | `get` | Read | `GET /ride/<id>/status` | Query order status; `--watch` emits an NDJSON polling stream |
@@ -76,7 +76,8 @@ A runtime-plane CLI that uses an **API Key** (`--api-key`, carried per command a
 ```bash
 # 1. Discover capabilities
 agenzo-merchant-cli services list
-agenzo-merchant-cli services get ride-elife
+agenzo-merchant-cli services get ride-elife                     # service-layer view: workflow + conventions + verbs_summary
+agenzo-merchant-cli ride-elife book --help --format json        # capability layer: this verb's full flags/response schema
 
 # 2. Quote (produces quote_id)
 agenzo-merchant-cli ride-elife quote --api-key "$API_KEY" \

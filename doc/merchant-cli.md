@@ -32,11 +32,14 @@ API-Key auth (`--api-key`). `services` discovers the available capabilities; the
 Discover the available merchant-fulfillment capabilities before calling them:
 
 ```bash
-agenzo-merchant-cli services list                # list available capabilities
-agenzo-merchant-cli services get ride-elife      # one capability's metadata (its nouns/verbs + flow)
+agenzo-merchant-cli services list                          # list available capabilities
+agenzo-merchant-cli services get ride-elife                # service-layer view: workflow + conventions + verbs_summary
+agenzo-merchant-cli ride-elife book --help --format json   # capability layer: this verb's full flags/response schema
 ```
 
 An unknown capability id returns `SERVICE_NOT_FOUND`. As more capabilities are added, they appear here — `services` is how an Agent learns what it can fulfill today.
+
+`services get` returns the **service layer** (doc/architecture-upgrade/v1/schema-standard.md §3): `selection_hints` / `schema_ref` / `conventions` / the full `workflow` object / `verbs_summary` (verb name + one-line description + read/write `annotations`, no parameters). It deliberately does NOT inline each verb's full `flags`/`response`/`example`/`error_recovery` — that capability-layer detail (tens of KB across a dozen verbs) stays behind the two paths named in `schema_ref`: `<noun> <verb> --help --format json` (local, always matches the installed CLI) or `schema_ref.schema_url` (HTTP, aggregate download). Both paths return the same per-verb schema shape.
 
 ## ride-elife
 

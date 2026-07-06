@@ -66,7 +66,7 @@
 | `ride-elife` | `quote` / `book` / `get` / `cancel` / `list-orders` |
 | `hotel-redaug` | `find-destination` / `hotel-filters` / `list-cities` / `search` / `hotel-detail` / `quote` / `create-order` / `pay-order` / `get` / `cancel` / `checkout` / `get-checkout` / `list-orders` |
 
-`services list` discovers available capabilities from the platform backend, gated against the CLI's own registered commands (services/verbs the CLI cannot execute are hidden). `services get <service-id>` returns the full schema for a service (Agent reads this to learn how to use it).
+`services list` discovers available capabilities from the platform backend, gated against the CLI's own registered commands (services/verbs the CLI cannot execute are hidden). `services get <service-id>` returns the **service-layer** view (doc/architecture-upgrade/v1/schema-standard.md §3): `selection_hints` / `schema_ref` / `conventions` / `workflow` / `verbs_summary` (verb + one-line description + read/write `annotations`, no flags/response). Full per-verb parameter schemas stay behind the two capability-layer entry points named in `schema_ref`: `<noun> <verb> --help --format json` or `schema_ref.schema_url`.
 
 `hotel-redaug` typical workflow: `find-destination` → `search` → `hotel-detail` (optional) → `quote` → `create-order` → `pay-order` → `get` (poll until CONFIRMED) → `cancel` / `checkout` (optional).
 
