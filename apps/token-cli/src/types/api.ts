@@ -24,6 +24,8 @@ export interface PaymentMethod {
   enroll_url?: string;
   /** UnionPay only: enrollment correlation id, present when payment_brand === 'unionpay'. */
   correlation_id?: string;
+  /** The end-user member id this payment method belongs to (set at enrollment). */
+  member_id?: string | null;
 }
 
 // ---- Drop-in session (payment-methods add --mode dropin) ----

@@ -1,21 +1,23 @@
 # Agenzo CLI Skill
 
-You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, and merchant fulfillment (ride bookings).
+You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, charges, and merchant fulfillment (ride bookings).
 
 This file is the **index**: overview + shared conventions. Per-CLI command detail lives in the linked guides — read the relevant one for the task at hand.
 
 ## CLIs
 
-Agenzo provides three command-line tools, split by product area:
+Agenzo provides four command-line tools, split by product area:
 
 | CLI | Package | Binary | Auth | Guide |
 |---|---|---|---|---|
 | `admin-cli` | `@agenzo/admin-cli` | `agenzo-admin-cli` | Bearer Token | [doc/admin-cli.md](doc/admin-cli.md) |
 | `token-cli` | `@agenzo/token-cli` | `agenzo-token-cli` | API Key | [doc/token-cli.md](doc/token-cli.md) |
+| `payment-cli` | `@agenzo/payment-cli` | `agenzo-payment-cli` | API Key | [doc/payment-cli.md](doc/payment-cli.md) |
 | `merchant-cli` | `@agenzo/merchant-cli` | `agenzo-merchant-cli` | API Key | [doc/merchant-cli.md](doc/merchant-cli.md) |
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method: Evo 3DS or UnionPay enrollment) and payment-tokens (VCN / Network Token / X402).
+- **payment-cli** — charge a previously created payment token (`charge pay`). Amount / currency / fee are taken from the token, not passed at pay time.
 - **merchant-cli** — ride-elife ride fulfillment (quote / book / get / cancel / list-orders).
 
 ## Behavior Rules (all CLIs)
@@ -31,9 +33,9 @@ Agenzo provides three command-line tools, split by product area:
 - Node.js 22+
 - Install the CLIs from npm:
   ```bash
-  npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/merchant-cli
+  npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/payment-cli @agenzo/merchant-cli
   ```
-  This provides the `agenzo-admin-cli`, `agenzo-token-cli`, and `agenzo-merchant-cli` commands.
+  This provides the `agenzo-admin-cli`, `agenzo-token-cli`, `agenzo-payment-cli`, and `agenzo-merchant-cli` commands.
 - API host: `https://agent.everonet.com` (default; change with `agenzo-admin-cli config set-host`).
 
 ## Authentication Model
@@ -42,6 +44,7 @@ Agenzo provides three command-line tools, split by product area:
 |-------|-----|----------|-------------|
 | Control Plane | `agenzo-admin-cli` | `auth`, `orgs`, `developers`, `keys`, `accounts`, `config` | Bearer Token (via `auth login`) |
 | Runtime Plane | `agenzo-token-cli` | `payment-methods`, `payment-tokens` | API Key (`--api-key` flag) |
+| Runtime Plane | `agenzo-payment-cli` | `charge pay` | API Key (`--api-key` flag) |
 | Runtime Plane | `agenzo-merchant-cli` | `ride-elife` | API Key (`--api-key` flag) |
 
 ## End-to-end Onboarding Flow
@@ -49,11 +52,12 @@ Agenzo provides three command-line tools, split by product area:
 Follow this order across CLIs — each step depends on the previous one:
 
 ```
-[admin-cli] auth login → developers create → keys create → [token-cli] payment-methods add → payment-tokens create
+[admin-cli] auth login → developers create → keys create → [token-cli] payment-methods add → payment-tokens create → [payment-cli] charge pay
 ```
 
 - Steps 1–3 (login / create developer / create API key) → [admin-cli guide](doc/admin-cli.md)
 - Steps 4–5 (add payment method + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
+- Step 6 (charge the created token) → [payment-cli guide](doc/payment-cli.md)
 - Ride fulfillment (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md)
 
 ### UnionPay flow (requires user action in browser)
@@ -83,4 +87,4 @@ When the payment brand is `unionpay`, both card binding and token creation requi
 | Connection / network error (exit 4) | Wrong API host, or the service is unreachable | Check the host with `agenzo-admin-cli config show`; verify connectivity, then retry |
 | `Internal Server Error` (exit 4) | Temporary platform-side error | Retry; if it persists, contact Agenzo support with the `request_id` from the error output |
 
-Per-CLI errors are documented in each guide: [admin-cli](doc/admin-cli.md#admin-specific-errors) · [token-cli](doc/token-cli.md#token-specific-errors).
+Per-CLI errors are documented in each guide: [admin-cli](doc/admin-cli.md#admin-specific-errors) · [token-cli](doc/token-cli.md#token-specific-errors) · [payment-cli](doc/payment-cli.md#payment-specific-errors).

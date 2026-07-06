@@ -317,8 +317,15 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     const isUnionpayNetworkToken = serverType === 'network_token' && selectedPmPaymentBrand === 'unionpay';
 
     // --- Resolve member ---
+    // UnionPay: member_id is already on file for this payment method (captured
+    // at `payment-methods add --payment-brand unionpay --member <id>` — it
+    // drives the UPI consumer identity server-side). Never prompt for it again
+    // here: it would just duplicate what the PM already knows, and the two
+    // values could silently drift apart. Omit --member entirely for unionpay;
+    // if the caller passes it anyway, forward it verbatim and let the server
+    // validate it against the PM's own member_id (mismatch → error).
     let member: string | undefined = opts.member as string | undefined;
-    if (!member && !isYes) {
+    if (!member && !isYes && !isUnionpayNetworkToken) {
       // In interactive mode, prompt for member (optional — allow empty)
       const memberInput = await PromptEngine.resolveInput(undefined, {
         message: 'Member ID (optional, press Enter to skip):',
@@ -328,7 +335,7 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
         member = memberInput.trim();
       }
     }
-    // In --yes mode, if --member not provided, omit it (don't prompt).
+    // In --yes mode, or for unionpay, if --member not provided, omit it (don't prompt).
 
     // --- Type-specific branch logic ---
     let freezeAmountCents: number | undefined;
