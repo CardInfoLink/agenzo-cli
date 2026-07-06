@@ -1,6 +1,6 @@
 # Agenzo CLI Skill
 
-You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, charges, and merchant fulfillment (ride bookings).
+You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, charges, and merchant fulfillment (ride bookings, hotel bookings).
 
 This file is the **index**: overview + shared conventions. Per-CLI command detail lives in the linked guides — read the relevant one for the task at hand.
 
@@ -18,7 +18,20 @@ Agenzo provides four command-line tools, split by product area:
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method: Evo 3DS or UnionPay enrollment) and payment-tokens (VCN / Network Token / X402).
 - **payment-cli** — capture (charge) a previously created payment token (`capture`). Amount / currency / fee are taken from the token; payment brand is auto-detected from the token record.
-- **merchant-cli** — ride-elife ride fulfillment (quote / book / get / cancel / list-orders).
+- **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …).
+
+### hotel-redaug: create-order → pay-order flow
+
+The `hotel-redaug` capability splits booking into two independent steps:
+
+1. **`create-order`** — creates a hotel order (calls upstream `checkBooking` + `createOrder`) without charging any account. Returns `order_id`, `fc_order_code`, `total_amount`, and `currency`. The order enters `AWAITING_PAYMENT` status.
+2. **`pay-order`** — settles an existing order created by `create-order`. Requires only `--order-id` (the `order_id` output from `create-order`); there is no merchant-transaction-id flag. The billing path is chosen server-side by the developer's `billing_mode`:
+   - **`monthly_settlement`**: the developer's settlement account balance is debited and upstream `payOrder` is called.
+   - **`pay_per_call`**: the user pays offline via EVO using the `order_id` as the EVO merchant transaction ID; the platform verifies the payment amount/currency against EVO for that same `order_id`, then calls upstream `payOrder`.
+
+`pay-order` depends on `create-order`'s output `order_id`. The two verbs MUST be called in sequence: `create-order` first, then `pay-order`.
+
+For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` returns `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to poll until the payment is confirmed and the order reaches `PAID` status.
 
 ## Behavior Rules (all CLIs)
 
@@ -26,7 +39,7 @@ Agenzo provides four command-line tools, split by product area:
 2. **Session memory**: Remember outputs from previous steps (email, developer_id, api_key, pm_id, etc.) and reuse them in subsequent commands. Do not ask the user to repeat information they already provided.
 3. **One step at a time**: Execute one command, confirm the result, then proceed to the next step.
 4. **Error recovery**: If a command fails, explain the error and suggest a fix. Do not silently retry with different parameters.
-5. **Automation mode**: When executing commands for the user, always add the `--yes` global flag to skip interactive confirmations (e.g. pre-authorization prompts).
+5. **Automation mode**: When executing commands for the user, always add the `--yes` global flag — it only skips this CLI's own interactive TTY prompts (which can't be answered by a non-interactive Agent process). `--yes` is NOT a substitute for user consent: it does not remove the requirement to show the user what a command will do (which hotel/rate, how much money moves, which account is charged) and get their explicit decision in the chat UI BEFORE running a booking- or money-moving command. For hotel-redaug specifically, this means: present hotel/rate candidates and get the user's pick before `create-order`, and confirm the amount + billing path before `pay-order` — every time, `--yes` or not.
 
 ## Prerequisites
 
@@ -45,7 +58,7 @@ Agenzo provides four command-line tools, split by product area:
 | Control Plane | `agenzo-admin-cli` | `auth`, `orgs`, `developers`, `keys`, `accounts`, `config` | Bearer Token (via `auth login`) |
 | Runtime Plane | `agenzo-token-cli` | `payment-methods`, `payment-tokens` | API Key (`--api-key` flag) |
 | Runtime Plane | `agenzo-payment-cli` | `capture` | API Key (`--api-key` flag) |
-| Runtime Plane | `agenzo-merchant-cli` | `ride-elife` | API Key (`--api-key` flag) |
+| Runtime Plane | `agenzo-merchant-cli` | `ride-elife`, `hotel-redaug` | API Key (`--api-key` flag) |
 
 ## End-to-end Onboarding Flow
 
@@ -59,6 +72,7 @@ Follow this order across CLIs — each step depends on the previous one:
 - Steps 4–5 (add payment method + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
 - Step 6 (capture the created token) → [payment-cli guide](doc/payment-cli.md)
 - Ride fulfillment (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md)
+- Hotel booking (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md#hotel-redaug)
 
 ### UnionPay flow (requires user action in browser)
 
@@ -73,8 +87,8 @@ When the payment brand is `unionpay`, both card binding and token creation requi
 
 - **API key format**: `sk_<env>_...` — the prefix depends on the environment (`sk_prod_` in production, `sk_test_` in test; do not assume `sk_prod_`). `--api-key` takes the full key string, not the key ID.
 - **API key scope**: keys are bound to a developer; resources created with Key A are NOT visible to Key B. Scope (`token` / `merchant` / `payment`) is set at `keys create --scope`.
-- **Idempotency-Key**: write commands (`payment-tokens create`, ride `book` / `cancel`, etc.) take `--idempotency-key`. The CLI never auto-generates it — the caller MUST supply a unique value per logical request. Sent as the `Idempotency-Key` HTTP header (never in the body). Reuse the same value to safely retry the same logical request; use a fresh value for a new one.
-- **Automation**: always pass the `--yes` global flag when executing for the user (skips interactive confirmations).
+- **Idempotency-Key**: write commands (`payment-tokens create`, ride `book` / `cancel`, hotel-redaug `create-order` / `pay-order`, etc.) take `--idempotency-key`. The CLI never auto-generates it — the caller MUST supply a unique value per logical request. Sent as the `Idempotency-Key` HTTP header (never in the body). Reuse the same value to safely retry the same logical request; use a fresh value for a new one.
+- **Automation**: always pass the `--yes` global flag when executing for the user (skips this CLI's own TTY prompts only — it does not replace showing the user what will happen and getting their decision before booking- or money-moving commands; see Behavior Rule 5).
 - **Debugging**: add `--verbose` to print detailed logs to stderr. Error output includes a `request_id` — quote it when contacting support.
 - **Exit codes**: `0` success · `1` business error (4xx, e.g. RESOURCE_NOT_FOUND / feature disabled) · `2` CLI below required minimum version · `3` auth failure · `4` upstream / 5xx · `5` user cancel.
 

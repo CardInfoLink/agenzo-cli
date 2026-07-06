@@ -263,12 +263,14 @@ Corresponds to: Req 1.2, 1.3, 5.1; cli-design §4.4.1.2.
 | TC-SVC-GET-01 | Match found | `services get ride-elife` | data=full `ServiceCapability` (contains `verb_descriptions`/`workflow`/`discovery`); exit 0 |
 | TC-SVC-GET-02 | No match | `services get nope` | Throws `CliError('SERVICE_NOT_FOUND')` (code_num 4101, exit 1); message suggests `Run "services list"` |
 | TC-SVC-GET-03 | Missing positional argument | `services get` | Commander reports missing `<service-id>`; non-0 |
-| TC-SVC-GET-04 | table full view | `services get ride-elife --format table` | stdout keyValue contains `Workflow`/`Verb descriptions:` blocks; exit 0 |
+| TC-SVC-GET-04 | table full view | `services get ride-elife --format table` | stdout keyValue contains `workflow:`/`verbs_summary:` blocks; exit 0 |
 | TC-SVC-GET-05 | json envelope | `--format json` | stdout contains capability + `profile`/`endpoint`; stderr silent |
+| TC-SVC-GET-SERVICE-LAYER | backend-sourced capability | `services get svc_... --format json` | data projects onto the service-layer shape (`selection_hints`/`schema_ref`/`conventions`/`workflow`/`verbs_summary`/`cross_service_recovery`); per-verb `flags`/`response`/`example`/`error_recovery` never appear; `verbs_summary` gated to local verbs |
 
 ```bash
-agenzo-merchant-cli services get ride-elife --format json | jq '{service_id,verbs,workflow}'
+agenzo-merchant-cli services get ride-elife --format json | jq '{service_id,workflow,verbs_summary}'
 agenzo-merchant-cli services get nope 2>&1; echo "exit=$?"   # expect 1 (SERVICE_NOT_FOUND)
+agenzo-merchant-cli hotel-redaug search --help --format json | jq '{verb,flags}'  # capability layer, separate call
 ```
 
 ### 5.3 `ride-elife quote` (R, `POST /ride/quote`, no idem)
@@ -551,3 +553,182 @@ Code review item-by-item verification (comparing against cli-design §4.4 + exis
 | `tests/pbt.test.ts` | PBT-IDEM-01..03, PBT-WATCH-01..04 (fast-check) | 6.5 |
 
 > When running PBT, pass `LongRunningPBT` in the `execute-bash` warning field. L3 command integration mocks `ApiClient`, uses real `parseAsync`; L4 E2E (§7) requires a real merchant-scope key, manually reproduced, not included in `vitest run`.
+
+## 10. `hotel-redaug` Command Matrix
+
+> The `hotel-redaug` noun adds **13 thin verbs** over the platform `/hotel/*` endpoints, mirroring the `ride-elife` patterns: per-command `--api-key` → `X-Api-Key`, `--format json` default, `Idempotency-Key` **header** (never body) on write verbs, and NDJSON `--watch` on the status/pay reads. All monetary amounts are **DECIMAL currency units** (e.g. `320.00` = 320.00 yuan), never minor units, always paired with a currency. Booking is a create-then-pay split (`create-order` locks inventory without charging, `pay-order` settles it) supporting both `monthly_settlement` and `pay_per_call` billing modes, chosen server-side (`pay-order` takes only `--order-id`, no merchant-transaction-id flag); there is no combined `book` verb. Order status on the wire is the STRING `order_status` (PROCESSING/CONFIRMED/CANCELLED/COMPLETED) plus an integer `order_status_code` (2/3/4/5) on the provider path. Response types: `src/types/hotel.ts`; verb schemas: `src/verb-schema.ts`; watch engine: `src/hotel-redaug/watch.ts`.
+
+### 10.1 Verb → endpoint map
+
+| Verb | Type | HTTP | Idempotency-Key | --watch |
+|---|---|---|---|---|
+| `search` | R | `POST /hotel/search` | — | — |
+| `find-destination` | R | `POST /hotel/find-destination` | — | — |
+| `hotel-filters` | R | `POST /hotel/filters` | — | — |
+| `list-cities` | R | `POST /hotel/cities` | — | — |
+| `hotel-detail` | R | `POST /hotel/detail` | — | — |
+| `quote` | R | `POST /hotel/quote` | — | — |
+| `create-order` | W/Y | `POST /hotel/create-order` | header | — |
+| `pay-order` | W/Y | `POST /hotel/<id>/pay` | header | ✓ |
+| `get` | R | `GET /hotel/<id>/status` | — | ✓ |
+| `cancel` | W/Y | `POST /hotel/<id>/cancel` | header | — |
+| `checkout` | W/Y | `POST /hotel/<id>/checkout` | header | — |
+| `get-checkout` | R | `GET /hotel/checkout/<task_order_code>` | — | ✓ |
+| `list-orders` | R | `GET /hotel/orders` | — | — |
+
+### 10.2 `hotel-redaug search` (R, `POST /hotel/search`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HSEARCH-01 | Valid coords + dates | `POST /hotel/search` (`X-Api-Key`); snake_case body `{lat,lng,distance,check_in,check_out,adults,children,room_num,star?,keyword?}` (lat/lng as numbers); data `{hotels[]}`; exit 0 |
+| TC-HSEARCH-02 | Neither location branch supplied | `PARAM_INVALID` (exactly-one-branch: `--destination-id` XOR `--lat`/`--lng`); no request; exit 1 |
+| TC-HSEARCH-03 | Both location branches supplied | `PARAM_INVALID` (exactly-one-branch); no request; exit 1 |
+| TC-HSEARCH-04 | `--lat 91` / `--lng 181` | `PARAM_INVALID` (range −90..90 / −180..180); no request; exit 1 |
+| TC-HSEARCH-05 | Bad date / `check-out` ≤ `check-in` | `PARAM_INVALID` (YYYY-MM-DD, strictly after); no request; exit 1 |
+| TC-HSEARCH-06 | Empty `hotels` | Rendered as success (exit 0), not an error |
+| TC-HSEARCH-07 | `--destination-id` branch | Body `{destination_id,distance,check_in,...}` (no lat/lng); exit 0 |
+| TC-HSEARCH-08 | Filter flags forwarded only when supplied | `--price-min`/`--price-max`/`--sort-by`/`--page`/`--page-size` + opaque-code arrays forwarded when present, omitted when absent |
+| TC-HSEARCH-09 | 401 / 403 | `KEY_INVALID` (3) / `KEY_SCOPE_DENIED` (3) |
+
+### 10.3 `hotel-redaug quote` (R, `POST /hotel/quote`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HQUOTE-01 | Valid `--hotel-id` + dates | `POST /hotel/quote`; body `{hotel_id,check_in,check_out,adults,children,room_num,nationality}`; renders `rates[]` with `product_token`/`total_price`(decimal)/`price_items[]`; exit 0 |
+| TC-HQUOTE-02 | Missing `--hotel-id` | `PARAM_INVALID`; no request; exit 1 |
+| TC-HQUOTE-03 | Bad/disordered dates | `PARAM_INVALID`; no request; exit 1 |
+| TC-HQUOTE-04 | `NO_AVAILABILITY` from platform | String code preserved (4301, exit 1) |
+
+### 10.4 `hotel-redaug create-order` (W/Y, `POST /hotel/create-order`, [idem])
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HCREATE-01 | Valid `--yes` + idem key | `POST /hotel/create-order` (`X-Api-Key` + `Idempotency-Key` header); decimal `total_amount` + `price_items`; renders `order_id`/`fc_order_code`/`order_status=AWAITING_PAYMENT`/`rooms[]`; exit 0 |
+| TC-HCREATE-02 | Missing a required flag | `PARAM_INVALID`; no request; exit 1 |
+| TC-HCREATE-03 | `--price-items` not a valid JSON array of `{sale_date,sale_price,breakfast_num}` | `PARAM_INVALID` (parsePriceItems); no request; exit 1 |
+| TC-HCREATE-04 | `--yes` missing `--idempotency-key` | `PARAM_IDEMPOTENCY_KEY_REQUIRED`; no request; exit 1 |
+| TC-HCREATE-05 | Invalid idem key `bad!` | `PARAM_INVALID`; no request; exit 1 |
+| TC-HCREATE-06 | Idem key location | Sent as `Idempotency-Key` header; never in body |
+| TC-HCREATE-07 | Confirm declined (no `--yes`) | `CLIENT_ABORTED`; no request; exit 5 |
+| TC-HCREATE-08 | Decimal amounts | `total_amount`/`price_items[].sale_price` forwarded verbatim (no minor-unit conversion) |
+| TC-HCREATE-09 | Platform `NAME_FORMAT_INVALID` | String code preserved (exit 1) |
+| TC-HCREATE-10 | No charge made | Response carries `order_status=AWAITING_PAYMENT`; no settlement/payment fields |
+
+### 10.5 `hotel-redaug pay-order` (W/Y, `POST /hotel/<id>/pay`, [idem]; `--watch` → NDJSON)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HPAY-01 | Order with `monthly_settlement` billing_mode, `--yes` | `POST /hotel/<order_id>/pay` (`X-Api-Key` + `Idempotency-Key` header); body is empty (no request params); renders `settlement_path=monthly_settlement`/`pay_status`/`order_status=PAID`; exit 0 |
+| TC-HPAY-02 | Order with `pay_per_call` billing_mode, same command (no extra flag) | body is identical/empty; platform queries EVO for the `order_id`; renders `settlement_path=pay_per_call`; exit 0 |
+| TC-HPAY-03 | `PAYMENT_NOT_COMPLETED` (pay_per_call, EVO not yet confirmed for this order_id) | String code preserved; exit 1; order/payment state unchanged |
+| TC-HPAY-04 | `--watch` polling | Retries on `PAYMENT_NOT_COMPLETED` at `--watch-interval`; one NDJSON line per attempt; stops on `PAID` or `--watch-timeout` (final line `{watch_status:'timeout',...}`) |
+| TC-HPAY-05 | Missing `--order-id` | `PARAM_INVALID`; no request; exit 1 |
+| TC-HPAY-06 | `--yes` missing `--idempotency-key` | `PARAM_IDEMPOTENCY_KEY_REQUIRED`; no request; exit 1 |
+| TC-HPAY-07 | Idem key location | Sent as `Idempotency-Key` header; never in body |
+| TC-HPAY-08 | Confirm declined (no `--yes`) | `CLIENT_ABORTED`; no request; exit 5 |
+| TC-HPAY-09 | `BILLING_MODE_MISMATCH` | String code preserved (exit 1) when the order's `billing_mode` is neither `monthly_settlement` nor `pay_per_call` |
+| TC-HPAY-10 | `INVALID_ORDER_STATE` (order not `AWAITING_PAYMENT`) | String code preserved (exit 1); no settlement attempted |
+
+### 10.6 `hotel-redaug get` (R, `GET /hotel/<id>/status`; `--watch` → NDJSON)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HGET-01 | Single query | `GET /hotel/<id>/status` (id `encodeURIComponent`); renders `order_status` (string) + `order_status_code` (int) + `hotel_confirm_no`; exit 0 |
+| TC-HGET-02 | Missing `--order-id` | `PARAM_INVALID`; no request; exit 1 |
+| TC-HGET-03 | `--watch` reaches terminal | NDJSON, one line per poll; stops when `order_status_code ∈ {3,4,5}` (or `order_status ∈ {CONFIRMED,CANCELLED,COMPLETED}`); no timeout line; exit 0 |
+| TC-HGET-04 | `--watch` timeout | Final line `{ "watch_status":"timeout", ... }`; exit 0 |
+| TC-HGET-05 | `--watch` envelope | NDJSON lines NOT wrapped in profile/endpoint envelope |
+| TC-HGET-06 | `HOTEL_ORDER_NOT_FOUND` | String code preserved (4304, exit 1) |
+
+### 10.7 `hotel-redaug cancel` (W/Y, `POST /hotel/<id>/cancel`, [idem])
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HCANCEL-01 | Valid `--yes` + idem | `POST /hotel/<id>/cancel`; body `{fc_order_code,reason?}`; `Idempotency-Key` header; exit 0 |
+| TC-HCANCEL-02 | Missing `--order-id`/`--fc-order-code` | `PARAM_INVALID`; no request; exit 1 |
+| TC-HCANCEL-03 | Confirmed shape | Renders `cancellation`/`cancellation_fee`/`refund_amount` |
+| TC-HCANCEL-04 | Accepted-but-pending shape | Renders `cancel_status=cancel_pending`; info line: acceptance ≠ proof — poll `get` until CANCELLED (4) |
+| TC-HCANCEL-05 | Confirm declined | `CLIENT_ABORTED`; no request; exit 5 |
+| TC-HCANCEL-06 | `CANCELLATION_NOT_ALLOWED` / `ALREADY_CANCELLED` | String codes preserved (4204 / 4305, exit 1) |
+
+### 10.8 `hotel-redaug checkout` (W/Y, `POST /hotel/<id>/checkout`, [idem])
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HCHECKOUT-01 | Valid `--yes` + idem | `POST /hotel/<id>/checkout`; body `{fc_order_code,reason,refund_type,checkout_rooms}`; renders `task_order_code`; async info → poll `get-checkout`; exit 0 |
+| TC-HCHECKOUT-02 | Missing required flag | `PARAM_INVALID`; no request; exit 1 |
+| TC-HCHECKOUT-03 | `--checkout-rooms` not valid JSON array of `{room_index,guest_name,cancel_check_in_date}` | `PARAM_INVALID` (parseCheckoutRooms); no request; exit 1 |
+| TC-HCHECKOUT-04 | Confirm declined | `CLIENT_ABORTED`; no request; exit 5 |
+| TC-HCHECKOUT-05 | `CHECKOUT_NOT_ALLOWED` | String code preserved (4306, exit 1) |
+
+### 10.9 `hotel-redaug get-checkout` (R, `GET /hotel/checkout/<task_order_code>`; `--watch`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HGETCO-01 | Single query | `GET /hotel/checkout/<code>` (`encodeURIComponent`); renders `refund_status` + `refund`; exit 0 |
+| TC-HGETCO-02 | Missing `--task-order-code` | `PARAM_INVALID`; no request; exit 1 |
+| TC-HGETCO-03 | `--watch` terminal | Stops when `refund_status ∈ {approved,rejected,refunded}`; NDJSON, no envelope; exit 0 |
+| TC-HGETCO-04 | `--watch` timeout | Final line `{ "watch_status":"timeout", ... }`; exit 0 |
+| TC-HGETCO-05 | `CHECKOUT_TASK_NOT_FOUND` | String code preserved (4307, exit 1) |
+
+### 10.10 `hotel-redaug list-orders` (R, `GET /hotel/orders`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HLIST-01 | Defaults | `GET /hotel/orders?page=1&page_size=20`; renders `orders[]`/`total`/`page`/`page_size`; exit 0 |
+| TC-HLIST-02 | `--page 0` / `--page-size -1` / non-integer | `PARAM_INVALID` (positive integer); no request; exit 1 |
+| TC-HLIST-03 | `--status` omitted | No `status` query param sent (all statuses) |
+| TC-HLIST-04 | `--status CONFIRMED` | `status=CONFIRMED` query param present |
+
+### 10.11 `hotel-redaug find-destination` (R, `POST /hotel/find-destination`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HFINDDEST-01 | Valid `--keyword` | `POST /hotel/find-destination` (`X-Api-Key`); body `{keyword, data_type?}`; renders `destinations[]`; exit 0 |
+| TC-HFINDDEST-02 | Missing/empty `--keyword` | `PARAM_INVALID` before any request; exit 1 |
+| TC-HFINDDEST-03 | `--data-type` optional | When supplied, forwarded as `data_type` in body; when omitted, key absent from body |
+| TC-HFINDDEST-04 | Empty `destinations` | Rendered as success (exit 0), not an error |
+
+### 10.12 `hotel-redaug hotel-filters` (R, `POST /hotel/filters`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HFILTERS-01 | `--destination-id` branch | `POST /hotel/filters` (`X-Api-Key`); body `{destination_id, distance}`; renders filter groups (stars/brands/groups/labels/sub_categories/hotel_facilities/room_facilities); exit 0 |
+| TC-HFILTERS-02 | `--lat`/`--lng` branch | Body `{lat, lng, distance}`; same render; exit 0 |
+| TC-HFILTERS-03 | Both branches supplied | `PARAM_INVALID` (exactly-one-branch); no request; exit 1 |
+| TC-HFILTERS-04 | Neither branch supplied | `PARAM_INVALID`; no request; exit 1 |
+| TC-HFILTERS-05 | Coord range (`--lat 91` / `--lng 181`) | `PARAM_INVALID`; no request; exit 1 |
+
+### 10.13 `hotel-redaug list-cities` (R, `POST /hotel/cities`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HCITIES-01 | Valid `--country` | `POST /hotel/cities` (`X-Api-Key`); body `{country_code}`; renders `cities[]` with `city_code`/`city_name`/`destination_id`/`lat`/`lng`; exit 0 |
+| TC-HCITIES-02 | Missing/empty `--country` | `PARAM_INVALID` before any request; exit 1 |
+
+### 10.14 `hotel-redaug hotel-detail` (R, `POST /hotel/detail`)
+
+| Case | Scenario | Expected |
+|---|---|---|
+| TC-HDETAIL-01 | Valid `--hotel-id` | `POST /hotel/detail` (`X-Api-Key`); body `{hotel_id, with_images}`; renders detail (`hotel_name`/`star`/`address`/`intro`/`facilities[]`/`images[]`); exit 0 |
+| TC-HDETAIL-02 | Missing/empty `--hotel-id` | `PARAM_INVALID` before any request; exit 1 |
+| TC-HDETAIL-03 | `--with-images false` | Body `with_images=false`; response `images` is empty array |
+| TC-HDETAIL-04 | `--with-images` default true | Body `with_images=true` (default); images rendered when platform returns them |
+
+### 10.15 Cross-cutting (hotel-redaug)
+
+- **Auth:** every verb takes `--api-key` → `X-Api-Key`; HTTP 401 → `KEY_INVALID` (exit 3), 403 → `KEY_SCOPE_DENIED` (exit 3) via `CliError.fromApi(result, { auth:'api-key' })`.
+- **Error codes (exit 1) preserved verbatim from the platform string code:** `NO_AVAILABILITY`(4301), `PRICE_CHANGED`(4302), `NAME_FORMAT_INVALID`(4303), `HOTEL_ORDER_NOT_FOUND`(4304), `ALREADY_CANCELLED`(4305), `CHECKOUT_NOT_ALLOWED`(4306), `CHECKOUT_TASK_NOT_FOUND`(4307), `PAY_PER_CALL_NOT_AVAILABLE`(4308), plus reused `BILLING_MODE_MISMATCH`(3001), `ACCOUNT_*`(31xx), `BOOKING_FAILED`(4203), `CANCELLATION_NOT_ALLOWED`(4204).
+- **Output contract:** `--format json` default — single JSON (payload + profile/endpoint envelope) on stdout, status/spinner on stderr; `--watch` is a raw NDJSON line stream (no envelope).
+- **Idempotency:** `create-order`/`pay-order`/`cancel`/`checkout` require `--idempotency-key` (`[A-Za-z0-9_-]{1,128}`), forwarded as the `Idempotency-Key` header, never auto-generated, never in the body (reuses `src/idempotency.ts`).
+- **Amounts:** DECIMAL currency units throughout; never minor units.
+- **Scope:** 13 verbs registered, including `find-destination` (search-prep lookup — the platform now exposes `/hotel/find-destination`) and the `create-order`/`pay-order` split (no combined `book` verb).
+
+### 10.16 Planned automated test files (hotel-redaug)
+
+- `tests/hotel-pbt.test.ts` — Properties 1–8, 11, 12 (validation, JSON-flag parsing, request assembly, decimal amounts, billing guard, idempotency, list-orders query, error mapping).
+- `tests/hotel-watch.test.ts` — Properties 9–10 (watch terminal predicates + termination/timeout via fake clock).
+- `tests/hotel-redaug.test.ts` — per-verb integration (mocked `ApiClient`): body/query assembly, confirm/`--yes`/api-key prompt branches, rendering, error mapping.
+- `tests/hotel-verb-schema.test.ts` — `--help --format json` emission, `polling` blocks (`get`/`get-checkout`), flag/response alignment, `error_recovery` keys.
+- Registration test — `hotel-redaug` exposes exactly **12 verbs** including `find-destination`, no host/profile subcommand.
+- E2E (testing profile) — `search → quote → book → get` against `agent-test.everonet.com` with a merchant-scoped key.

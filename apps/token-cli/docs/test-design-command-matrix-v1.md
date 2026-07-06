@@ -245,7 +245,7 @@ File: `tests/payment-methods.test.ts`
 | TC-PT-CRT-03 | VCN amount out of range | `--amount 600.00` | Throws PARAM_INVALID |
 | TC-PT-CRT-04 | VCN fee calculation | amount=10.00 (1000 cents) | fee=max(1,round(1000*0.05))=50; freeze=1050 |
 | TC-PT-CRT-05 | Network-token type mapping | `--type network-token` | POST body type=`network_token` |
-| TC-PT-CRT-06 | NT fee fallback | GET /config/network-token-fee fails | fee=DEFAULT_NT_FEE_CENTS=500 |
+| TC-PT-CRT-06 | NT fee fallback | GET /config/network-token-fee fails | fee=DEFAULT_NT_FEE_CENTS=50 |
 | TC-PT-CRT-07 | X402 normal | All x402 flags | POST body contains pay_to/nonce/network/deadline; stdout contains X402 + `ℹ Use the Signature Value` |
 | TC-PT-CRT-08 | X402 fee calculation | amount=1.00 USDC | fee=max(10000, round(1000000*0.05))=50000 |
 | TC-PT-CRT-09 | Payment method resolution — single card auto | No --payment-method-id/--card + single ACTIVE card | Auto-selected |

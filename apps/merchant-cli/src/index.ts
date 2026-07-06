@@ -23,6 +23,22 @@ import { registerListOrdersCommand } from './ride-elife/list-orders.js';
 import { registerServicesListCommand } from './services/list.js';
 import { registerServiceGetCommand } from './services/get.js';
 
+// hotel-redaug commands (injection-style register, D6)
+import { registerHotelSearchCommand } from './hotel-redaug/search.js';
+import { registerHotelQuoteCommand } from './hotel-redaug/quote.js';
+import { registerHotelCreateOrderCommand } from './hotel-redaug/create-order.js';
+import { registerHotelPayOrderCommand } from './hotel-redaug/pay-order.js';
+import { registerHotelGetCommand } from './hotel-redaug/get.js';
+import { registerHotelCancelCommand } from './hotel-redaug/cancel.js';
+import { registerHotelCheckoutCommand } from './hotel-redaug/checkout.js';
+import { registerHotelGetCheckoutCommand } from './hotel-redaug/get-checkout.js';
+import { registerHotelListOrdersCommand } from './hotel-redaug/list-orders.js';
+import { registerHotelFindDestinationCommand } from './hotel-redaug/find-destination.js';
+import { registerHotelFiltersCommand } from './hotel-redaug/hotel-filters.js';
+import { registerHotelListCitiesCommand } from './hotel-redaug/list-cities.js';
+import { registerHotelDetailCommand } from './hotel-redaug/hotel-detail.js';
+import { registerHotelSkillCommand } from './hotel-redaug/skill.js';
+
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
 // is constructed; may be undefined if an error is thrown before then.
@@ -41,6 +57,12 @@ async function main() {
   const apiBaseUrl = await configManager.getApiBaseUrl();
   const apiClient = new ApiClient({ baseUrl: apiBaseUrl });
 
+  // Discovery lives at the host root (/api/discovery/v1/catalog), NOT under the
+  // per-binary merchant prefix, so it needs its own client built from the raw
+  // host. Built here (not inside the action) so it can be injected/mocked.
+  const apiHost = await configManager.getApiHost();
+  const discoveryClient = new ApiClient({ baseUrl: apiHost });
+
   // Shared deps object for networked commands — API Key is supplied per-command
   // (or interactively), so commands only need the HTTP client.
   const deps = { apiClient };
@@ -52,7 +74,7 @@ async function main() {
     .name('agenzo-merchant-cli')
     .version(getCurrentVersion())
     .description(
-      'Agenzo merchant fulfillment plane: service discovery (services) and ride ordering (ride-elife)',
+      'Agenzo merchant fulfillment plane: service discovery (services), ride ordering (ride-elife), and hotel booking (hotel-redaug)',
     )
     .option('--verbose', 'Show verbose logs')
     .option('--yes', 'Skip confirmation prompts (for automation/AI Agents)')
@@ -82,10 +104,62 @@ async function main() {
   registerCancelCommand(rideCmd, deps);
   registerListOrdersCommand(rideCmd, deps);
 
-  // services command group (CLI-bundled capability discovery)
+  // services command group (capability discovery via platform backend + local fallback).
+  // These commands gate backend capabilities against the CLI's own command tree,
+  // so they need the root `program` to introspect registered nouns/verbs, plus
+  // the host-root discovery client.
   const servicesCmd = program.command('services').description('Merchant service discovery');
-  registerServicesListCommand(servicesCmd);
-  registerServiceGetCommand(servicesCmd);
+  registerServicesListCommand(servicesCmd, { discoveryClient, program });
+  registerServiceGetCommand(servicesCmd, { discoveryClient, program });
+
+  // hotel-redaug command group (Redaug hotel booking) — 13 verbs
+  const hotelCmd = program.command('hotel-redaug').description(
+    `Hotel booking (Redaug) — international hotel search, quote, create-order, pay-order, cancel, and check-out.
+
+Workflow (typical order):
+  1. find-destination  Resolve a place name → coordinates (or destination_id via list-cities)
+  2. hotel-filters     (optional) Get filter options for a location (star/brand/facility codes)
+  3. search            Search hotels by coordinates OR destination_id, with date/guest/filter params
+  4. hotel-detail      View hotel + rooms[] (area/floor/beds/photos). Call it for the chosen/
+                       shortlisted hotel BEFORE quote — quote's room_name alone has no detail,
+                       and the user should see real room info before picking a rate at step 5.
+  5. quote             Get real-time room rates for a hotel + dates → product_token + price_items.
+                       Pair each rate with hotel-detail's rooms[] (match by room_name) before
+                       presenting options to the user.
+  6. create-order      Create order using product_token from quote (lock inventory, no charge)
+  7. pay-order         Settle the order by --order-id (path chosen server-side by billing_mode)
+  8. get               Poll order status until CONFIRMED (or use --watch for NDJSON stream)
+  9. cancel            Cancel an order (whole-order, within policy)
+ 10. checkout          Apply for partial check-out / out-of-policy cancellation (async)
+ 11. get-checkout      Poll checkout application status
+ 12. list-orders       List developer's hotel orders
+
+Key notes:
+  • search has two location branches: --destination-id OR --lat/--lng (exactly one required)
+  • hotel-detail's rooms[] is the actual room info (area/beds/photos) — quote's room_name is
+    just a bare label; show both together before asking the user to pick a rate
+  • create-order locks inventory without charging; order enters AWAITING_PAYMENT
+  • pay-order settles the order by --order-id; the path is chosen server-side by
+    billing_mode. For pay_per_call the user pays via EVO using the order_id
+    as the merchantTransID first; use --watch to poll until PAID
+  • All amounts are DECIMAL (e.g. 10.00 = ten yuan), never minor units (cents)
+  • product_token from quote is opaque — pass it unchanged to create-order
+  • price_items from quote must be copied verbatim as --price-items JSON array to create-order`,
+  );
+  registerHotelSearchCommand(hotelCmd, deps);
+  registerHotelQuoteCommand(hotelCmd, deps);
+  registerHotelCreateOrderCommand(hotelCmd, deps);
+  registerHotelPayOrderCommand(hotelCmd, deps);
+  registerHotelGetCommand(hotelCmd, deps);
+  registerHotelCancelCommand(hotelCmd, deps);
+  registerHotelCheckoutCommand(hotelCmd, deps);
+  registerHotelGetCheckoutCommand(hotelCmd, deps);
+  registerHotelListOrdersCommand(hotelCmd, deps);
+  registerHotelFindDestinationCommand(hotelCmd, deps);
+  registerHotelFiltersCommand(hotelCmd, deps);
+  registerHotelListCitiesCommand(hotelCmd, deps);
+  registerHotelDetailCommand(hotelCmd, deps);
+  registerHotelSkillCommand(hotelCmd);
 
   // Parse and execute
   await program.parseAsync(process.argv);
@@ -108,8 +182,10 @@ function resolveActiveFormat(): OutputFormat {
  * format and exits with the mapped code (1–5). stdout is left untouched so a
  * partial machine payload is never emitted on failure.
  *
- * - `json`: a single `{ error: { code, code_num, message, request_id? } }` envelope (§8.2).
- * - `table`: `✗ [<code_num>] <message>`.
+ * - `json`: a single `{ error: { code, code_num, message, request_id?, upstream? } }` envelope (§8.2).
+ * - `table`: `✗ [<code_num>] <message>`, plus a `  ↳ [<upstream.code>] <upstream.message>`
+ *   line when this failure originated from a third-party upstream (e.g. Redaug/eLife)
+ *   the platform calls out to.
  */
 function reportError(error: unknown): never {
   const envelope = toErrorEnvelope(error);
@@ -121,6 +197,9 @@ function reportError(error: unknown): never {
     console.error(
       Formatter.status('error', `[${envelope.error.code_num}] ${envelope.error.message}`),
     );
+    if (envelope.error.upstream) {
+      console.error(`  ↳ [${envelope.error.upstream.code}] ${envelope.error.upstream.message}`);
+    }
     // Unknown (non-CliError) failures keep the --verbose raw-dump affordance.
     if (!(error instanceof CliError) && process.argv.includes('--verbose')) {
       console.error(error);

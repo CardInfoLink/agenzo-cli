@@ -9,6 +9,16 @@ export class CliError extends Error {
     public readonly statusCode?: number,
     public readonly requestId?: string,
     public readonly upstream?: UpstreamError,
+    /**
+     * The backend's own raw message for this error (e.g. a Pydantic
+     * validation detail such as "child_seat_count: must be between 0 and 5",
+     * or a provider adapter's `user_hint`). Kept SEPARATE from `message`
+     * (the stable, catalog-owned text for `code`) so callers always get a
+     * predictable top-level message while still being able to see exactly
+     * what the backend said. Surfaced in the envelope as `backend_message`
+     * when present and different from the stable message.
+     */
+    public readonly backendMessage?: string,
   ) {
     super(message);
     this.name = 'CliError';
@@ -16,9 +26,13 @@ export class CliError extends Error {
 
   /**
    * Map a backend ApiError to a CLI-facing code (§8.5 transitional mapping).
-   * Backend numeric codes / HTTP status are translated to §8.4 string codes;
-   * the raw backend message is NOT passed through (§8.1 principle 4) — a
-   * stable, fixed message per code is used instead.
+   * Backend numeric codes / HTTP status are translated to §8.4 string codes.
+   * The top-level `message` is always the stable, catalog-owned text for the
+   * resolved code (§8.1 principle 4 — never let raw backend text become the
+   * primary/stable message). The backend's own message is NOT discarded,
+   * though: it is preserved on `backendMessage` and surfaced in the envelope
+   * as `backend_message` so the caller can see the real reason (e.g. which
+   * field failed validation) alongside the stable code/message.
    *
    * The optional `opts.auth` selects the auth semantics for the 401 mapping:
    * - `'bearer'` (default, admin-cli Bearer Token): 401 → `AUTH_SESSION_EXPIRED`.
@@ -44,6 +58,7 @@ export class CliError extends Error {
         error.statusCode,
         error.requestId,
         error.upstream,
+        error.errorMessage,
       );
     }
 
@@ -64,6 +79,7 @@ export class CliError extends Error {
       status,
       error.requestId,
       error.upstream,
+      error.errorMessage,
     );
   }
 }
@@ -147,6 +163,9 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
   AUTH_INVITE_CODE_INVALID: 'The invitation code is invalid.',
   KEY_INVALID: 'The API key is invalid or has been revoked. Please check your --api-key and retry.',
   KEY_SCOPE_DENIED: 'This API key does not have the required scope for this command.',
+  PAYMENT_METHOD_NOT_FOUND: 'Payment method not found.',
+  PAYMENT_METHOD_DISABLED: 'This payment method has been disabled.',
+  INVALID_PAYMENT_METHOD: 'The payment method is not available for this operation.',
   RESOURCE_NOT_FOUND: 'The resource was not found or does not belong to the current organization.',
   RESOURCE_CONFLICT: 'A resource with the same unique value already exists.',
   RESOURCE_STATE_INVALID: 'The resource is in a state that does not permit this operation.',
@@ -169,10 +188,26 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
   QUOTE_EXPIRED: 'The quote has expired. Please request a new quote and retry.',
   BOOKING_FAILED: 'The booking could not be completed. Please retry.',
   CANCELLATION_NOT_ALLOWED: 'This order cannot be cancelled in its current state.',
+  NO_AVAILABILITY: 'No rooms available for the selected hotel and dates.',
+  PRICE_CHANGED: 'The price changed since the quote. Re-quote and confirm.',
+  NAME_FORMAT_INVALID: 'The guest name format is not accepted; use Latin letters.',
+  HOTEL_ORDER_NOT_FOUND: 'Hotel order not found.',
+  ALREADY_CANCELLED: 'This hotel order is already cancelled.',
+  CHECKOUT_NOT_ALLOWED: 'A partial check-out is not allowed in the current state.',
+  CHECKOUT_TASK_NOT_FOUND: 'Check-out application not found.',
+  PAY_PER_CALL_NOT_AVAILABLE: 'Pay-per-call billing is not available; use monthly_settlement.',
   NOT_IMPLEMENTED: 'This operation is not implemented yet.',
 };
 
-/** §8.2 error envelope: `{ error: { code, code_num, message, request_id?, upstream? } }`. */
+/**
+ * §8.2 error envelope: `{ error: { code, code_num, message, request_id?, upstream?, backend_message? } }`.
+ *
+ * `message` is always the stable, catalog-owned text for `code` — safe to
+ * match on and never changes shape. `backend_message` (when present) is the
+ * backend's own raw text for this specific failure (e.g. which field failed
+ * validation, or a provider's real rejection reason) — diagnostic, not a
+ * stable contract, but no longer discarded.
+ */
 export interface ErrorEnvelope {
   error: {
     code: ErrorCode;
@@ -180,18 +215,27 @@ export interface ErrorEnvelope {
     message: string;
     request_id?: string;
     upstream?: UpstreamError;
+    backend_message?: string;
   };
 }
 
 export function toErrorEnvelope(error: unknown): ErrorEnvelope {
   if (error instanceof CliError) {
+    const stableMessage = error.message || 'Unknown error';
+    // Only surface backend_message when it adds information beyond the
+    // stable message (avoid noisy duplication when they already match).
+    const backendMessage =
+      error.backendMessage && error.backendMessage !== stableMessage
+        ? error.backendMessage
+        : undefined;
     return {
       error: {
         code: error.code,
         code_num: codeNum(error.code),
-        message: error.message || 'Unknown error',
+        message: stableMessage,
         ...(error.requestId ? { request_id: error.requestId } : {}),
         ...(error.upstream ? { upstream: error.upstream } : {}),
+        ...(backendMessage ? { backend_message: backendMessage } : {}),
       },
     };
   }

@@ -388,6 +388,9 @@ describe('§6.3 error mapping (CliError.fromApi + exitCodeFor)', () => {
         code_num: 1101,
         message: expect.any(String),
         request_id: 'req-1',
+        // backend_message surfaces the backend's raw text when it differs from
+        // the stable catalog message (here apiError's default 'backend error').
+        backend_message: 'backend error',
       },
     });
 

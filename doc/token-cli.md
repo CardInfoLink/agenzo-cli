@@ -210,7 +210,7 @@ Card resolution priority:
 VCN, X402, and Network Token all involve pre-authorization (fund freeze) on a gateway token, followed by capture or cancel:
 - VCN: Frozen amount = amount + service fee (5%). Displayed as concrete dollar values.
 - X402: Amount converted from USDC smallest units to USD (1 USD = 1,000,000 units). Service fee 5%.
-- Network Token: Flat service fee charged via gateway token. The amount is fetched at runtime from `GET /config/network-token-fee` (default $0.50 if the endpoint is unreachable).
+- Network Token: Flat service fee charged via gateway token. The amount is fetched at runtime from `GET /config/network-token-fee` (default $0.50 if the endpoint is unreachable, matching the server's `NETWORK_TOKEN_FEE_CENTS` default).
 - Use the `--yes` global flag to skip confirmation (always use this when executing for the user).
 
 ### Network Token Compatibility

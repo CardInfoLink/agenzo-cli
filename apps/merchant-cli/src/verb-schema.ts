@@ -22,6 +22,8 @@ import { TERMINAL_STATUSES, DEFAULT_WATCH_INTERVAL_SECONDS } from './ride-elife/
 
 const CLI_NAME = 'agenzo-merchant-cli';
 const NOUN = 'ride-elife';
+/** Hotel noun (command group) — the `hotel-redaug/*` verbs share this. */
+export const HOTEL_NOUN = 'hotel-redaug';
 
 // ============================================================
 // Schema shape (§4.4.1.3 verb-level schema)
@@ -43,11 +45,18 @@ export interface ExampleSchema {
   output_summary: string;
 }
 
-/** Polling guidance — only status-query verbs (`get`) carry this block. */
+/**
+ * Polling guidance — status-query verbs (`get`, `get-checkout`) carry this block.
+ *
+ * `terminal_statuses` / `in_progress_statuses` are `Array<string | number>`
+ * because hotel `get` keys off the INTEGER `order_status_code` set (`[3,4,5]` /
+ * `[2]`), while ride `get` and hotel `get-checkout` use STRING statuses. The
+ * widened element type keeps both valid in the same shared interface.
+ */
 export interface PollingSchema {
   recommended_interval_seconds: number;
-  terminal_statuses: string[];
-  in_progress_statuses: string[];
+  terminal_statuses: Array<string | number>;
+  in_progress_statuses: Array<string | number>;
   field_availability?: Record<string, string>;
 }
 
@@ -379,5 +388,700 @@ export const listOrdersSchema: VerbSchema = {
   error_recovery: {
     INTERNAL_ERROR: 'Transient backend error. Retry once after a short delay.',
     PARAM_INVALID: 'Ensure --page / --page-size are positive integers, then retry.',
+  },
+};
+
+// ============================================================
+// Hotel-redaug verb schemas
+// ============================================================
+//
+// Flags / response are kept aligned with each command's ACTUAL flags
+// (requirements 2.1 / 3.1 / 4.1 / 5.1 / 6.1 / 7.1 / 8.1 / 9.1) and the live
+// response types in `types/hotel.ts` (NOT the capability schema where they
+// diverge). Three deliberate reconciliations vs the capability schema:
+//   - `order_status` is the std STRING on the wire; `get` also carries the
+//     integer `order_status_code` (2/3/4/5). There is NO `order_status_std`.
+//   - `cancel` models both the confirmed and accepted-but-pending shapes.
+//   - `checkout` returns `{ order_id, task_order_code, apply_status,
+//     checkout_status }`.
+// Amounts are decimal currency units paired with a currency code (never minor
+// units). `error_recovery` guidance is taken from the capability schema's
+// `error_recovery[code].agent_action`, keyed on the REAL wire codes
+// (`HOTEL_ORDER_NOT_FOUND` / `CHECKOUT_TASK_NOT_FOUND`, not the agent-facing
+// `ORDER_NOT_FOUND` / `TASK_NOT_FOUND` aliases).
+//
+// `--api-key`, `--yes` and `--format` are cross-cutting flags resolved by the
+// program/top-level handler; like the ride-elife schemas, they are intentionally
+// omitted from the per-verb `flags` block (which declares only domain flags).
+
+/** `hotel-redaug search` schema. Read-only, supports both location branches. */
+export const hotelSearchSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'search',
+  description:
+    'Search hotels near a coordinate OR within a destination for the given stay dates. Two location branches: --destination-id (from find-destination) XOR --lat/--lng (geocoded by the Agent backend). Exactly one branch must be supplied',
+  flags: {
+    'destination-id': { type: 'string', required: 'conditional', description: 'Destination ID from find-destination (alternative to --lat/--lng)', constraints: 'Exactly one location branch: --destination-id XOR (--lat + --lng)' },
+    lat: { type: 'float', required: 'conditional', description: 'Latitude of the search center (geocoded by the Agent backend, not by the CLI)', constraints: '-90 to 90; requires --lng; mutually exclusive with --destination-id' },
+    lng: { type: 'float', required: 'conditional', description: 'Longitude of the search center (geocoded by the Agent backend, not by the CLI)', constraints: '-180 to 180; requires --lat; mutually exclusive with --destination-id' },
+    distance: { type: 'int', required: false, default: 20, description: 'Search radius in kilometers', constraints: 'Agent infers from phrasing — small (2-5) for "right next to a spot", larger (15-30) for a whole city. Do NOT ask the user for a number' },
+    'check-in': { type: 'string', required: true, description: 'Check-in date', constraints: 'YYYY-MM-DD, today or later' },
+    'check-out': { type: 'string', required: true, description: 'Check-out date', constraints: 'YYYY-MM-DD, strictly after check-in' },
+    adults: { type: 'int', required: false, default: 2, description: 'Number of adults', constraints: '1-9 per room' },
+    children: { type: 'int', required: false, default: 0, description: 'Number of children' },
+    'room-num': { type: 'int', required: false, default: 1, description: 'Number of rooms requested' },
+    star: { type: 'int', required: false, description: 'Minimum hotel star rating filter', constraints: 'Enum 3 / 4 / 5' },
+    keyword: { type: 'string', required: false, description: 'Optional hotel name keyword to narrow results' },
+    'price-min': { type: 'float', required: false, description: 'Minimum price filter' },
+    'price-max': { type: 'float', required: false, description: 'Maximum price filter' },
+    'sort-by': { type: 'string', required: false, description: 'Sort field' },
+    page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
+    'page-size': { type: 'int', required: false, default: 10, description: 'Results per page', constraints: '>= 1' },
+    'hotel-facility-codes': { type: 'string', required: false, description: 'Hotel facility codes (comma-separated or JSON array, from hotel-filters)' },
+    'room-facility-codes': { type: 'string', required: false, description: 'Room facility codes (comma-separated or JSON array, from hotel-filters)' },
+    'hotel-brand-codes': { type: 'string', required: false, description: 'Hotel brand codes (comma-separated or JSON array, from hotel-filters)' },
+    'plate-codes': { type: 'string', required: false, description: 'Plate codes (comma-separated or JSON array, from hotel-filters)' },
+    'hotel-label-ids': { type: 'string', required: false, description: 'Hotel label IDs (comma-separated or JSON array, from hotel-filters)' },
+    'hotel-sub-category-ids': { type: 'string', required: false, description: 'Hotel sub-category IDs (comma-separated or JSON array, from hotel-filters)' },
+  },
+  response: {
+    hotels: {
+      type: 'array',
+      description: 'Matching hotels for the location and dates. Empty when nothing was found (rendered as a successful empty result, not an error).',
+      items: {
+        hotel_id: { type: 'string|int', description: 'Opaque hotel identifier. Pass verbatim to quote --hotel-id. Do NOT interpret.' },
+        hotel_name: { type: 'string', description: 'Hotel name.' },
+        star: { type: 'int|null', description: 'Star rating.' },
+        address: { type: 'string|null', description: 'Hotel address.' },
+        distance_km: { type: 'float|null', description: 'Approximate distance from the search center, in km.' },
+        city_name: { type: 'string|null', description: 'City name.' },
+        district_name: { type: 'string|null', description: 'District name.' },
+        business_name: { type: 'string|null', description: 'Business area name.' },
+        score: { type: 'float|null', description: 'Hotel score/rating.' },
+        main_image: { type: 'string|null', description: 'Main hotel image URL.' },
+        lowest_price: {
+          type: 'object|null',
+          description: 'Indicative nightly starting price (not the bookable total — get the real price from quote).',
+          properties: {
+            amount: { type: 'float', description: 'Starting price in DECIMAL units (NOT cents).' },
+            currency: { type: 'string', description: 'ISO 4217 currency code.' },
+          },
+        },
+      },
+    },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli hotel-redaug search --destination-id D12345 --check-in 2026-07-04 --check-out 2026-07-05 --adults 2',
+    output_summary: 'Returns hotels[] for the location. Pick one and use hotels[].hotel_id in hotel-redaug quote. Alternatively use --lat/--lng instead of --destination-id.',
+  },
+  error_recovery: {
+    NO_AVAILABILITY: 'No hotels near this coordinate for these dates. Widen --distance, try different dates, or have the Agent backend geocode a nearby area. As a last resort try another category=hotel service (see cross_service_recovery).',
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff. Otherwise surface to user.',
+  },
+};
+
+/** `hotel-redaug quote` schema. Read-only. */
+export const hotelQuoteSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'quote',
+  description:
+    'Get real-time room types and bookable rates for one hotel and stay. Returns rates each carrying an opaque product_token and per-night price_items that must be passed verbatim to create-order. Run immediately before create-order — availability and prices change in real time',
+  flags: {
+    'hotel-id': { type: 'string', required: true, description: 'Hotel chosen from search results (search.response.hotels[].hotel_id)' },
+    'check-in': { type: 'string', required: true, description: 'Check-in date (match search)', constraints: 'YYYY-MM-DD' },
+    'check-out': { type: 'string', required: true, description: 'Check-out date (match search)', constraints: 'YYYY-MM-DD, strictly after check-in' },
+    adults: { type: 'int', required: false, default: 2, description: 'Adults per room (match search)' },
+    children: { type: 'int', required: false, default: 0, description: 'Children per room (match search)' },
+    'room-num': { type: 'int', required: false, default: 1, description: 'Number of rooms (match search)' },
+    nationality: { type: 'string', required: false, default: 'CN', description: 'Guest nationality (ISO country code). Affects rate eligibility for some hotels' },
+  },
+  response: {
+    rates: {
+      type: 'array',
+      description: 'Bookable room+rate options. Empty when the hotel has no rooms for these dates (treat as NO_AVAILABILITY: re-quote another hotel or change dates).',
+      items: {
+        product_token: { type: 'string', description: 'Opaque token packing room/rate/supply identifiers. Pass verbatim to create-order --product-token. Do NOT interpret or reuse across quotes.' },
+        room_name: { type: 'string', description: 'Room type name.' },
+        rate_plan_name: { type: 'string|null', description: "Rate plan name (e.g. 'Breakfast included, free cancellation')." },
+        breakfast: { type: 'int|null', description: 'Breakfast enum for the rate (-1=bed breakfast, 0=no breakfast, 1+=N breakfasts). Display only.' },
+        free_cancellation: { type: 'bool|null', description: 'Whether this rate is currently in a free-cancellation window. Prefer when the user wants flexibility.' },
+        total_price: {
+          type: 'object',
+          description: 'Total bookable price for the whole stay and room count.',
+          properties: {
+            amount: { type: 'float', description: 'Total price in DECIMAL units. Pass verbatim to create-order --total-amount.' },
+            currency: { type: 'string', description: 'ISO 4217 currency code. Pass to create-order --currency.' },
+          },
+        },
+        price_items: {
+          type: 'array',
+          description: 'Per-night price breakdown. Pass this array verbatim to create-order --price-items.',
+          items: {
+            sale_date: { type: 'string', description: 'Night date YYYY-MM-DD.' },
+            sale_price: { type: 'float', description: 'Price for that night in DECIMAL units.' },
+            breakfast_num: { type: 'int', description: 'Breakfast enum for that night (-1=bed breakfast, 0=no breakfast, 1+=N). Copy verbatim into create-order; never alter.' },
+          },
+        },
+      },
+    },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli hotel-redaug quote --hotel-id 10583772 --check-in 2026-08-20 --check-out 2026-08-21 --adults 2',
+    output_summary: 'Returns rates[]. Use rates[].product_token, total_price.amount/currency and price_items[] in hotel-redaug create-order.',
+  },
+  error_recovery: {
+    NO_AVAILABILITY: 'This hotel has no bookable rooms for these dates (upstream roomItems empty). Re-quote a different hotel from the search result, or re-search with other dates. Do NOT retry the same hotel/dates.',
+    PRICE_CHANGED: 'Rates shifted since search. Use the prices returned here; do not reuse search lowest_price. No action other than informing the user if materially higher.',
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
+  },
+};
+
+/** `hotel-redaug create-order` schema. Write op (W/Y) — lock inventory, no charge. */
+export const hotelCreateOrderSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'create-order',
+  description:
+    'Create AND pay for a hotel order in one call, using a product_token and price_items from a recent quote. The backend re-checks availability, authorizes/captures payment via the platform payment gateway (funds path decided server-side by the developer billing_mode — monthly_settlement or pay_per_call), locks the room with the supplier, and returns the order already PAID. There is no separate settlement step. If any step after funds are taken fails, the funds are automatically released/refunded before the error is returned. check-in/check-out, guest counts, total-amount and price-items must match the quote',
+  flags: {
+    'product-token': { type: 'string', required: true, description: 'Chosen rate token from quote (quote.response.rates[].product_token). Pass verbatim' },
+    'total-amount': { type: 'float', required: true, description: 'Total price for the stay (quote.response.rates[].total_price.amount)', constraints: 'DECIMAL units (NOT cents), 0.01–999999999.99. Must equal the chosen rate total_price.amount' },
+    currency: { type: 'string', required: true, description: 'ISO 4217 currency code from the chosen rate (quote.response.rates[].total_price.currency)', constraints: 'Exactly 3 uppercase letters' },
+    'price-items': { type: 'string', required: true, description: 'Per-night price breakdown from quote, copied verbatim (including breakfast_num)', constraints: 'JSON array of {sale_date, sale_price, breakfast_num}; copy breakfast_num verbatim from quote (-1/0/1+ are distinct breakfast products, never alter); else PARAM_INVALID' },
+    'check-in': { type: 'string', required: true, description: 'Check-in date (match quote)', constraints: 'YYYY-MM-DD' },
+    'check-out': { type: 'string', required: true, description: 'Check-out date (match quote)', constraints: 'YYYY-MM-DD, strictly after check-in' },
+    'room-num': { type: 'int', required: false, default: 1, description: 'Number of rooms (match quote)' },
+    adults: { type: 'int', required: false, default: 2, description: 'Adults per room (match quote)', constraints: '1-20' },
+    children: { type: 'int', required: false, default: 0, description: 'Children per room (match quote)', constraints: '0-10' },
+    nationality: { type: 'string', required: false, default: 'CN', description: 'Guest nationality (match quote)' },
+    'guest-name': { type: 'string', required: true, description: 'Primary guest name', constraints: 'Use the name as the user gives it. If a supplier returns NAME_FORMAT_INVALID, re-collect in Latin letters and retry' },
+    'contact-name': { type: 'string', required: true, description: 'Booking contact name (may equal guest-name)' },
+    'contact-phone': { type: 'string', required: true, description: 'Booking contact phone number', constraints: 'Digits; collect country code separately in --contact-country-code' },
+    'contact-country-code': { type: 'string', required: false, default: '86', description: "Phone country calling code without '+'" },
+    'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
+    'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
+    'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
+    'payment-method-id': { type: 'string', required: false, description: 'pay_per_call only: charge this SPECIFIC already-bound card instead of the platform auto-selected default/most-recent one. Ignored for monthly_settlement.', constraints: 'Must be an ACTIVE card belonging to this developer, else PAYMENT_METHOD_REQUIRED' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(user_id + product_token + check_in)) and reuse the SAME key when retrying the identical request. This single call covers both order creation AND payment',
+      constraints: '1-128 chars [A-Za-z0-9_-]',
+    },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Our order reference (coOrderCode). Use as --order-id in get / cancel.' },
+    fc_order_code: { type: 'string', description: 'Supplier order reference. Needed as --fc-order-code in cancel and checkout.' },
+    total_amount: { type: 'float', description: 'Amount actually charged (DECIMAL units) — the order is already PAID by the time this response is returned.' },
+    currency: { type: 'string', description: 'ISO 4217 currency code of the charge.' },
+  },
+  example: {
+    command:
+      `agenzo-merchant-cli hotel-redaug create-order --product-token <tok> --total-amount 10.00 --currency CNY --price-items '[{"sale_date":"2026-08-20","sale_price":10.00,"breakfast_num":0}]' --check-in 2026-08-20 --check-out 2026-08-21 --adults 2 --guest-name "Zhang San" --contact-name "Zhang San" --contact-phone 13800138000 --idempotency-key create-h1n2`,
+    output_summary: 'Returns {order_id, fc_order_code, total_amount, currency}. The order is already PAID — proceed to get to poll for supplier CONFIRMED status.',
+  },
+  error_recovery: {
+    NO_AVAILABILITY: 'Availability vanished between quote and create-order. Re-quote the same hotel; if still empty, quote another hotel or change dates. Use a NEW idempotency-key for the new product_token.',
+    PRICE_CHANGED: 'The price/price_items no longer match upstream. Re-quote to get fresh total_price and price_items, confirm the new price with the user, then create-order with the new values and a NEW idempotency-key.',
+    NAME_FORMAT_INVALID: 'The supplier requires the guest name in a specific format (commonly Latin first/last name for international properties). Re-collect guest-name in Latin letters and retry with a NEW idempotency-key (the request is no longer identical).',
+    PAYMENT_METHOD_REQUIRED: 'pay_per_call developer has no ACTIVE bound card at all, OR the explicitly-passed --payment-method-id is missing/not ACTIVE/does not belong to this developer. Direct the user to bind a card, drop --payment-method-id to auto-select, or pass a valid one.',
+    ACCOUNT_INSUFFICIENT_BALANCE: 'monthly_settlement developer settlement credit is insufficient (check via admin-cli accounts get). Direct the user to top up offline; do NOT retry until funded.',
+    ACCOUNT_NOT_FOUND: 'monthly_settlement developer has no settlement account. Direct the user to complete contract signing.',
+    ACCOUNT_SUSPENDED: 'The settlement account is suspended. Direct the user to contact support; do NOT retry.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key derived from business intent and retry.',
+    PARAM_IDEMPOTENCY_KEY_CONFLICT: 'The same idempotency-key was used with different parameters. Retry with the original parameters, or generate a NEW key for the new parameters.',
+    UPSTREAM_ERROR: 'Transient upstream error during checkBooking or createOrder. Any funds already taken are automatically released/refunded before this error is returned. Retry once after ~2s backoff with the SAME idempotency-key.',
+  },
+};
+
+/**
+ * `hotel-redaug pay-order` schema. Write op (W/Y) — trigger supplier confirmation.
+ *
+ * After `create-order` settles payment (authorize+capture), `pay-order` calls
+ * the supplier's payOrder endpoint to confirm/issue the booking. Takes only
+ * `--order-id` and `--idempotency-key` — no payment parameters needed because
+ * funds were already settled in create-order.
+ */
+export const hotelPayOrderSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'pay-order',
+  description:
+    'Trigger supplier confirmation (upstream payOrder) for an order that was already paid via create-order. Takes only --order-id; no payment parameters needed. On success the supplier begins asynchronous confirmation — poll get until CONFIRMED (3). Idempotent: calling pay-order on an already-confirmed order replays the existing result',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Order to confirm with the supplier (create-order.response.order_id).' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent and reuse the SAME key when retrying the same pay-order call',
+      constraints: '1-128 chars [A-Za-z0-9_-]',
+    },
+    watch: { type: 'bool', required: false, default: false, description: 'Retained for backward compatibility. Each iteration emits one NDJSON line' },
+    'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between poll attempts in --watch mode' },
+    'watch-timeout': { type: 'int', required: false, default: 300, description: 'Total seconds before giving up in --watch mode' },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Order reference.' },
+    settlement_path: { type: 'string', description: "The order's billing_mode echoed: 'monthly_settlement' or 'pay_per_call'." },
+    status: { type: 'string', description: "'PAID' — supplier confirmation is asynchronous; poll get until CONFIRMED." },
+    amount: { type: 'float', description: 'Settled amount in DECIMAL units (from create-order).' },
+    currency: { type: 'string', description: 'ISO 4217 currency code.' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli hotel-redaug pay-order --order-id hho_01KWC63Z5CD6CKBM33Q7SC2ZDT --idempotency-key pay-h1n2',
+    output_summary: 'Triggers supplier payOrder (confirmation/ticket issuance). Returns {order_id, settlement_path, status:"PAID", amount, currency}. Then poll get until CONFIRMED.',
+  },
+  error_recovery: {
+    INVALID_ORDER_STATE: 'The order is not in a payable state (it may already be confirmed, cancelled, or missing auth). Check status via get; do NOT retry pay-order.',
+    ORDER_NOT_FOUND: 'No order for this --order-id. Verify it is the order_id returned by create-order. Do NOT retry.',
+    UPSTREAM_ERROR: 'Transient upstream error during supplier payOrder. Retry once after ~5s with the SAME idempotency-key, then poll get to check whether the confirmation actually took effect.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key and retry.',
+    PARAM_IDEMPOTENCY_KEY_CONFLICT: 'Same idempotency-key used with different parameters. Use the original parameters, or generate a NEW key.',
+  },
+};
+
+/** `hotel-redaug get` schema. Read-only, supports `--watch`. Long-running. */
+export const hotelGetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'get',
+  description:
+    'Query a hotel order status by id; with --watch, poll until a terminal status. Confirmation from the property is asynchronous, so order_status is usually PROCESSING (2) immediately after book — poll until CONFIRMED (3)',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Our order reference (coOrderCode) returned by book (book.response.order_id)' },
+    watch: { type: 'bool', required: false, default: false, description: 'Poll until a terminal status, emitting one NDJSON line per update' },
+    'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between polls when --watch is set' },
+    'watch-timeout': { type: 'int', required: false, default: 600, description: 'Max seconds to poll before giving up' },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Our order reference.' },
+    fc_order_code: { type: 'string', description: 'Supplier order reference.' },
+    order_status: { type: 'string', description: 'Std STRING: PROCESSING | CONFIRMED | CANCELLED | COMPLETED | INIT. There is no order_status_std field.' },
+    order_status_code: { type: 'int', description: '2 = Processing, 3 = Confirmed, 4 = Cancelled, 5 = Completed. Provider path only; absent on the local-cache fallback.' },
+    channel_state: { type: 'string|null', description: "Channel-level state (e.g. 'paid' = settled)." },
+    hotel_confirm_no: { type: 'string|null', description: 'Property confirmation number. Populated once order_status reaches CONFIRMED (3); null while PROCESSING (2).' },
+    hotel_name: { type: 'string|null', description: 'Hotel name.' },
+    room_name: { type: 'string|null', description: 'Booked room type.' },
+    check_in: { type: 'string|null', description: 'Check-in date YYYY-MM-DD.' },
+    check_out: { type: 'string|null', description: 'Check-out date YYYY-MM-DD.' },
+    total_amount: { type: 'float|null', description: 'Total amount in DECIMAL units.' },
+    source: { type: 'string', description: "'provider' (live upstream, carries order_status_code) or 'local_cache' (fallback, string status only)." },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug get --order-id E2E1750000000',
+    output_summary: 'Returns order_status (string) + order_status_code (int). Poll every 5s until CONFIRMED (3); hotel_confirm_no appears once confirmed.',
+  },
+  polling: {
+    recommended_interval_seconds: 5,
+    terminal_statuses: [3, 4, 5],
+    in_progress_statuses: [2],
+    field_availability: {
+      hotel_confirm_no: 'Populated only after order_status reaches CONFIRMED (3). Null while PROCESSING (2).',
+    },
+  },
+  error_recovery: {
+    HOTEL_ORDER_NOT_FOUND: 'No order for this --order-id. Verify it is the order_id returned by book. Do NOT retry.',
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after 5s; if still failing, surface to user.',
+  },
+};
+
+/** `hotel-redaug cancel` schema. Write op (W/Y) — acknowledgement is not proof. */
+export const hotelCancelSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'cancel',
+  description:
+    'Cancel an entire hotel order within the cancellation policy (a cancellation fee may apply). Returns synchronously, but a successful call is acceptance only, NOT proof: poll get until order_status=CANCELLED (4). For partial-night or out-of-policy cancellation, use checkout instead',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Our order reference (coOrderCode) to cancel (book.response.order_id)' },
+    'fc-order-code': { type: 'string', required: true, description: 'Supplier order reference (book.response.fc_order_code)' },
+    reason: { type: 'string', required: false, description: 'Cancellation reason' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Reuse the SAME key when retrying the same cancellation',
+      constraints: '1-128 chars [A-Za-z0-9_-]',
+    },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Cancelled order reference.' },
+    order_status: { type: 'string', description: "Status after the cancel request. Acceptance is NOT proof — poll get until 'CANCELLED' (order_status_code 4)." },
+    cancellation: {
+      type: 'object|null',
+      description: 'Confirmed-cancellation details (confirmed shape).',
+      properties: {
+        cancellation_fee: { type: 'float', description: 'Fee charged for cancellation, in DECIMAL units.' },
+        reversal_amount: { type: 'float', description: 'Amount reversed/refunded, in DECIMAL units.' },
+        currency: { type: 'string', description: 'ISO 4217 currency code.' },
+      },
+    },
+    cancellation_fee: { type: 'float|null', description: 'Fee charged for cancellation (confirmed shape), in DECIMAL units.' },
+    refund_amount: { type: 'float', description: 'Amount credited back to the settlement balance (paid - cancellation_fee), in DECIMAL units.' },
+    cancel_status: { type: 'string|absent', description: "'cancel_pending' when accepted upstream but not yet observed as CANCELLED (accepted-but-pending shape)." },
+    cancel_result: { type: 'unknown|absent', description: 'Upstream cancel acknowledgement (pending shape). NOT proof of cancellation — confirm via get.' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli hotel-redaug cancel --order-id E2E1750000000 --fc-order-code FC1750000000 --idempotency-key cancel-h1n2',
+    output_summary: 'Returns the cancellation acknowledgement and any fee/refund. Then poll get until order_status=CANCELLED (4) to confirm.',
+  },
+  error_recovery: {
+    CANCELLATION_NOT_ALLOWED: 'The order is outside its free/allowed cancellation window or already terminal. Do NOT retry cancel. If the user still wants out (e.g. drop some nights or request a waiver), use checkout instead.',
+    ALREADY_CANCELLED: 'Order is already cancelled (order_status=4). Treat as success; confirm via get.',
+    HOTEL_ORDER_NOT_FOUND: 'Verify --order-id / --fc-order-code from the book response. Do NOT retry.',
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after 5s with the SAME idempotency-key, then poll get to check whether the cancellation actually took effect.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key derived from business intent and retry.',
+    PARAM_IDEMPOTENCY_KEY_CONFLICT: 'The same idempotency-key was used with different parameters. Retry with the original parameters, or generate a NEW key for the new parameters.',
+  },
+};
+
+/** `hotel-redaug checkout` schema. Write op (W/Y) — async application. */
+export const hotelCheckoutSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'checkout',
+  description:
+    'Request a partial check-out or an out-of-policy cancellation (drop some nights, or cancel after the free window so the property must approve). This is an APPLICATION: it returns a task_order_code synchronously, then the supplier decides asynchronously — poll get-checkout. Use cancel for a simple whole-order in-policy cancellation',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Our order reference (coOrderCode) for the URL path (book.response.order_id)' },
+    'fc-order-code': { type: 'string', required: true, description: 'Supplier order reference of the booking to change (book.response.fc_order_code)' },
+    reason: { type: 'string', required: true, description: 'Why the partial check-out / out-of-policy cancellation is requested' },
+    'checkout-rooms': {
+      type: 'string',
+      required: true,
+      description: 'Which booked rooms to check out of, taken from the book response (book.response.rooms[]). room_index and guest_name come verbatim from book — do NOT ask the user for them',
+      constraints: 'JSON array of {room_index, guest_name, cancel_check_in_date}; else PARAM_INVALID. cancel_check_in_date is the check-in date of the night(s) being dropped (YYYY-MM-DD)',
+    },
+    'refund-type': { type: 'int', required: false, default: 1, description: 'Requested refund handling (upstream refund-type code; default to the standard refund flow when unsure)' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Reuse the SAME key when retrying the same application',
+      constraints: '1-128 chars [A-Za-z0-9_-]',
+    },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Our order reference (echoes the path order_id).' },
+    task_order_code: { type: 'string', description: 'Check-out application id. Poll get-checkout --task-order-code to track approval and refund.' },
+    apply_status: { type: 'string|null', description: 'Initial application status (e.g. submitted / pending).' },
+    checkout_status: { type: 'string|absent', description: "'checkout_pending' — async; poll get-checkout for the outcome." },
+  },
+  example: {
+    command:
+      `agenzo-merchant-cli hotel-redaug checkout --order-id E2E1750000000 --fc-order-code FC1750000000 --reason "guest leaving early" --checkout-rooms '[{"room_index":"1","guest_name":"San Zhang","cancel_check_in_date":"2026-07-05"}]' --idempotency-key checkout-h1n2`,
+    output_summary: 'Returns task_order_code. Poll hotel-redaug get-checkout --task-order-code <code> until the application is approved/rejected/refunded.',
+  },
+  error_recovery: {
+    CHECKOUT_NOT_ALLOWED: 'The order state does not permit a check-out application (e.g. not yet confirmed, or already completed). Surface to user; do NOT retry.',
+    HOTEL_ORDER_NOT_FOUND: 'Verify --order-id / --fc-order-code from the book response. Do NOT retry.',
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after 5s with the SAME idempotency-key.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key derived from business intent and retry.',
+    PARAM_IDEMPOTENCY_KEY_CONFLICT: 'The same idempotency-key was used with different parameters. Retry with the original parameters, or generate a NEW key for the new parameters.',
+  },
+};
+
+/** `hotel-redaug get-checkout` schema. Read-only, supports `--watch`. Long-running. */
+export const hotelGetCheckoutSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'get-checkout',
+  description:
+    'Poll the status and refund outcome of a check-out application created by checkout. The supplier decides asynchronously; with --watch, keep polling until a terminal refund_status',
+  flags: {
+    'task-order-code': { type: 'string', required: true, description: 'Check-out application id from checkout (checkout.response.task_order_code)' },
+    watch: { type: 'bool', required: false, default: false, description: 'Poll until a terminal status, emitting one NDJSON line per update' },
+    'watch-interval': { type: 'int', required: false, default: 10, description: 'Seconds between polls when --watch is set' },
+    'watch-timeout': { type: 'int', required: false, default: 600, description: 'Max seconds to poll before giving up' },
+  },
+  response: {
+    task_order_code: { type: 'string', description: 'Check-out application id.' },
+    refund_status: { type: 'string', description: 'Application/refund status: pending | approved | rejected | refunded.' },
+    refund: {
+      type: 'object|null',
+      description: 'Final refund once approved. Populated only once refund_status is approved or refunded.',
+      properties: {
+        amount: { type: 'float', description: 'Refunded amount in DECIMAL units.' },
+        currency: { type: 'string', description: 'ISO 4217 currency code.' },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug get-checkout --task-order-code TASK1750000000',
+    output_summary: 'Returns refund_status. Poll every 10s until approved/rejected/refunded; refund appears once approved.',
+  },
+  polling: {
+    recommended_interval_seconds: 10,
+    terminal_statuses: ['approved', 'rejected', 'refunded'],
+    in_progress_statuses: ['pending'],
+    field_availability: {
+      refund: 'Populated only once refund_status is approved or refunded.',
+    },
+  },
+  error_recovery: {
+    CHECKOUT_TASK_NOT_FOUND: 'Verify --task-order-code from the checkout response. Do NOT retry.',
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after 10s.',
+  },
+};
+
+/** `hotel-redaug list-orders` schema. Read-only. */
+export const hotelListOrdersSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'list-orders',
+  description: 'List the developer\'s hotel orders with optional status filtering and pagination',
+  flags: {
+    status: { type: 'string', required: false, description: 'Filter by order status (e.g. PROCESSING / CONFIRMED / CANCELLED / COMPLETED). Omitted entirely when absent (all statuses)' },
+    page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1 (platform caps at 100 server-side)' },
+  },
+  response: {
+    orders: {
+      type: 'array',
+      description: 'List of hotel orders (slim list-item shape).',
+      items: {
+        order_id: { type: 'string', description: 'Our order reference.' },
+        fc_order_code: { type: 'string', description: 'Supplier order reference.' },
+        status: { type: 'string', description: 'Current order status (string).' },
+        provider: { type: 'string', description: "Service provider ('redaug')." },
+        check_in: { type: 'string|null', description: 'Check-in date YYYY-MM-DD.' },
+        check_out: { type: 'string|null', description: 'Check-out date YYYY-MM-DD.' },
+        room_num: { type: 'int|null', description: 'Number of rooms booked.' },
+        price_amount: { type: 'float|null', description: 'Total price in DECIMAL units (NOT cents).' },
+        price_currency: { type: 'string', description: 'ISO 4217 currency code.' },
+        payment_status: { type: 'string', description: "Payment status (e.g. 'ON_ACCOUNT')." },
+        hotel_confirm_no: { type: 'string|null', description: 'Property confirmation number (once confirmed).' },
+        cancellation_fee: { type: 'float|null', description: 'Cancellation fee for cancelled orders; null otherwise.' },
+        refund_amount: { type: 'float|null', description: 'Amount refunded on cancellation/checkout; null otherwise.' },
+        created_at: { type: 'string', description: 'Order creation time (ISO 8601).' },
+        updated_at: { type: 'string', description: 'Last update time (ISO 8601).' },
+      },
+    },
+    total: { type: 'int', description: 'Total matching orders.' },
+    page: { type: 'int', description: 'Current page.' },
+    page_size: { type: 'int', description: 'Items per page.' },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug list-orders --status CONFIRMED --page 1 --page-size 10',
+    output_summary: 'Returns a paginated list of hotel orders with status, dates and amount info.',
+  },
+  error_recovery: {
+    INTERNAL_ERROR: 'Transient backend error. Retry once after a short delay.',
+    PARAM_INVALID: 'Ensure --page / --page-size are positive integers, then retry.',
+  },
+};
+
+// ============================================================
+// Hotel-redaug Addendum A verb schemas (4 new read-only verbs)
+// ============================================================
+
+/** `hotel-redaug find-destination` schema. Read-only. */
+export const hotelFindDestinationSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'find-destination',
+  description:
+    'Search for a destination by keyword (city, landmark, airport, etc.). Returns a list of destinations whose destination_id can be passed to search --destination-id or hotel-filters --destination-id',
+  flags: {
+    keyword: { type: 'string', required: true, description: 'Destination search keyword (city name, landmark, airport code, etc.)' },
+    'data-type': { type: 'string', required: false, description: 'Optional data type filter to narrow result categories' },
+  },
+  response: {
+    destinations: {
+      type: 'array',
+      description: 'Matching destinations. Empty when nothing matches the keyword (rendered as a successful empty result, not an error).',
+      items: {
+        destination_id: { type: 'string|null', description: 'Opaque destination identifier. Pass to search --destination-id or hotel-filters --destination-id.' },
+        type: { type: 'string|int|null', description: 'Destination type (city, landmark, airport, etc.).' },
+        name: { type: 'string|null', description: 'Destination name.' },
+        city_name: { type: 'string|null', description: 'City name.' },
+        city_code: { type: 'string|null', description: 'City code.' },
+        country_name: { type: 'string|null', description: 'Country name.' },
+        lat: { type: 'float|null', description: 'Latitude (can also be used with search --lat).' },
+        lng: { type: 'float|null', description: 'Longitude (can also be used with search --lng).' },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug find-destination --keyword "Shanghai"',
+    output_summary: 'Returns destinations[]. Use destinations[].destination_id in search --destination-id or hotel-filters --destination-id.',
+  },
+  error_recovery: {
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
+    PARAM_INVALID: 'Ensure --keyword is non-empty, then retry.',
+  },
+};
+
+/** `hotel-redaug hotel-filters` schema. Read-only. */
+export const hotelFiltersSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'hotel-filters',
+  description:
+    'Get available filter options (stars, brands, groups, labels, sub-categories, hotel/room facilities) for a location. Each item\'s code maps directly to the corresponding search filter flag (e.g. hotel_facilities[].code → search --hotel-facility-codes)',
+  flags: {
+    'destination-id': { type: 'string', required: 'conditional', description: 'Destination ID (alternative to --lat/--lng)', constraints: 'Exactly one location branch: --destination-id XOR (--lat + --lng)' },
+    lat: { type: 'float', required: 'conditional', description: 'Latitude (-90 to 90, requires --lng)', constraints: '-90 to 90; mutually exclusive with --destination-id' },
+    lng: { type: 'float', required: 'conditional', description: 'Longitude (-180 to 180, requires --lat)', constraints: '-180 to 180; mutually exclusive with --destination-id' },
+    distance: { type: 'int', required: false, default: 20, description: 'Search radius in kilometers' },
+  },
+  response: {
+    stars: { type: 'array', description: 'Star rating options [{code, name, count}]. code → search --star.' },
+    brands: { type: 'array', description: 'Hotel brand options [{code, name, count}]. code → search --hotel-brand-codes.' },
+    groups: { type: 'array', description: 'Hotel group options [{code, name, count}].' },
+    labels: { type: 'array', description: 'Hotel label options [{code, name, count}]. code → search --hotel-label-ids.' },
+    sub_categories: { type: 'array', description: 'Hotel sub-category options [{code, name, count}]. code → search --hotel-sub-category-ids.' },
+    hotel_facilities: { type: 'array', description: 'Hotel facility options [{code, name, count, type}]. code → search --hotel-facility-codes.' },
+    room_facilities: { type: 'array', description: 'Room facility options [{code, name, count, type}]. code → search --room-facility-codes.' },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug hotel-filters --destination-id D12345',
+    output_summary: 'Returns filter groups. Use the code values in search filter flags (e.g. search --hotel-facility-codes code1,code2).',
+  },
+  error_recovery: {
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
+    PARAM_INVALID: 'Supply exactly one location branch (--destination-id OR --lat/--lng). Coordinates must be within valid ranges.',
+  },
+};
+
+/** `hotel-redaug list-cities` schema. Read-only. */
+export const hotelListCitiesSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'list-cities',
+  description:
+    'List cities available for hotel booking in a given country. Each city provides a destination_id (for search --destination-id) and/or lat/lng coordinates (for search --lat/--lng)',
+  flags: {
+    country: { type: 'string', required: true, description: 'ISO country code (e.g. CN, US, TH)' },
+  },
+  response: {
+    cities: {
+      type: 'array',
+      description: 'Cities for the country. Empty when no cities are available (rendered as success, not an error).',
+      items: {
+        city_code: { type: 'string', description: 'City code.' },
+        city_name: { type: 'string', description: 'City name.' },
+        destination_id: { type: 'string|null', description: 'Destination ID for this city. Pass to search --destination-id.' },
+        province_code: { type: 'string|null', description: 'Province code.' },
+        province_name: { type: 'string|null', description: 'Province name.' },
+        country_code: { type: 'string|null', description: 'Country code.' },
+        country_name: { type: 'string|null', description: 'Country name.' },
+        lat: { type: 'float|null', description: 'Latitude (can be used with search --lat).' },
+        lng: { type: 'float|null', description: 'Longitude (can be used with search --lng).' },
+        time_zone: { type: 'string|null', description: 'Time zone identifier.' },
+        popularity_score: { type: 'float|null', description: 'Popularity score for sorting/ranking.' },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug list-cities --country CN',
+    output_summary: 'Returns cities[]. Use cities[].destination_id in search --destination-id, or cities[].lat/lng in search --lat/--lng.',
+  },
+  error_recovery: {
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
+    PARAM_INVALID: 'Ensure --country is a non-empty ISO country code, then retry.',
+  },
+};
+
+/** `hotel-redaug hotel-detail` schema. Read-only. */
+export const hotelDetailSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: HOTEL_NOUN,
+  verb: 'hotel-detail',
+  description:
+    'Get detailed information about a specific hotel including facilities, images, location, check-in/check-out times. Use to show the user hotel details before quoting/booking',
+  flags: {
+    'hotel-id': { type: 'string', required: true, description: 'Hotel ID from search results (search.response.hotels[].hotel_id)' },
+    'with-images': { type: 'bool', required: false, default: true, description: 'Include hotel images in the response (set false to reduce payload)' },
+  },
+  response: {
+    hotel_id: { type: 'string|int', description: 'Hotel identifier.' },
+    hotel_name: { type: 'string|null', description: 'Hotel name.' },
+    hotel_eng_name: { type: 'string|null', description: 'English hotel name.' },
+    star: { type: 'int|null', description: 'Star rating.' },
+    address: { type: 'string|null', description: 'Hotel address.' },
+    intro: { type: 'string|null', description: 'Hotel introduction/description.' },
+    appearance_image: { type: 'string|null', description: 'Main appearance image URL.' },
+    telephone: { type: 'string|null', description: 'Hotel telephone number.' },
+    country_name: { type: 'string|null', description: 'Country name.' },
+    province_name: { type: 'string|null', description: 'Province name.' },
+    city_name: { type: 'string|null', description: 'City name.' },
+    district_name: { type: 'string|null', description: 'District name.' },
+    business_name: { type: 'string|null', description: 'Business area name.' },
+    lat: { type: 'float|null', description: 'Latitude.' },
+    lng: { type: 'float|null', description: 'Longitude.' },
+    check_in_time: { type: 'string|null', description: 'Hotel check-in time.' },
+    check_out_time: { type: 'string|null', description: 'Hotel check-out time.' },
+    room_num: { type: 'int|null', description: 'Number of rooms available.' },
+    facilities: {
+      type: 'array',
+      description: 'Hotel facilities list.',
+      items: {
+        name: { type: 'string', description: 'Facility name.' },
+        type: { type: 'string|null', description: 'Facility type/category.' },
+      },
+    },
+    images: {
+      type: 'array',
+      description: 'Hotel-level images. Empty array when --with-images false.',
+      items: {
+        url: { type: 'string', description: 'Image URL.' },
+        is_main: { type: 'bool', description: 'Whether this is the main image.' },
+        type: { type: 'int|null', description: 'Image type/category.' },
+      },
+    },
+    rooms: {
+      type: 'array',
+      description: "Room types with STATIC info only (area/floor/beds/max occupancy/images) — NOT live rates. room_id is the SAME id space as quote's roomItems[].roomId, so relate a room here to its live rate/price/product_token by matching room_id to quote's rates. ALWAYS use quote for price/availability/product_token; this verb never has them. Present this alongside quote's rate options so the user sees what the room actually looks like (area, beds, photos) before picking a rate, not just the one-line room_name from quote.",
+      items: {
+        room_id: { type: 'int|string|null', description: "Room type id. Matches quote's roomItems[].roomId — use to relate this room's detail to a specific quoted rate." },
+        room_name: { type: 'string|null', description: 'Room type name.' },
+        area_sqm: { type: 'string|null', description: 'Room area (upstream unit, commonly square meters), as a string.' },
+        floor: { type: 'string|null', description: 'Floor(s) this room type is on (may be a range, e.g. "10-15").' },
+        max_person: { type: 'int|null', description: 'Max total occupancy.' },
+        max_adults: { type: 'int|null', description: 'Max adults.' },
+        max_child: { type: 'int|null', description: 'Max children.' },
+        allow_smoking: { type: 'bool|null', description: 'Whether smoking is allowed in this room type.' },
+        beds: {
+          type: 'array',
+          description: 'Bed configuration for the room area.',
+          items: {
+            name: { type: 'string|null', description: 'Bed type name (e.g. "King Bed").' },
+            width: { type: 'string|null', description: 'Bed width, upstream unit.' },
+            num: { type: 'string|null', description: 'Number of this bed type.' },
+          },
+        },
+        living_room_beds: {
+          type: 'array',
+          description: 'Bed configuration for a separate living-room area, when the room type has one. Same shape as beds.',
+          items: {
+            name: { type: 'string|null', description: 'Bed type name.' },
+            width: { type: 'string|null', description: 'Bed width, upstream unit.' },
+            num: { type: 'string|null', description: 'Number of this bed type.' },
+          },
+        },
+        images: {
+          type: 'array',
+          description: 'Photos of this specific room type. Empty when --with-images false, or when upstream has none for this room.',
+          items: {
+            url: { type: 'string', description: 'Image URL.' },
+            is_main: { type: 'bool', description: 'Whether this is the main image for the room.' },
+            type: { type: 'int|null', description: 'Image type/category.' },
+          },
+        },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli hotel-redaug hotel-detail --hotel-id 10583772',
+    output_summary: "Returns full hotel details including facilities, hotel images, AND rooms[] (per-room-type static info + photos). Use to present both the hotel and its room types before quoting — rooms[].room_id matches quote's roomItems[].roomId so the two can be shown together.",
+  },
+  error_recovery: {
+    UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
+    PARAM_INVALID: 'Ensure --hotel-id is a non-empty string, then retry.',
   },
 };
