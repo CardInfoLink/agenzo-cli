@@ -35,7 +35,7 @@ async function main() {
     .name('agenzo-payment-cli')
     .version(getCurrentVersion())
     .description(
-      'Agenzo payment plane: charge a previously created payment token (evo / unionpay).',
+      'Agenzo payment plane: capture a previously created payment token (evo / unionpay).',
     )
     .option('--verbose', 'Show verbose logs')
     .option('--yes', 'Skip confirmation prompts (for automation/AI Agents)')
@@ -50,9 +50,8 @@ async function main() {
     process.env.AGENZO_FORMAT = resolveFormat(flag);
   });
 
-  // charge command group
-  const chargeCmd = program.command('charge').description('Charge management');
-  registerPayCommand(chargeCmd, deps);
+  // capture command (top-level verb, no subcommand)
+  registerPayCommand(program, deps);
 
   await program.parseAsync(process.argv);
 }

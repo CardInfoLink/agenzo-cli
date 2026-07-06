@@ -47,14 +47,13 @@ function formatCents(cents: number | undefined): string {
  */
 export function registerPayCommand(parent: Command, deps: PayDeps): void {
   const cmd = parent
-    .command('pay')
-    .description('Charge a previously created payment token')
+    .command('capture')
+    .description('Capture (charge) a previously created payment token')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-token-id <id>', 'Payment token ID to charge (ptk_...)')
     .option(
       '--payment-brand <brand>',
-      'Payment brand: "evo" (default; legacy pay_with_token) or "unionpay" (network token)',
-      'evo',
+      'Payment brand override (optional; auto-detected from token). "evo" or "unionpay".',
     )
     .option('--description <text>', 'Optional payment description')
     .option(
@@ -67,8 +66,10 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     const format = resolveFormat(opts.format as string | undefined);
     const isYes = Boolean(opts.yes);
 
-    const paymentBrand = String(opts.paymentBrand ?? 'evo').toLowerCase();
-    if (paymentBrand !== 'evo' && paymentBrand !== 'unionpay') {
+    const paymentBrand = opts.paymentBrand
+      ? String(opts.paymentBrand).toLowerCase()
+      : undefined;
+    if (paymentBrand && paymentBrand !== 'evo' && paymentBrand !== 'unionpay') {
       throw new CliError(
         'PARAM_INVALID',
         `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo" or "unionpay".`,
@@ -104,8 +105,10 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
 
     const body: Record<string, unknown> = {
       payment_token_id: paymentTokenId,
-      payment_brand: paymentBrand,
     };
+    if (paymentBrand) {
+      body.payment_brand = paymentBrand;
+    }
     if (opts.description) {
       body.description = opts.description as string;
     }
