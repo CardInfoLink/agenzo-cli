@@ -15,7 +15,7 @@
 
 - **`services`** (capability discovery): list what's currently available and how to call it — run this first to learn the current capability set.
 - **`ride-elife`** (ride-hailing): the full loop of quote → book → query/poll → cancel → list-orders.
-- **`hotel-redaug`** (hotel booking): search, find-destination, hotel-filters, list-cities, hotel-detail, quote, create-order, pay-order, get (status/poll), cancel, checkout, get-checkout, list-orders. Supports both **monthly_settlement** (on-account deduction) and **pay_per_call** (user pays via EVO using the order_id as the merchantTransID).
+- **`hotel-redaug`** (hotel booking): search, find-destination, hotel-filters, list-cities, hotel-detail, quote, create-order (locks the room AND settles payment inline), get (status/poll), cancel, checkout, get-checkout, list-orders. Supports both **monthly_settlement** (settlement-account deduction) and **pay_per_call** (the platform's own server-side EVO integration; optionally target a specific bound card via `--payment-method-id`) — the funds path is decided server-side by `billing_mode`, the CLI call is identical either way.
 
 More fulfillment capabilities are added as new nouns over time; `services list` always reflects the current set.
 
@@ -36,8 +36,8 @@ More fulfillment capabilities are added as new nouns over time; `services list` 
 | `hotel-redaug` | `list-cities` | Read | `POST /hotel/cities` | List cities for a country (destination_id + coordinates) |
 | `hotel-redaug` | `hotel-detail` | Read | `POST /hotel/detail` | Hotel detail with facilities/images AND `rooms[]` (area/floor/beds/photos) — call before quote |
 | `hotel-redaug` | `quote` | Read | `POST /hotel/quote` | Real-time rooms/rates for one hotel (`product_token` + `price_items`) |
-| `hotel-redaug` | `create-order` | Write/Y | `POST /hotel/create-order` | Create a hotel order without charging (locks rate + returns `order_id` + payable amount) |
-| `hotel-redaug` | `pay-order` | Write/Y | `POST /hotel/{order_id}/pay` | Pay for a created order (takes only `--order-id`); billing path (`monthly_settlement` or `pay_per_call`) is chosen server-side |
+| `hotel-redaug` | `create-order` | Write/Y | `POST /hotel/create-order` | Create AND pay for a hotel order (locks the rate + settles payment inline; billing path chosen server-side by `billing_mode`); returns `order_id`, already `PAID` |
+| `hotel-redaug` | `pay-order` | Write/Y | `POST /hotel/{order_id}/pay` | Trigger supplier confirmation (upstream payOrder) for a paid order; takes only `--order-id` — no payment params needed |
 | `hotel-redaug` | `get` | Read | `GET /hotel/<id>/status` | Query order status; `--watch` emits an NDJSON polling stream |
 | `hotel-redaug` | `cancel` | Write/Y | `POST /hotel/<id>/cancel` | Cancel a whole order (acceptance ≠ proof; poll `get`) |
 | `hotel-redaug` | `checkout` | Write/Y | `POST /hotel/<id>/checkout` | Partial check-out / out-of-policy cancellation (async) |
@@ -104,11 +104,12 @@ agenzo-merchant-cli ride-elife cancel --api-key "$API_KEY" --yes \
 
 ### Hotel booking end-to-end example
 
-The core Agent loop is `search → quote → create-order → pay-order → get`. Amounts are decimal currency
-units (e.g. `320.00` = 320.00 yuan). `pay-order` takes only `--order-id`; the billing path is chosen
-server-side by the developer's `billing_mode`:
-- **monthly_settlement**: deducted from the monthly-settlement account.
-- **pay_per_call**: the user pays via shared EVO parameters using the `order_id` as the EVO merchantTransID; the platform verifies that payment for the same `order_id` before confirming.
+The core Agent loop is `search → quote → create-order → get`. `create-order` is a single write step
+that BOTH locks the room AND settles payment inline — there is no separate settlement call. Amounts
+are decimal currency units (e.g. `320.00` = 320.00 yuan). The billing path is chosen server-side by
+the developer's `billing_mode`, but the CLI call is identical either way:
+- **monthly_settlement**: `total_amount` is deducted from the developer's settlement-account balance inline.
+- **pay_per_call**: `total_amount` is authorized + captured on the developer's bound card via the platform's own server-side EVO integration — no EVO parameters are ever passed through this CLI. Optionally pass `--payment-method-id` to charge a specific bound card instead of the auto-selected one.
 
 ```bash
 # 1. Search hotels by coordinates + stay dates (or use --destination-id from find-destination).
