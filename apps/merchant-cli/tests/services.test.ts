@@ -97,15 +97,11 @@ function setupGet(
 // services registry (unit) — §4.7 UT-REG-01..03 (Req 1.1, 1.2)
 // ============================================================
 
-// service_id is an opaque svc_-prefixed ULID (schema-standard.md §2.1), not the
-// cli_noun; kept as a constant here so the test intent (rename-proof) is clear.
-const RIDE_ELIFE_SERVICE_ID = 'svc_01KWTPBWDH5YZ52H717BFVWZA8';
-
 describe('services registry (registry.ts)', () => {
-  it('UT-REG-01: findService(RIDE_ELIFE_SERVICE_ID) returns the full capability', () => {
-    const svc = findService(RIDE_ELIFE_SERVICE_ID);
+  it('UT-REG-01: findService("ride-elife") returns the full capability', () => {
+    const svc = findService('ride-elife');
     expect(svc).toBeDefined();
-    expect(svc!.service_id).toBe(RIDE_ELIFE_SERVICE_ID);
+    expect(svc!.service_id).toBe('ride-elife');
     expect(svc!.category).toBe('ride');
     expect(svc!.provider).toBe('elife');
     expect(svc!.cli_noun).toBe('ride-elife');
@@ -148,7 +144,7 @@ describe('services list', () => {
     ]) {
       expect(item).toHaveProperty(key);
     }
-    expect(item.service_id).toBe(RIDE_ELIFE_SERVICE_ID);
+    expect(item.service_id).toBe('ride-elife');
     expect(item.verbs).toEqual(['quote', 'book', 'get', 'cancel', 'list-orders']);
   });
 
@@ -263,10 +259,7 @@ describe('services list', () => {
     for (const header of ['Service ID', 'Name', 'Category', 'Provider', 'Version', 'Verbs']) {
       expect(output).toContain(header);
     }
-    // Table row has no cli_noun column; assert on fields that are actually
-    // rendered (service_id is opaque, not "ride-elife").
-    expect(output).toContain(RIDE_ELIFE_SERVICE_ID);
-    expect(output).toContain('Ride hailing (eLife)');
+    expect(output).toContain('ride-elife');
   });
 });
 
@@ -275,24 +268,20 @@ describe('services list', () => {
 // ============================================================
 
 describe('services get', () => {
-  it('TC-SVC-GET-01/05: backend unreachable → service-layer view of the local capability + json envelope, stderr silent', async () => {
+  it('TC-SVC-GET-01/05: backend unreachable → full local capability (verb_descriptions/workflow/discovery) + json envelope, stderr silent', async () => {
     const { program } = setupGet();
 
     const out = captureStdout();
     const err = captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'get', RIDE_ELIFE_SERVICE_ID, '--format', 'json', '--api-key', 'k']);
+    await program.parseAsync(['node', 'cli', 'services', 'get', 'ride-elife', '--format', 'json', '--api-key', 'k']);
 
     const payload = parseJsonOutput(out.text()) as Record<string, unknown>;
-    expect(payload.service_id).toBe(RIDE_ELIFE_SERVICE_ID);
-    // Service-layer shape (schema-standard.md §3): identity + workflow +
-    // verbs_summary + schema_ref. No schema_content has no selection_hints/
-    // conventions/cross_service_recovery to surface — that's fine, they're
-    // simply absent (degrades gracefully), never faked.
+    expect(payload.service_id).toBe('ride-elife');
+    // Full metadata (not the list subset).
+    expect(payload).toHaveProperty('verb_descriptions');
     expect(payload).toHaveProperty('workflow');
-    expect(payload).toHaveProperty('verbs_summary');
-    expect(payload).toHaveProperty('schema_ref');
-    expect(payload).not.toHaveProperty('selection_hints');
+    expect(payload).toHaveProperty('discovery');
     // profile/endpoint envelope.
     expect(payload).toHaveProperty('profile');
     expect(payload).toHaveProperty('endpoint');
@@ -300,41 +289,18 @@ describe('services get', () => {
     expect(err.text()).toBe('');
   });
 
-  it('TC-SVC-GET-SERVICE-LAYER: backend-sourced capability projects onto the service-layer shape, omitting per-verb flags/response', async () => {
+  it('TC-SVC-GET-SCHEMA: backend returns full schema_content, gated to locally-registered verbs', async () => {
     const discovery = mockDiscovery(async () => ({
       success: true,
       data: {
         service_id: 'svc_01J0HT5REDAUG0001',
         name: 'Hotel booking (Redaug)',
-        category: 'hotel',
-        provider: 'redaug',
-        version: 'v1',
         cli_noun: 'hotel-redaug',
         verbs: ['search', 'book', 'future-verb'],
-        verb_descriptions: { search: 'Search hotels.', book: 'Book a hotel.' },
-        discovery: { help_command: 'agenzo-merchant-cli hotel-redaug --help' },
         schema_content: {
-          selection_hints: { use_when: ['hotel stays'], not_for: ['rides'] },
-          schema_ref: {
-            schema_url: 'https://agent.everonet.com/schemas/hotel-redaug.json',
-            help_command: 'agenzo-merchant-cli hotel-redaug <verb> --help --format json',
-          },
-          conventions: { amount_unit: 'DECIMAL currency units.' },
-          workflow: {
-            description: 'search → quote → create-order → pay-order',
-            steps: [{ verb: 'search', next: 'book', data_flow: '...', selection_hint: null }],
-          },
-          cross_service_recovery: { no_availability: 'try another hotel service' },
           verbs: {
-            search: {
-              description: 'search hotels',
-              annotations: { write: false },
-              flags: { keyword: { type: 'string' } },
-              response: { hotels: { type: 'array' } },
-              example: { command: '...', output_summary: '...' },
-              error_recovery: { NO_AVAILABILITY: 'retry' },
-            },
-            book: { description: 'book a hotel', annotations: { write: true } },
+            search: { description: 'search hotels' },
+            book: { description: 'book a hotel' },
             'future-verb': { description: 'not in this CLI' },
           },
         },
@@ -349,36 +315,13 @@ describe('services get', () => {
       'node', 'cli', 'services', 'get', 'svc_01J0HT5REDAUG0001', '--format', 'json', '--api-key', 'k',
     ]);
 
-    const payload = parseJsonOutput(out.text()) as Record<string, unknown>;
-
-    // Service-layer fields are present and correctly sourced from schema_content.
-    expect(payload.selection_hints).toEqual({ use_when: ['hotel stays'], not_for: ['rides'] });
-    expect(payload.schema_ref).toEqual({
-      schema_url: 'https://agent.everonet.com/schemas/hotel-redaug.json',
-      help_command: 'agenzo-merchant-cli hotel-redaug <verb> --help --format json',
-    });
-    expect(payload.conventions).toEqual({ amount_unit: 'DECIMAL currency units.' });
-    expect(payload.cross_service_recovery).toEqual({ no_availability: 'try another hotel service' });
-    // Full workflow object (not the flattened array), unchanged from the schema.
-    expect(payload.workflow).toMatchObject({
-      description: 'search → quote → create-order → pay-order',
-      steps: [{ verb: 'search', next: 'book', data_flow: '...', selection_hint: null }],
-    });
-
-    // verbs_summary: verb + description + annotations only — gated to local
-    // verbs (future-verb dropped), no flags/response/example/error_recovery.
-    expect(payload.verbs_summary).toEqual([
-      { verb: 'search', description: 'Search hotels.', annotations: { write: false } },
-      { verb: 'book', description: 'Book a hotel.', annotations: { write: true } },
-    ]);
-
-    // The raw schema_content / per-verb capability detail must never leak
-    // into the service-layer response — that's the capability layer's job.
-    expect(payload).not.toHaveProperty('schema_content');
-    const summaryText = JSON.stringify(payload.verbs_summary);
-    expect(summaryText).not.toContain('flags');
-    expect(summaryText).not.toContain('response');
-    expect(summaryText).not.toContain('error_recovery');
+    const payload = parseJsonOutput(out.text()) as {
+      verbs: string[];
+      schema_content: { verbs: Record<string, unknown> };
+    };
+    // Both the top-level summary and the schema_content.verbs map are intersected.
+    expect(payload.verbs).toEqual(['search', 'book']);
+    expect(Object.keys(payload.schema_content.verbs)).toEqual(['search', 'book']);
   });
 
   it('TC-SVC-GET-GATE: backend service whose noun is not local → SERVICE_NOT_FOUND', async () => {
@@ -401,18 +344,18 @@ describe('services get', () => {
     ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
   });
 
-  it('TC-SVC-GET-04: table output renders the key/value block plus the service-layer sections', async () => {
+  it('TC-SVC-GET-04: table output renders the full key/value block including verb descriptions', async () => {
     const { program } = setupGet();
 
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync(['node', 'cli', 'services', 'get', RIDE_ELIFE_SERVICE_ID, '--format', 'table', '--api-key', 'k']);
+    await program.parseAsync(['node', 'cli', 'services', 'get', 'ride-elife', '--format', 'table', '--api-key', 'k']);
 
     const output = out.text();
     expect(output).toContain('ride-elife');
-    expect(output).toContain('workflow:');
-    expect(output).toContain('verbs_summary:');
+    expect(output).toContain('Workflow');
+    expect(output).toContain('Verb descriptions:');
   });
 
   it('TC-SVC-GET-02: miss throws CliError(SERVICE_NOT_FOUND) and points to "services list"', async () => {

@@ -134,6 +134,14 @@ function formatCreateOrder(data: CreateHotelOrderResponse): string {
     out.push('', Formatter.table(headers, rows));
   }
 
+  out.push(
+    '',
+    Formatter.status(
+      'info',
+      `Order created with status AWAITING_PAYMENT — proceed with 'hotel-redaug pay-order --order-id ${data.order_id ?? '<order_id>'}' to settle.`,
+    ),
+  );
+
   return out.join('\n');
 }
 
@@ -142,21 +150,20 @@ function formatCreateOrder(data: CreateHotelOrderResponse): string {
 // ============================================================
 
 /**
- * `hotel-redaug create-order` — create AND pay for a hotel order in one call.
- * Calls `POST /hotel/create-order` with `Idempotency-Key` header. The backend
- * authorizes/captures payment via the platform's payment gateway (funds path
- * decided server-side by the developer's billing_mode — monthly_settlement or
- * pay_per_call) and locks the room with the supplier; on success the order is
- * already `PAID` — there is no separate settlement step to call afterwards.
+ * `hotel-redaug create-order` — create a hotel order without charging any
+ * account. Calls `POST /hotel/create-order` with `Idempotency-Key` header.
+ * On success: exit 0, prints the created order_id to stdout.
  *
- * This single call moves money, so the non-`--yes` path MUST confirm
- * (restating amount/currency/dates) before the write; `--yes` skips it. A
- * declined confirm maps to `CLIENT_ABORTED` (exit 5).
+ * This is the first step of the create-then-pay flow; the order enters
+ * AWAITING_PAYMENT status and must be settled via `pay-order`. Locking a rate
+ * is a real commitment (though not a charge), so the non-`--yes` path MUST
+ * confirm (restating amount/currency/dates) before the write; `--yes` skips
+ * it. A declined confirm maps to `CLIENT_ABORTED` (exit 5).
  */
 export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('create-order')
-    .description('Create AND pay for a hotel order in one call (billing path decided server-side by billing_mode)')
+    .description('Create a hotel order without charging (lock inventory, await payment)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--product-token <token>', 'Chosen rate token from quote (rates[].product_token)')
     .option('--total-amount <amount>', 'Total stay price in decimal currency units (not cents)')
@@ -175,13 +182,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--contact-email <email>', 'Booking contact email')
     .option('--arrive-time <time>', 'Expected arrival time (HH:mm, hotel local time)')
     .option('--special-requests <text>', 'Free-text special requests (non-binding)')
-    .option(
-      '--payment-method-id <id>',
-      'pay_per_call only: charge this SPECIFIC already-bound card instead of the platform auto-selected one',
-    )
+    .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
       '--idempotency-key <key>',
-      'Idempotency key forwarded verbatim as the Idempotency-Key header (covers both order creation AND payment)',
+      'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
 
   attachSchemaHelp(cmd, hotelCreateOrderSchema);
@@ -233,17 +237,16 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.contactEmail !== undefined) body.contact_email = opts.contactEmail as string;
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
-    if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
+    if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
 
-    // Confirm before the write unless --yes. This call BOTH locks the rate AND
-    // charges the developer's account (via billing_mode) — the user must have
-    // already picked this hotel/rate (from search + quote) and been shown the
-    // amount, so the prompt restates what is about to be locked in AND charged
-    // before the call is made. The prompt goes to stderr; declining maps to
-    // CLIENT_ABORTED (exit 5) via the top-level envelope.
+    // Confirm before the write unless --yes. This locks inventory at the quoted
+    // rate — the user must have already picked this hotel/rate (from search +
+    // quote), so the prompt restates what is being locked in before the call is
+    // made. The prompt goes to stderr; declining maps to CLIENT_ABORTED (exit 5)
+    // via the top-level envelope.
     if (!isYes) {
       const confirmed = await confirm({
-        message: `Create and pay for this hotel order: ${totalAmount} ${currency} (check-in ${checkIn}, check-out ${checkOut})? This locks the rate AND charges the amount immediately.`,
+        message: `Create this hotel order for ${totalAmount} ${currency} (check-in ${checkIn}, check-out ${checkOut})? This locks the rate but does NOT charge anything yet.`,
         default: false,
       });
       if (!confirmed) {

@@ -25,11 +25,14 @@ import {
 
 export interface PayHotelOrderResponse {
   order_id: string;
+  order_status: string;
   settlement_path?: string;
-  /** Always "PAID" for orders created under the current architecture. */
-  status?: string;
-  amount?: number;
+  pay_status?: string;
+  total_amount?: number;
   currency?: string;
+  billing_entry_id?: string;
+  /** For the pay_per_call settlement path, this echoes the order_id (the EVO merchantTransID). */
+  merchant_trans_id?: string;
   [key: string]: unknown;
 }
 
@@ -49,12 +52,15 @@ export const DEFAULT_PAY_WATCH_TIMEOUT_SECONDS = 300;
 function formatPayOrder(data: PayHotelOrderResponse): string {
   const lines: [string, string][] = [
     ['Order ID', String(data.order_id ?? '-')],
-    ['Order status', String(data.status ?? '-')],
+    ['Order status', String(data.order_status ?? '-')],
   ];
   if (data.settlement_path) lines.push(['Settlement path', String(data.settlement_path)]);
-  if (data.amount != null && data.currency) {
-    lines.push(['Amount', `${data.amount} ${data.currency}`]);
+  if (data.pay_status) lines.push(['Pay status', String(data.pay_status)]);
+  if (data.total_amount != null && data.currency) {
+    lines.push(['Amount', `${data.total_amount} ${data.currency}`]);
   }
+  if (data.billing_entry_id) lines.push(['Billing entry', String(data.billing_entry_id)]);
+  if (data.merchant_trans_id) lines.push(['Merchant trans ID', String(data.merchant_trans_id)]);
 
   return Formatter.keyValue(lines);
 }
@@ -68,7 +74,7 @@ function formatPayOrder(data: PayHotelOrderResponse): string {
  * Any error response triggers exit 1 outside the loop (thrown as CliError).
  */
 function isPaymentTerminal(record: unknown): boolean {
-  const status = (record as { status?: unknown }).status;
+  const status = (record as { order_status?: unknown }).order_status;
   return status === 'PAID';
 }
 
@@ -77,26 +83,32 @@ function isPaymentTerminal(record: unknown): boolean {
 // ============================================================
 
 /**
- * `hotel-redaug pay-order` — trigger supplier confirmation (payOrder) for an
- * order that was already created and paid via `create-order`.
+ * `hotel-redaug pay-order` — settle an existing hotel order created via
+ * `create-order`. Calls `POST /hotel/{order_id}/pay` with an `Idempotency-Key`
+ * header and an empty body.
  *
- * `create-order` handles all payment logic (authorize + capture from the
- * developer's account/card); `pay-order` takes only `--order-id` and notifies
- * the supplier to confirm/issue the booking. There is no separate payment
- * gateway interaction for the caller at this step.
- *
- * - `--order-id` (required): the order to confirm with the supplier.
+ * - `--order-id` (required): the order to pay. This is the ONLY identifier the
+ *   command needs — the settlement path is decided server-side by the order's
+ *   billing_mode. For the pay_per_call mode the EVO merchantTransID IS the
+ *   order_id (the user pays via EVO under the order_id), so the platform
+ *   verifies that payment itself; there is no merchant-transaction-id flag.
  * - `--idempotency-key` (required): forwarded as header.
- * - `--watch` / `--watch-interval` / `--watch-timeout`: polling mode
- *   (retained for backward compatibility).
+ * - `--watch` / `--watch-interval` / `--watch-timeout`: polling mode that
+ *   retries on PAYMENT_NOT_COMPLETED until PAID or timeout.
  *
- * On success: exit 0, print the confirmation result.
+ * This is the step that actually moves money, so the non-`--yes` path MUST
+ * confirm before the write; `--yes` skips it. A declined confirm maps to
+ * `CLIENT_ABORTED` (exit 5). Applies to both the single-shot and `--watch`
+ * paths (the confirm happens once, before polling begins).
+ *
+ * On success: exit 0, print settlement result.
  * On business error: exit 1, error code to stderr.
+ * Watch mode: NDJSON output per poll iteration.
  */
 export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('pay-order')
-    .description('Trigger supplier confirmation for a paid hotel order (upstream payOrder)')
+    .description('Settle an existing hotel order (path decided by billing_mode: monthly_settlement or pay_per_call)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--order-id <id>', 'Order ID to pay (from create-order response)')
     .option(
@@ -144,21 +156,22 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     const watchInterval = resolveSeconds(opts.watchInterval as string, DEFAULT_PAY_WATCH_INTERVAL_SECONDS);
     const watchTimeout = resolveSeconds(opts.watchTimeout as string, DEFAULT_PAY_WATCH_TIMEOUT_SECONDS);
 
-    // Pay-order sends no body params — it triggers supplier confirmation for an
-    // order that was already paid in create-order.
+    // Pay-order sends no body params — settlement is routed server-side by the
+    // order's billing_mode.
     const body: Record<string, unknown> = {};
 
-    // Confirm before the write unless --yes. Although this step does not move
-    // money (that happened in create-order), it commits the booking with the
-    // supplier. The prompt goes to stderr; declining maps to CLIENT_ABORTED
-    // (exit 5) via the top-level envelope.
+    // Confirm before the write unless --yes. This is the step that actually
+    // moves money (settlement account debit for monthly_settlement, or EVO
+    // verification for pay_per_call), decided server-side by billing_mode. The
+    // prompt goes to stderr; declining maps to CLIENT_ABORTED (exit 5) via the
+    // top-level envelope.
     if (!isYes) {
       const confirmed = await confirm({
-        message: `Confirm hotel order ${orderId} with the supplier? (Payment was already settled in create-order; this triggers supplier confirmation.)`,
-        default: true,
+        message: `Settle hotel order ${orderId}? This moves money via the order's configured billing mode (monthly_settlement or pay_per_call).`,
+        default: false,
       });
       if (!confirmed) {
-        throw new CliError('CLIENT_ABORTED', 'Confirmation aborted by user.');
+        throw new CliError('CLIENT_ABORTED', 'Payment aborted by user.');
       }
     }
 
@@ -192,13 +205,7 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
 
       await renderWithContext(commandResult, { format }, configManager);
     } else {
-      // Watch mode: retained for backward compatibility. Since create-order
-      // now settles inline, the order is already PAID (or in a terminal
-      // non-PAID state) by the time pay-order can be called — there is no
-      // longer a transient "not yet paid" state to poll through, so this
-      // loop returns on its first successful iteration in practice. Any
-      // business error (e.g. a genuinely terminal non-PAID state) is
-      // non-retryable and exits immediately.
+      // Watch mode: poll until PAID or timeout, output NDJSON per iteration
       const deadline = Date.now() + watchTimeout * 1000;
       let lastRecord: unknown = null;
 
@@ -219,8 +226,23 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
             return;
           }
         } else {
-          // Non-retryable business error → exit 1
-          throw CliError.fromApi(result, { auth: 'api-key' });
+          // Business error — check if it's PAYMENT_NOT_COMPLETED (retryable in watch)
+          const errorCode = (result as any).code ?? (result as any).errorCode;
+          const errorCodeStr = String(errorCode);
+
+          if (errorCodeStr === 'PAYMENT_NOT_COMPLETED' || errorCodeStr === '1933') {
+            // Retryable: output the error as NDJSON line and continue
+            const errorLine = {
+              watch_status: 'pending',
+              error_code: errorCodeStr === '1933' ? 'PAYMENT_NOT_COMPLETED' : errorCodeStr,
+              message: (result as any).errorMessage ?? 'Payment not yet completed',
+            };
+            lastRecord = errorLine;
+            ndjsonWriteLine(errorLine);
+          } else {
+            // Non-retryable business error → exit 1
+            throw CliError.fromApi(result, { auth: 'api-key' });
+          }
         }
 
         // Check timeout

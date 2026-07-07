@@ -1,24 +1,17 @@
 /**
  * Tests for hotel-redaug create-order and pay-order CLI verbs.
  *
- * Current architecture: create-order is a single write step that BOTH locks
- * the room AND settles payment inline (billing path decided server-side by
- * billing_mode) — it returns the order already PAID. pay-order is retained
- * only as a thin backward-compat replay endpoint (no body params, no
- * merchant-transaction-id, moves no money) for callers still on the old
- * two-step flow.
- *
- * Covers:
- *   - create-order success → exit 0 + order_id, order already PAID (Req 9.1)
- *   - create-order optional --payment-method-id (pay_per_call card selection)
- *   - pay-order compat replay → returns the existing PAID result (Req 9.2, 9.4)
- *   - pay-order on a non-PAID terminal order → INVALID_ORDER_STATE (exit 1)
- *   - --watch mode: returns on first successful poll since there is no
- *     transient "not yet paid" state to retry through anymore (Req 9.5)
+ * Task 15.1 — covers:
+ *   - create-order success → exit 0 + order_id in stdout (Req 9.1)
+ *   - pay-order monthly_settlement path → success (Req 9.2, 9.4)
+ *   - pay-order pay_per_call path (server-decided by billing_mode, same
+ *     request shape — no merchant-transaction-id flag) → success (Req 9.3)
+ *   - PAYMENT_NOT_COMPLETED → exit 1 + error in stderr (Req 9.6)
+ *   - --watch mode polling until PAID / timeout (Req 9.5)
  *
  * **Validates: Requirements 9.1, 9.2, 9.3, 9.4, 9.5, 9.6**
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import type { ApiClient } from '@agenzo/cli-core';
 
 vi.mock('@inquirer/prompts', () => ({
@@ -44,26 +37,30 @@ afterEach(() => {
 const CREATE_ORDER_RESP = {
   order_id: 'ord_new1',
   fc_order_code: 'fc_new1',
-  order_status: 'PAID',
+  order_status: 'AWAITING_PAYMENT',
   total_amount: 640,
   currency: 'CNY',
   rooms: [{ room_index: '1', guest_name: 'Alice' }],
 };
 
-const PAY_ORDER_REPLAY_MONTHLY_RESP = {
+const PAY_ORDER_SUCCESS_RESP = {
   order_id: 'ord_new1',
+  order_status: 'PAID',
   settlement_path: 'monthly_settlement',
-  status: 'PAID',
-  amount: 640,
+  pay_status: 'success',
+  total_amount: 640,
   currency: 'CNY',
+  billing_entry_id: 'bill_001',
 };
 
-const PAY_ORDER_REPLAY_PER_CALL_RESP = {
+const PAY_ORDER_ACTIVE_RESP = {
   order_id: 'ord_new1',
+  order_status: 'PAID',
   settlement_path: 'pay_per_call',
-  status: 'PAID',
-  amount: 640,
+  pay_status: 'success',
+  total_amount: 640,
   currency: 'CNY',
+  merchant_trans_id: 'evo_tx_123',
 };
 
 // ============================================================
@@ -97,7 +94,7 @@ describe('hotel-redaug create-order', () => {
     ...extra,
   ];
 
-  it('success → exit 0, POSTs /hotel/create-order, order already PAID in stdout (Req 9.1)', async () => {
+  it('success → exit 0, POSTs /hotel/create-order, prints order_id to stdout (Req 9.1)', async () => {
     const api = mockApiClient({ '/hotel/create-order': CREATE_ORDER_RESP });
     const program = hotelProgram(api);
     const out = captureStdout();
@@ -116,31 +113,15 @@ describe('hotel-redaug create-order', () => {
     expect(body.children).toBe(0);
     expect(body.nationality).toBe('CN');
     expect(body.contact_country_code).toBe('86');
-    // payment-method-id omitted by default (monthly_settlement / auto-selected card)
-    expect(body).not.toHaveProperty('payment_method_id');
     expect(headers).toEqual({ 'Idempotency-Key': 'co-1' });
     // Idempotency key is never in the body
     expect(body).not.toHaveProperty('idempotency_key');
 
     const payload = parseJsonOutput(out.text()) as Record<string, any>;
     expect(payload.order_id).toBe('ord_new1');
-    expect(payload.order_status).toBe('PAID');
+    expect(payload.order_status).toBe('AWAITING_PAYMENT');
     expect(payload.total_amount).toBe(640);
     expect(payload.currency).toBe('CNY');
-  });
-
-  it('--payment-method-id is forwarded when supplied (pay_per_call specific card) (Req 9.3)', async () => {
-    const api = mockApiClient({ '/hotel/create-order': CREATE_ORDER_RESP });
-    const program = hotelProgram(api);
-    captureStdout();
-    captureStderr();
-
-    await program.parseAsync(
-      createOrderArgs(['--yes', '--idempotency-key', 'co-pm-1', '--format', 'json', '--payment-method-id', 'pm_01ABCXYZ']),
-    );
-
-    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
-    expect(body.payment_method_id).toBe('pm_01ABCXYZ');
   });
 
   it('missing required flags → PARAM_INVALID before any request', async () => {
@@ -170,12 +151,12 @@ describe('hotel-redaug create-order', () => {
 });
 
 // ============================================================
-// pay-order — thin compat replay (monthly_settlement echoed)
+// pay-order — default path (monthly_settlement, no merchant-trans-id)
 // ============================================================
 
-describe('hotel-redaug pay-order (compat replay, monthly_settlement)', () => {
-  it('success → exit 0, POSTs /hotel/{order_id}/pay, replays the existing PAID result (Req 9.2, 9.4)', async () => {
-    const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_REPLAY_MONTHLY_RESP });
+describe('hotel-redaug pay-order (default path)', () => {
+  it('success → exit 0, POSTs /hotel/{order_id}/pay, prints settlement result (Req 9.2, 9.4)', async () => {
+    const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_SUCCESS_RESP });
     const program = hotelProgram(api);
     const out = captureStdout();
     captureStderr();
@@ -191,14 +172,15 @@ describe('hotel-redaug pay-order (compat replay, monthly_settlement)', () => {
     const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, any>, Record<string, string>];
     expect(path).toBe('/hotel/ord_new1/pay');
     expect(auth).toEqual({ type: 'api-key', key: 'k' });
-    // pay-order sends no body params at all — it moves no money.
-    expect(body).toEqual({});
+    // No merchant_trans_id in body for default path
+    expect(body).not.toHaveProperty('merchant_trans_id');
     expect(headers).toEqual({ 'Idempotency-Key': 'pay-1' });
 
     const payload = parseJsonOutput(out.text()) as Record<string, any>;
     expect(payload.order_id).toBe('ord_new1');
-    expect(payload.status).toBe('PAID');
+    expect(payload.order_status).toBe('PAID');
     expect(payload.settlement_path).toBe('monthly_settlement');
+    expect(payload.billing_entry_id).toBe('bill_001');
   });
 
   it('missing --order-id → PARAM_INVALID before any request', async () => {
@@ -218,12 +200,13 @@ describe('hotel-redaug pay-order (compat replay, monthly_settlement)', () => {
 });
 
 // ============================================================
-// pay-order — thin compat replay (pay_per_call echoed, same request shape)
+// pay-order — active payment path (billing_mode decides server-side; the CLI
+// request is identical to the monthly_settlement path — only --order-id)
 // ============================================================
 
-describe('hotel-redaug pay-order (compat replay, pay_per_call)', () => {
-  it('order with pay_per_call billing_mode → settlement_path echoed in replay, no extra flags sent (Req 9.3)', async () => {
-    const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_REPLAY_PER_CALL_RESP });
+describe('hotel-redaug pay-order (active payment path)', () => {
+  it('order with pay_per_call billing_mode → active payment path in response, no extra flags sent (Req 9.3)', async () => {
+    const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_ACTIVE_RESP });
     const program = hotelProgram(api);
     const out = captureStdout();
     captureStderr();
@@ -239,35 +222,37 @@ describe('hotel-redaug pay-order (compat replay, pay_per_call)', () => {
     const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, any>, Record<string, string>];
     expect(path).toBe('/hotel/ord_new1/pay');
     expect(auth).toEqual({ type: 'api-key', key: 'k' });
-    // pay-order sends no body params — same request shape regardless of billing_mode.
+    // pay-order sends no body params — the server decides the path from billing_mode.
     expect(body).toEqual({});
     expect(headers).toEqual({ 'Idempotency-Key': 'pay-2' });
 
     const payload = parseJsonOutput(out.text()) as Record<string, any>;
     expect(payload.order_id).toBe('ord_new1');
-    expect(payload.status).toBe('PAID');
+    expect(payload.order_status).toBe('PAID');
     expect(payload.settlement_path).toBe('pay_per_call');
+    expect(payload.merchant_trans_id).toBe('evo_tx_123');
   });
 });
 
 // ============================================================
-// pay-order — non-PAID terminal order → INVALID_ORDER_STATE
+// pay-order — PAYMENT_NOT_COMPLETED → exit 1 + error in stderr
 // ============================================================
 
-describe('hotel-redaug pay-order (non-PAID terminal order)', () => {
-  it('order in a terminal state other than PAID (e.g. CANCELLED) → exit 1 (Req 9.6)', async () => {
+describe('hotel-redaug pay-order (PAYMENT_NOT_COMPLETED)', () => {
+  it('PAYMENT_NOT_COMPLETED → exit 1 + error code thrown as RESOURCE_CONFLICT (mapped from 409) (Req 9.6)', async () => {
     const api = mockApiClient();
     api.post.mockResolvedValue({
       success: false,
-      errorCode: 1930,
-      errorMessage: 'Invalid order state',
+      errorCode: 1933,
+      errorMessage: 'Payment not yet completed',
       statusCode: 409,
-      code: 'INVALID_ORDER_STATE',
+      code: 'PAYMENT_NOT_COMPLETED',
     });
     const program = hotelProgram(api);
     captureStdout();
     captureStderr();
 
+    // PAYMENT_NOT_COMPLETED is not in the CLI error catalog, so fromApi maps 409 → RESOURCE_CONFLICT
     await expect(
       program.parseAsync([
         ...BASE, 'pay-order', '--api-key', 'k',
@@ -281,19 +266,37 @@ describe('hotel-redaug pay-order (non-PAID terminal order)', () => {
 });
 
 // ============================================================
-// pay-order — --watch mode (retained for back-compat; returns on first poll
-// since there is no transient "not yet paid" state anymore)
+// pay-order — --watch mode polling until PAID or timeout
 // ============================================================
 
 describe('hotel-redaug pay-order --watch mode', () => {
-  it('returns immediately on first successful poll — order is already PAID (Req 9.5)', async () => {
-    const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_REPLAY_PER_CALL_RESP });
+  it('polls until PAID, outputs NDJSON per iteration (Req 9.5)', async () => {
+    // Use fake timers to avoid real sleeping
+    vi.useFakeTimers();
+
+    let callCount = 0;
+    const api = mockApiClient();
+    api.post.mockImplementation(() => {
+      callCount++;
+      if (callCount < 3) {
+        // First 2 calls → PAYMENT_NOT_COMPLETED (retryable in watch)
+        return Promise.resolve({
+          success: false,
+          errorCode: 1933,
+          errorMessage: 'Payment not yet completed',
+          statusCode: 409,
+          code: 'PAYMENT_NOT_COMPLETED',
+        });
+      }
+      // 3rd call → success
+      return Promise.resolve({ success: true, data: PAY_ORDER_ACTIVE_RESP });
+    });
 
     const program = hotelProgram(api);
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync([
+    const parsePromise = program.parseAsync([
       ...BASE, 'pay-order', '--api-key', 'k',
       '--order-id', 'ord_new1',
       '--idempotency-key', 'pay-watch-1',
@@ -303,14 +306,33 @@ describe('hotel-redaug pay-order --watch mode', () => {
       '--yes', '--format', 'json',
     ]);
 
-    // Single poll — no transient pending state to retry through.
-    expect(api.post).toHaveBeenCalledTimes(1);
+    // Advance timers to let the sleep calls resolve
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
 
+    await parsePromise;
+
+    vi.useRealTimers();
+
+    // Should have polled 3 times (2 pending + 1 success)
+    expect(api.post).toHaveBeenCalledTimes(3);
+
+    // Output should be NDJSON lines
     const lines = out.text().trim().split('\n').filter(Boolean);
-    expect(lines.length).toBe(1);
+    expect(lines.length).toBe(3);
 
+    // First two lines are pending status
     const line1 = JSON.parse(lines[0]);
-    expect(line1.status).toBe('PAID');
+    expect(line1.watch_status).toBe('pending');
+    expect(line1.error_code).toBe('PAYMENT_NOT_COMPLETED');
+
+    const line2 = JSON.parse(lines[1]);
+    expect(line2.watch_status).toBe('pending');
+
+    // Third line is the PAID response
+    const line3 = JSON.parse(lines[2]);
+    expect(line3.order_status).toBe('PAID');
   });
 
   it('non-retryable error in watch mode → throws CliError (exit 1)', async () => {
@@ -339,5 +361,42 @@ describe('hotel-redaug pay-order --watch mode', () => {
       ]),
     ).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
     expect(api.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('timeout without reaching PAID → outputs timeout line', async () => {
+    const api = mockApiClient();
+    api.post.mockResolvedValue({
+      success: false,
+      errorCode: 1933,
+      errorMessage: 'Payment not yet completed',
+      statusCode: 409,
+      code: 'PAYMENT_NOT_COMPLETED',
+    });
+
+    const program = hotelProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    // Use very short timeout — 0 seconds means the first poll may be the only one
+    // Then it immediately times out after the first successful poll iteration.
+    await program.parseAsync([
+      ...BASE, 'pay-order', '--api-key', 'k',
+      '--order-id', 'ord_new1',
+      '--idempotency-key', 'pay-watch-3',
+      '--watch',
+      '--watch-interval', '999',
+      '--watch-timeout', '1',
+      '--yes', '--format', 'json',
+    ]);
+
+    // Should have polled at least once
+    expect(api.post.mock.calls.length).toBeGreaterThanOrEqual(1);
+
+    // Output should contain lines — last line should have timeout status
+    const lines = out.text().trim().split('\n').filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+
+    const lastLine = JSON.parse(lines[lines.length - 1]);
+    expect(lastLine.watch_status).toBe('timeout');
   });
 });

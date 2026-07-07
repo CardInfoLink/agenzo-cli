@@ -150,8 +150,8 @@ export const quoteSchema: VerbSchema = {
       required: true,
       description: "Epoch seconds or the literal 'now'",
     },
-    'passenger-name': { type: 'string', required: true, description: 'Lead passenger full name' },
-    'passenger-phone': { type: 'string', required: true, description: 'Passenger phone in E.164 format (e.g. +14155551234)' },
+    'passenger-name': { type: 'string', required: false, description: 'Lead passenger full name' },
+    'passenger-phone': { type: 'string', required: false, description: 'Passenger phone in E.164 format (e.g. +14155551234)' },
     'passenger-count': { type: 'int', required: false, description: 'Number of passengers' },
     'luggage-count': { type: 'int', required: false, description: 'Number of luggage items' },
     'passenger-email': { type: 'string', required: false, description: 'Passenger email address' },
@@ -546,7 +546,7 @@ export const hotelCreateOrderSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'create-order',
   description:
-    'Create AND pay for a hotel order in one call, using a product_token and price_items from a recent quote. The backend re-checks availability, authorizes/captures payment via the platform payment gateway (funds path decided server-side by the developer billing_mode — monthly_settlement or pay_per_call), locks the room with the supplier, and returns the order already PAID. There is no separate settlement step. If any step after funds are taken fails, the funds are automatically released/refunded before the error is returned. check-in/check-out, guest counts, total-amount and price-items must match the quote',
+    'Create a hotel order WITHOUT charging any account (re-check availability + createOrder upstream), using a product_token and price_items from a recent quote. The order enters AWAITING_PAYMENT — no money is moved until pay-order. check-in/check-out, guest counts, total-amount and price-items must match the quote',
   flags: {
     'product-token': { type: 'string', required: true, description: 'Chosen rate token from quote (quote.response.rates[].product_token). Pass verbatim' },
     'total-amount': { type: 'float', required: true, description: 'Total price for the stay (quote.response.rates[].total_price.amount)', constraints: 'DECIMAL units (NOT cents), 0.01–999999999.99. Must equal the chosen rate total_price.amount' },
@@ -565,81 +565,79 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
-    'payment-method-id': { type: 'string', required: false, description: 'pay_per_call only: charge this SPECIFIC already-bound card instead of the platform auto-selected default/most-recent one. Ignored for monthly_settlement.', constraints: 'Must be an ACTIVE card belonging to this developer, else PAYMENT_METHOD_REQUIRED' },
     'idempotency-key': {
       type: 'string',
       required: true,
-      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(user_id + product_token + check_in)) and reuse the SAME key when retrying the identical request. This single call covers both order creation AND payment',
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(user_id + product_token + check_in)) and reuse the SAME key when retrying the same order creation',
       constraints: '1-128 chars [A-Za-z0-9_-]',
     },
   },
   response: {
-    order_id: { type: 'string', description: 'Our order reference (coOrderCode). Use as --order-id in get / cancel.' },
+    order_id: { type: 'string', description: 'Our order reference (coOrderCode). Use as --order-id in pay-order / get / cancel.' },
     fc_order_code: { type: 'string', description: 'Supplier order reference. Needed as --fc-order-code in cancel and checkout.' },
-    total_amount: { type: 'float', description: 'Amount actually charged (DECIMAL units) — the order is already PAID by the time this response is returned.' },
-    currency: { type: 'string', description: 'ISO 4217 currency code of the charge.' },
+    total_amount: { type: 'float', description: 'Amount to be paid in pay-order (DECIMAL units). The order is locked in AWAITING_PAYMENT — no charge has been made.' },
+    currency: { type: 'string', description: 'ISO 4217 currency code for the payment.' },
   },
   example: {
     command:
       `agenzo-merchant-cli hotel-redaug create-order --product-token <tok> --total-amount 10.00 --currency CNY --price-items '[{"sale_date":"2026-08-20","sale_price":10.00,"breakfast_num":0}]' --check-in 2026-08-20 --check-out 2026-08-21 --adults 2 --guest-name "Zhang San" --contact-name "Zhang San" --contact-phone 13800138000 --idempotency-key create-h1n2`,
-    output_summary: 'Returns {order_id, fc_order_code, total_amount, currency}. The order is already PAID — proceed to get to poll for supplier CONFIRMED status.',
+    output_summary: 'Returns {order_id, fc_order_code, total_amount, currency}. The order is AWAITING_PAYMENT (no charge). Use order_id as --order-id in pay-order to settle.',
   },
   error_recovery: {
     NO_AVAILABILITY: 'Availability vanished between quote and create-order. Re-quote the same hotel; if still empty, quote another hotel or change dates. Use a NEW idempotency-key for the new product_token.',
     PRICE_CHANGED: 'The price/price_items no longer match upstream. Re-quote to get fresh total_price and price_items, confirm the new price with the user, then create-order with the new values and a NEW idempotency-key.',
-    NAME_FORMAT_INVALID: 'The supplier requires the guest name in a specific format (commonly Latin first/last name for international properties). Re-collect guest-name in Latin letters and retry with a NEW idempotency-key (the request is no longer identical).',
-    PAYMENT_METHOD_REQUIRED: 'pay_per_call developer has no ACTIVE bound card at all, OR the explicitly-passed --payment-method-id is missing/not ACTIVE/does not belong to this developer. Direct the user to bind a card, drop --payment-method-id to auto-select, or pass a valid one.',
-    ACCOUNT_INSUFFICIENT_BALANCE: 'monthly_settlement developer settlement credit is insufficient (check via admin-cli accounts get). Direct the user to top up offline; do NOT retry until funded.',
-    ACCOUNT_NOT_FOUND: 'monthly_settlement developer has no settlement account. Direct the user to complete contract signing.',
-    ACCOUNT_SUSPENDED: 'The settlement account is suspended. Direct the user to contact support; do NOT retry.',
+    NAME_FORMAT_INVALID: 'The supplier requires the guest name in a specific format (commonly Latin first/last name for international properties). Re-collect guest-name in Latin letters and retry with the SAME idempotency-key.',
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key derived from business intent and retry.',
     PARAM_IDEMPOTENCY_KEY_CONFLICT: 'The same idempotency-key was used with different parameters. Retry with the original parameters, or generate a NEW key for the new parameters.',
-    UPSTREAM_ERROR: 'Transient upstream error during checkBooking or createOrder. Any funds already taken are automatically released/refunded before this error is returned. Retry once after ~2s backoff with the SAME idempotency-key.',
+    UPSTREAM_ERROR: 'Transient upstream error during checkBooking or createOrder. Retry once after ~2s backoff with the SAME idempotency-key.',
   },
 };
 
-/**
- * `hotel-redaug pay-order` schema. Write op (W/Y) — trigger supplier confirmation.
- *
- * After `create-order` settles payment (authorize+capture), `pay-order` calls
- * the supplier's payOrder endpoint to confirm/issue the booking. Takes only
- * `--order-id` and `--idempotency-key` — no payment parameters needed because
- * funds were already settled in create-order.
- */
+/** `hotel-redaug pay-order` schema. Write op (W/Y) — settle a created order. */
 export const hotelPayOrderSchema: VerbSchema = {
   cli: CLI_NAME,
   noun: HOTEL_NOUN,
   verb: 'pay-order',
   description:
-    'Trigger supplier confirmation (upstream payOrder) for an order that was already paid via create-order. Takes only --order-id; no payment parameters needed. On success the supplier begins asynchronous confirmation — poll get until CONFIRMED (3). Idempotent: calling pay-order on an already-confirmed order replays the existing result',
+    'Settle an existing AWAITING_PAYMENT order created by create-order. Takes only --order-id; the billing path is decided server-side by the order billing_mode. monthly_settlement deducts from the developer credit account then confirms with the supplier; pay_per_call verifies the user EVO payment — the EVO merchantTransID IS the order_id (the user pays via EVO under the order_id), so the platform queries EVO for that order_id and requires an exact amount/currency match before confirming (the response settlement_path is then "pay_per_call"). On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
   flags: {
-    'order-id': { type: 'string', required: true, description: 'Order to confirm with the supplier (create-order.response.order_id).' },
+    'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id). For pay_per_call this is also the EVO merchantTransID the user paid under.' },
     'idempotency-key': {
       type: 'string',
       required: true,
-      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent and reuse the SAME key when retrying the same pay-order call',
+      description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(order_id + attempt)) and reuse the SAME key when retrying the same payment',
       constraints: '1-128 chars [A-Za-z0-9_-]',
     },
-    watch: { type: 'bool', required: false, default: false, description: 'Retained for backward compatibility. Each iteration emits one NDJSON line' },
+    watch: { type: 'bool', required: false, default: false, description: 'Poll automatically on PAYMENT_NOT_COMPLETED until PAID or timeout. Each iteration emits one NDJSON line' },
     'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between poll attempts in --watch mode' },
     'watch-timeout': { type: 'int', required: false, default: 300, description: 'Total seconds before giving up in --watch mode' },
   },
   response: {
     order_id: { type: 'string', description: 'Order reference.' },
-    settlement_path: { type: 'string', description: "The order's billing_mode echoed: 'monthly_settlement' or 'pay_per_call'." },
-    status: { type: 'string', description: "'PAID' — supplier confirmation is asynchronous; poll get until CONFIRMED." },
-    amount: { type: 'float', description: 'Settled amount in DECIMAL units (from create-order).' },
-    currency: { type: 'string', description: 'ISO 4217 currency code.' },
+    settlement_path: { type: 'string', description: "Which billing path was used: 'monthly_settlement' or 'pay_per_call' (same tokens as billing_mode)." },
+    amount: { type: 'float', description: 'Settled amount in DECIMAL units.' },
+    currency: { type: 'string', description: 'ISO 4217 currency code of the settlement.' },
+    pay_status: { type: 'int', description: 'Upstream pay status (1 = paid). The order internal status is now PAID.' },
+    settled_at: { type: 'string', description: 'ISO 8601 settlement timestamp. On idempotent replay, the original first settled_at is returned unchanged.' },
   },
   example: {
     command:
       'agenzo-merchant-cli hotel-redaug pay-order --order-id hho_01KWC63Z5CD6CKBM33Q7SC2ZDT --idempotency-key pay-h1n2',
-    output_summary: 'Triggers supplier payOrder (confirmation/ticket issuance). Returns {order_id, settlement_path, status:"PAID", amount, currency}. Then poll get until CONFIRMED.',
+    output_summary: 'Settlement path is chosen server-side by billing_mode. monthly_settlement: deducts from the credit account, confirms with the supplier. Returns {order_id, settlement_path:"monthly_settlement", amount, currency, pay_status:1, settled_at}. Order becomes PAID. For pay_per_call the user must have already paid via EVO using the order_id as the merchantTransID; the same command settles it (settlement_path:"pay_per_call").',
   },
   error_recovery: {
-    INVALID_ORDER_STATE: 'The order is not in a payable state (it may already be confirmed, cancelled, or missing auth). Check status via get; do NOT retry pay-order.',
+    PAYMENT_NOT_COMPLETED: 'pay_per_call only: EVO has not yet confirmed the payment for this order_id. Retry with the SAME idempotency-key after a delay, or use --watch to poll automatically until PAID.',
+    PAYMENT_NOT_FOUND: 'No EVO transaction found for this order_id. Confirm the user paid via EVO using the order_id as the merchantTransID; do NOT retry blindly.',
+    PAYMENT_AMOUNT_MISMATCH: 'The EVO-confirmed amount/currency does not match the order. The user must pay the exact order amount in the exact currency under the order_id. Do NOT retry until corrected.',
+    PAYMENT_QUERY_FAILED: 'EVO gateway query failed (transport/timeout). Retry once after ~5s with the SAME idempotency-key.',
+    BILLING_MODE_MISMATCH: 'The order billing_mode is not a recognized settlement mode (only monthly_settlement and pay_per_call are valid). Check the developer billing_mode; do NOT retry blindly.',
+    INVALID_ORDER_STATE: 'The order is not in AWAITING_PAYMENT (it may already be PAID or CANCELLED). Check status via get; do NOT retry pay-order.',
     ORDER_NOT_FOUND: 'No order for this --order-id. Verify it is the order_id returned by create-order. Do NOT retry.',
-    UPSTREAM_ERROR: 'Transient upstream error during supplier payOrder. Retry once after ~5s with the SAME idempotency-key, then poll get to check whether the confirmation actually took effect.',
+    ACCOUNT_INSUFFICIENT_BALANCE: 'Settlement credit is insufficient (check via admin-cli accounts get). Direct the user to top up offline.',
+    ACCOUNT_NOT_FOUND: 'Developer has no settlement account. Direct the user to complete contract signing.',
+    ACCOUNT_SUSPENDED: 'The settlement account is suspended. Direct the user to contact support; do NOT retry.',
+    PAYORDER_FAILED: 'Upstream payOrder failed after a successful deduction; the deduction was reversed and the order stays AWAITING_PAYMENT. Retry with the SAME idempotency-key after a delay.',
+    PAYORDER_FAILED_AFTER_PAYMENT: 'EVO payment confirmed but upstream payOrder failed. The order is recoverable (the EVO payment under the order_id is preserved). Contact support for reconciliation; do NOT retry automatically.',
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Add a unique --idempotency-key and retry.',
     PARAM_IDEMPOTENCY_KEY_CONFLICT: 'Same idempotency-key used with different parameters. Use the original parameters, or generate a NEW key.',
   },
@@ -1083,5 +1081,89 @@ export const hotelDetailSchema: VerbSchema = {
   error_recovery: {
     UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
     PARAM_INVALID: 'Ensure --hotel-id is a non-empty string, then retry.',
+  },
+};
+
+// ============================================================
+// Unified cross-provider orders verb schemas ("orders" noun)
+// ============================================================
+//
+// Unlike ride-elife / hotel-redaug, `orders` has NO business logic of its own
+// — it is a thin read-only index spanning ALL providers (ride + hotel, and any
+// future ones). Use it when the user asks for "my orders" / "order history"
+// generically, without naming a specific business. Once you already know
+// which business the user means (or need domain-specific columns like
+// vehicle_class / hotel_name), prefer `ride-elife list-orders` /
+// `hotel-redaug list-orders` instead.
+
+export const ORDERS_NOUN = 'orders';
+
+/** `orders list` schema — cross-provider order list (`GET /orders`). Read-only. */
+export const unifiedOrdersListSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: ORDERS_NOUN,
+  verb: 'list',
+  description:
+    'List orders across ALL providers (ride + hotel) in one call. Use this for generic "my orders" / "order history" requests. Prefer ride-elife/hotel-redaug list-orders when the user names a specific business.',
+  flags: {
+    'order-type': { type: 'string', required: false, description: 'Filter by provider: ride | hotel' },
+    status: { type: 'string', required: false, description: 'Filter by NORMALIZED status (NOT the domain-specific status): PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
+    page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1' },
+  },
+  response: {
+    orders: {
+      type: 'array',
+      description: 'Slim cross-provider order-index items. For business-specific fields (vehicle_class, hotel_name, etc.), call `orders get --order-id <id>` or the domain-specific `get`.',
+      items: {
+        order_id: { type: 'string', description: 'Order id (rio_... for ride, hho_... for hotel). Pass to `orders get`.' },
+        order_type: { type: 'string', description: "'ride' or 'hotel'" },
+        status: { type: 'string', description: 'Normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
+        amount: { type: 'float|null', description: 'Order amount in DECIMAL currency units (NOT cents)' },
+        currency: { type: 'string|null', description: 'ISO 4217 currency code' },
+        created_at: { type: 'string|null', description: 'ISO 8601 datetime' },
+        updated_at: { type: 'string|null', description: 'ISO 8601 datetime' },
+      },
+    },
+    total: { type: 'int', description: 'Total matching orders across all providers' },
+    page: { type: 'int', description: 'Current page' },
+    page_size: { type: 'int', description: 'Items per page' },
+  },
+  example: {
+    command: 'agenzo-merchant-cli orders list --page 1 --page-size 10',
+    output_summary:
+      'Returns a paginated, cross-provider list of orders (both ride and hotel). If the user then asks about one order, use its order_id with `orders get`.',
+  },
+  error_recovery: {
+    INVALID_REQUEST: 'The --status value is not one of PENDING/CONFIRMED/COMPLETED/CANCELLED/FAILED. Fix and retry.',
+    INTERNAL_ERROR: 'Transient backend error. Retry once after a short delay.',
+    PARAM_INVALID: 'Ensure --page / --page-size are positive integers, then retry.',
+  },
+};
+
+/** `orders get` schema — cross-provider order detail (`GET /orders/{id}`). Read-only. */
+export const unifiedOrdersGetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: ORDERS_NOUN,
+  verb: 'get',
+  description:
+    'Get a single order detail by id, regardless of which provider (ride/hotel) it belongs to. The platform resolves order_id -> provider internally and returns that provider\'s own detail shape.',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'Order id from `orders list` (rio_... for ride, hho_... for hotel)' },
+  },
+  response: {
+    '(varies by order_type)': {
+      type: 'object',
+      description:
+        'The response shape is delegated to the owning provider and therefore varies: a ride order returns the same shape as `ride-elife get`; a hotel order returns the same shape as `hotel-redaug get`. Treat the result as an opaque object and surface whatever fields it contains — do NOT assume a fixed schema.',
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli orders get --order-id hho_01K...',
+    output_summary: "Returns the order's detail, delegated to its owning provider (ride or hotel).",
+  },
+  error_recovery: {
+    ORDER_NOT_FOUND: 'The order_id does not exist or does not belong to this developer/org. Verify the id from `orders list`. Do NOT retry blindly.',
+    INTERNAL_ERROR: "The order's provider detail lookup is temporarily unavailable. Retry once after a short delay.",
   },
 };
