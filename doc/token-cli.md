@@ -122,6 +122,7 @@ agenzo-token-cli payment-methods add --payment-brand unionpay --member <member_i
 - **`--member <id>`** (required): end-user identity this card belongs to. The caller defines this value (e.g. your system's user ID). Must be stable — the same member_id is reused for subsequent token creation.
 - `--api-key`: API Key from admin-cli (do not ask again if already provided).
 - `--email`: email address associated with this binding.
+- `--return-url <url>` (optional): front-end redirect URL returned alongside the terminal status. After enrollment completes, the caller can navigate the user to this URL. Not sent to UnionPay — purely a platform-side hint for post-enrollment navigation. If omitted, the caller determines its own post-enrollment behaviour.
 - Card details (`--card-number` / `--expiry` / `--cvv`), `--mode`, and `--idempotency-key` are **not used** in this mode.
 
 **How it works:**
@@ -195,6 +196,12 @@ Card resolution priority:
 | `--network <network>` | Chain network (e.g. `base`) | X402 |
 | `--deadline <timestamp>` | Unix timestamp deadline | X402 |
 | `--external-tx-id <id>` | External transaction ID. Sent only when supplied; the CLI does not auto-generate one. | Optional |
+| `--recipient-first-name <name>` | Recipient first name (UnionPay network token only) | UnionPay NT |
+| `--recipient-last-name <name>` | Recipient last name (UnionPay network token only) | UnionPay NT |
+| `--recipient-email <email>` | Recipient email (one of email/phone required for UnionPay NT) | UnionPay NT |
+| `--recipient-phone <phone>` | Recipient phone (one of email/phone required for UnionPay NT) | UnionPay NT |
+| `--unionpay-amount <amount>` | Intent amount as decimal string, e.g. "174.58" (required for UnionPay NT) | UnionPay NT |
+| `--return-url <url>` | Front-end redirect URL returned alongside terminal status. Only for UnionPay network tokens. Not sent to UnionPay — used by the caller for post-payment navigation. | Optional (UnionPay NT) |
 | `--idempotency-key <key>` | Idempotency-Key header value. Required — must be supplied by the caller. Prompts interactively if omitted; never auto-generated. Sent as the `Idempotency-Key` HTTP header, never in the body. | All types |
 
 ### Token Types
@@ -227,6 +234,7 @@ agenzo-token-cli payment-tokens create --type network-token --payment-method-id 
 
 - **Card selection**: UnionPay cards **must** be selected via `--payment-method-id`. The `--card` (last4 matching) flag does not work for UnionPay cards.
 - The CLI automatically detects the card's `payment_brand` and enters the UnionPay branch (prompting for amount, recipient info, etc.).
+- `--return-url <url>` (optional): front-end redirect URL returned alongside the terminal status. After payment completes, the caller can navigate the user to this URL. Not sent to UnionPay — purely a platform-side hint for post-payment navigation. If omitted, the caller determines its own post-payment behaviour.
 - **No `--idempotency-key` needed** for the initial request (the platform uses correlation IDs for idempotency).
 
 **How it works:**

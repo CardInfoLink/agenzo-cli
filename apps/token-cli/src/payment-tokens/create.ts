@@ -260,6 +260,10 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     .option('--recipient-phone <phone>', 'UnionPay network token: recipient phone (recipient-email or recipient-phone required)')
     .option('--unionpay-amount <amount>', 'UnionPay network token: intent amount as a decimal string, e.g. "174.58"')
     .option(
+      '--return-url <url>',
+      'Optional front-end redirect URL after UPI payment completes. Only applicable to UnionPay network tokens.',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
@@ -445,6 +449,8 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
         }
         if (recipientEmail) typeBody.recipient_email = recipientEmail;
         if (recipientPhone) typeBody.recipient_phone = recipientPhone;
+        // Optional return_url for post-payment navigation.
+        if (opts.returnUrl) typeBody.return_url = String(opts.returnUrl);
       } else {
         // Evo branch (default): fetch fee config (fallback to default)
         feeCents = await fetchNetworkTokenFee(deps.apiClient, apiKey);

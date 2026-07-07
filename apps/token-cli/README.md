@@ -96,6 +96,27 @@ agenzo-token-cli payment-methods add \
 
 Returns a `PM ID` with `PENDING` status immediately, then auto-polls 3DS verification (3s interval, 15 min timeout). On success it prints `ACTIVE` status plus card brand, first six and last four. On timeout it suggests continuing with `payment-methods get`.
 
+#### UnionPay enrollment mode
+
+```bash
+agenzo-token-cli payment-methods add \
+  --api-key <api_key> \
+  --payment-brand unionpay \
+  --member <member_id> \
+  --email user@example.com \
+  --return-url https://merchant.com/bind-done   # optional
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--api-key` | Yes | Prompted interactively when omitted |
+| `--payment-brand` | Yes | Set to `unionpay` |
+| `--member` | Yes | End-user identity (must be stable across enrollment and token creation) |
+| `--email` | Yes | Email associated with the binding |
+| `--return-url` | No | Front-end redirect URL returned alongside the terminal status. Only for `--payment-brand unionpay`. Not sent to UnionPay — used by the caller for post-enrollment navigation |
+
+Returns `Enroll URL` and polls for ACTIVE/FAILED (5s interval, 60s timeout). The user must open the Enroll URL in a browser to complete passkey authentication. Card details flags are not used.
+
 #### Drop-in mode
 
 ```bash
@@ -174,6 +195,12 @@ agenzo-token-cli payment-tokens create \
 | `--currency` | vcn | Omitted by default; the server applies its default currency |
 | `--pay-to` / `--nonce` / `--network` / `--deadline` | x402 | Required X402 quadruple; `--deadline` is a Unix timestamp |
 | `--external-tx-id` | all | Forwarded to the request body as `external_tx_id` (optional) |
+| `--recipient-first-name` | network-token (unionpay) | Recipient first name for UnionPay order delivery details |
+| `--recipient-last-name` | network-token (unionpay) | Recipient last name for UnionPay order delivery details |
+| `--recipient-email` | network-token (unionpay) | Recipient email (one of email or phone required for unionpay) |
+| `--recipient-phone` | network-token (unionpay) | Recipient phone (one of email or phone required for unionpay) |
+| `--unionpay-amount` | network-token (unionpay) | Intent amount as decimal string (e.g. "174.58"), required for unionpay cards |
+| `--return-url` | network-token (unionpay) | Front-end redirect URL returned alongside the terminal status. Not sent to UnionPay — used by the caller for post-payment navigation |
 | `--idempotency-key` | all | **Required**; forwarded verbatim as the `Idempotency-Key` HTTP header, retrying the same key returns the first result |
 
 > Before writing, the freeze amount and service fee are shown and confirmation is requested; `--yes` skips confirmation (in which case `--idempotency-key` must be supplied explicitly).

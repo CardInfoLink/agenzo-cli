@@ -101,6 +101,10 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .option(
       '--no-poll',
       'Dropin mode: mint the session, print it, and exit immediately without polling verification status (for server/SDK-driven flows where the front-end completes the binding)',
+    )
+    .option(
+      '--return-url <url>',
+      'Optional front-end redirect URL after UPI enrollment completes. Only applicable to --payment-brand unionpay. If not provided, the caller determines post-enrollment navigation.',
     );
 
   attachSchemaHelp(cmd, pmAddSchema);
@@ -343,7 +347,13 @@ async function handleUnionpayPaymentBrand(
   const result = await deps.apiClient.post<PaymentMethod>(
     '/payment-methods/create',
     { type: 'api-key', key: apiKey },
-    { type: 'card', payment_brand: 'unionpay', member_id: member, email },
+    {
+      type: 'card',
+      payment_brand: 'unionpay',
+      member_id: member,
+      email,
+      ...(opts.returnUrl ? { return_url: String(opts.returnUrl) } : {}),
+    },
   );
 
   if (!result.success) {
