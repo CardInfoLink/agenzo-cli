@@ -156,6 +156,8 @@ export const quoteSchema: VerbSchema = {
     'luggage-count': { type: 'int', required: false, description: 'Number of luggage items' },
     'passenger-email': { type: 'string', required: false, description: 'Passenger email address' },
     'children-count': { type: 'int', required: false, description: 'Number of children' },
+    'infant-count': { type: 'int', required: false, description: 'Number of infants (passenger breakdown; affects seat pricing)' },
+    'toddler-count': { type: 'int', required: false, description: 'Number of toddlers (passenger breakdown; affects seat pricing)' },
   },
   response: {
     vehicle_classes: {

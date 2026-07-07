@@ -101,7 +101,31 @@ async function main() {
   });
 
   // ride-elife command group (eLife ride ordering)
-  const rideCmd = program.command('ride-elife').description('Ride ordering (eLife)');
+  const rideCmd = program.command('ride-elife').description(
+    `Ride ordering (eLife) — quote a fare, book it, poll status, and cancel.
+
+Workflow (typical order):
+  1. quote        Get fare quotes between two points → vehicle_classes[] each with a quote_id
+  2. book         Book one vehicle_class using its quote_id → ride_id (write; needs --idempotency-key)
+  3. get          Poll ride status by --order-id=<ride_id> until terminal (or use --watch for NDJSON)
+  4. cancel       (optional) Cancel a ride by --order-id (write; may incur a fee)
+     list-orders  (standalone) List the developer's previous ride orders
+
+Key notes:
+  • Coordinates are NOT geocoded by the backend — supply --pickup-lat/lng and --dropoff-lat/lng.
+    book must repeat the SAME pickup/dropoff coordinates+names and pickup-time used in quote;
+    the quote_id does NOT carry them forward.
+  • quote_id from quote is opaque and provider-specific — pass it unchanged to book, never reuse
+    it across services.
+  • vehicle_class values are case-sensitive literals (Sedan / SUV / MPV-5 / MPV-7 / Van / Luxury /
+    Train) — pass back to book verbatim.
+  • --pickup-time is UTC epoch seconds or the literal "now"; convert the user's local time to UTC.
+  • All amounts are DECIMAL currency units (e.g. 42.50 = $42.50), never minor units (cents).
+  • Billing mode is decided server-side: pay_per_call needs a PAID --payment-order-id (from
+    payment-cli); monthly_settlement forbids it (settled against the developer's account).
+  • Write verbs (book / cancel) require --idempotency-key; reuse the SAME key when retrying the
+    same intent.`,
+  );
   registerQuoteCommand(rideCmd, deps);
   registerBookCommand(rideCmd, deps);
   registerRideGetCommand(rideCmd, deps);
