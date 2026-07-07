@@ -19,11 +19,16 @@
  * `@agenzo/cli-core`.
  */
 
-/** Discovery hints for a capability (§4.4.1 schema; `schema_url` reserved for backend feed). */
+/** Discovery hints for a capability (§4.4.1 schema). */
 export interface ServiceDiscovery {
   /** Command an agent can run to discover the verbs in detail. */
   help_command: string;
-  /** Reserved for the backend discovery feed's per-verb JSON schema URL (pending impl). */
+  /**
+   * Capability-layer schema download URL (the provider's aggregate
+   * `schema/<cli_noun>.json`, mirrored by its `schema_ref.schema_url`). The
+   * aggregate HTTP endpoint is reserved/pending; until it lands, agents use
+   * `help_command` (`<noun> <verb> --help --format json`) for the live schema.
+   */
   schema_url?: string;
 }
 
@@ -52,7 +57,10 @@ export interface ServiceCapability {
 /** Static registry. This iteration ships ride-elife and hotel-redaug capabilities. */
 export const SERVICE_REGISTRY: ServiceCapability[] = [
   {
-    service_id: 'ride-elife',
+    // service_id 是平台级不透明内部引用（svc_ 前缀 + ULID），不进 Agent 日常拼的命令
+    // ——Agent 拼命令用的是 cli_noun="ride-elife"。与后端
+    // services/merchant_service/discovery/catalog.py 的 RIDE_ELIFE_SERVICE_ID 保持一致。
+    service_id: 'svc_01KWTPBWDH5YZ52H717BFVWZA8',
     name: 'Ride hailing (eLife)',
     description: 'On-demand ride ordering: quote a fare, book it, poll status, and cancel.',
     category: 'ride',
@@ -69,7 +77,9 @@ export const SERVICE_REGISTRY: ServiceCapability[] = [
     },
     workflow: ['quote', 'book', 'get (poll for status)', 'cancel (optional)'],
     since: '2026-06-01',
-    discovery: { help_command: 'agenzo-merchant-cli ride-elife --help' },
+    discovery: {
+      help_command: 'agenzo-merchant-cli ride-elife --help',
+    },
   },
   {
     service_id: 'svc_01J0HT5REDAUG0001',
@@ -122,7 +132,9 @@ export const SERVICE_REGISTRY: ServiceCapability[] = [
       'cancel / checkout (optional)',
     ],
     since: '2026-06-25',
-    discovery: { help_command: 'agenzo-merchant-cli hotel-redaug --help' },
+    discovery: {
+      help_command: 'agenzo-merchant-cli hotel-redaug --help',
+    },
   },
 ];
 
