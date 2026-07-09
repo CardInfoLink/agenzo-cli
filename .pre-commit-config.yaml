@@ -1,0 +1,13 @@
+# Pre-commit — vitest（commit 前跑单测）
+#
+# 一次性：npm ci && npx pre-commit install（或 pip install pre-commit && pre-commit install）
+repos:
+  - repo: local
+    hooks:
+      - id: vitest
+        name: vitest
+        entry: npm run test
+        language: system
+        files: \.(ts|tsx|js|jsx|mjs|cjs)$
+        pass_filenames: false
+        require_serial: true

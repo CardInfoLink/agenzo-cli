@@ -57,10 +57,10 @@ export interface ServiceCapability {
 /** Static registry. This iteration ships ride-elife and hotel-redaug capabilities. */
 export const SERVICE_REGISTRY: ServiceCapability[] = [
   {
-    // service_id 是平台级不透明内部引用（svc_ 前缀 + ULID），不进 Agent 日常拼的命令
-    // ——Agent 拼命令用的是 cli_noun="ride-elife"。与后端
-    // services/merchant_service/discovery/catalog.py 的 RIDE_ELIFE_SERVICE_ID 保持一致。
-    service_id: 'svc_01KWTPBWDH5YZ52H717BFVWZA8',
+    // Agent-facing service_id = cli_noun（Agent 拼命令用这个标识）。
+    // 平台级不透明内部 ULID: svc_01KWTPBWDH5YZ52H717BFVWZA8（与后端
+    // services/merchant_service/discovery/catalog.py 的 RIDE_ELIFE_SERVICE_ID 对应）。
+    service_id: 'ride-elife',
     name: 'Ride hailing (eLife)',
     description: 'On-demand ride ordering: quote a fare, book it, poll status, and cancel.',
     category: 'ride',
@@ -82,7 +82,7 @@ export const SERVICE_REGISTRY: ServiceCapability[] = [
     },
   },
   {
-    service_id: 'svc_01J0HT5REDAUG0001',
+    service_id: 'hotel-redaug',
     name: 'Hotel booking (Redaug)',
     description:
       'International hotel booking via Redaug: search by location, real-time room/rate availability, two-step create-then-pay flow supporting monthly_settlement and pay_per_call (EVO) billing modes, cancel and partial check-out.',
@@ -138,7 +138,7 @@ export const SERVICE_REGISTRY: ServiceCapability[] = [
   },
 ];
 
-/** Look up a capability by its service_id. Returns undefined when not found. */
+/** Look up a capability by its service_id or cli_noun. Returns undefined when not found. */
 export function findService(serviceId: string): ServiceCapability | undefined {
-  return SERVICE_REGISTRY.find((s) => s.service_id === serviceId);
+  return SERVICE_REGISTRY.find((s) => s.service_id === serviceId || s.cli_noun === serviceId);
 }
