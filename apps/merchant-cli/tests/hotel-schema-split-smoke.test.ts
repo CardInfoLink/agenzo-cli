@@ -77,28 +77,32 @@ describe('hotel-redaug schema: pay-order verb (Req 7.7)', () => {
   });
 
   it('pay-order has response', () => {
+    // Funds are already settled inside create-order (PaymentGate.authorize+capture
+    // runs synchronously there); pay-order only triggers supplier confirmation, so
+    // its response carries settlement_path/status/amount/currency but no pay_status
+    // (that field belonged to the old design where pay-order itself queried EVO).
     const verb = verbs['pay-order'] as Record<string, unknown>;
     expect(verb).toHaveProperty('response');
     const response = verb.response as Record<string, unknown>;
-    expect(response).toHaveProperty('pay_status');
     expect(response).toHaveProperty('settlement_path');
+    expect(response).toHaveProperty('status');
   });
 
-  it('pay-order has examples', () => {
+  it('pay-order has an example', () => {
     const verb = verbs['pay-order'] as Record<string, unknown>;
-    expect(verb).toHaveProperty('examples');
-    const examples = verb.examples as unknown[];
-    expect(examples.length).toBeGreaterThanOrEqual(1);
+    expect(verb).toHaveProperty('example');
   });
 
-  it('pay-order has error_recovery with PAYMENT_NOT_COMPLETED polling guidance', () => {
+  it('pay-order has error_recovery covering invalid state and not-found', () => {
+    // pay-order no longer queries EVO itself (funds were captured synchronously
+    // in create-order via PaymentGate), so PAYMENT_NOT_COMPLETED / BILLING_MODE_MISMATCH
+    // / PAYORDER_FAILED_AFTER_PAYMENT no longer apply here — those belonged to the
+    // retired design where pay-order itself verified an out-of-band EVO payment.
     const verb = verbs['pay-order'] as Record<string, unknown>;
     expect(verb).toHaveProperty('error_recovery');
     const recovery = verb.error_recovery as Record<string, unknown>;
-    expect(recovery).toHaveProperty('PAYMENT_NOT_COMPLETED');
-    expect(recovery).toHaveProperty('BILLING_MODE_MISMATCH');
     expect(recovery).toHaveProperty('INVALID_ORDER_STATE');
-    expect(recovery).toHaveProperty('PAYORDER_FAILED_AFTER_PAYMENT');
+    expect(recovery).toHaveProperty('ORDER_NOT_FOUND');
   });
 });
 
@@ -173,8 +177,10 @@ describe('hotel-redaug schema: workflow describes create-then-pay (Req 7.7, 10.1
     const activePrereq = prereqs.find((p) => p.when.includes('pay_per_call'));
     expect(monthlyPrereq).toBeDefined();
     expect(activePrereq).toBeDefined();
-    expect(monthlyPrereq!.before_verb).toBe('pay-order');
-    expect(activePrereq!.before_verb).toBe('pay-order');
+    // Funds settle synchronously inside create-order (PaymentGate.authorize+capture),
+    // not pay-order — so the account/card prerequisite gates create-order, not pay-order.
+    expect(monthlyPrereq!.before_verb).toBe('create-order');
+    expect(activePrereq!.before_verb).toBe('create-order');
   });
 });
 
