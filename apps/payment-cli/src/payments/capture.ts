@@ -38,12 +38,16 @@ function formatCents(cents: number | undefined): string {
 }
 
 /**
- * `charge pay` — charge a previously created payment token.
+ * `payments capture` — charge a previously created payment token.
  *
  * Amount / currency / fee are taken from the token (set when it was created),
  * so this verb does NOT accept --amount / --currency. Branch is chosen by
  * `--payment-brand` (evo default | unionpay). Requires `--idempotency-key`
  * (never auto-generated). API key and Idempotency-Key are sent as headers.
+ *
+ * Registered under the `payments` command group (see index.ts) so the full
+ * invocation is `agenzo-payment-cli payments capture` — matching the
+ * orchestrator's three-segment tool name `payment__payments__capture`.
  */
 export function registerPayCommand(parent: Command, deps: PayDeps): void {
   const cmd = parent
@@ -95,7 +99,7 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
       if (isYes) {
-        throw new IdempotencyKeyRequiredError('charge pay');
+        throw new IdempotencyKeyRequiredError('payments capture');
       }
       idempotencyKey = await PromptEngine.resolveInput(undefined, {
         message: 'Idempotency key (unique per charge, for safe retry):',

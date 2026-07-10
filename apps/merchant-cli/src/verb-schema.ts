@@ -567,6 +567,11 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
+    'payment-token-id': {
+      type: 'string',
+      required: false,
+      description: 'UPI Agent Pay only: payment token id from an already-completed UnionPay network-token capture (funds already charged). When set, the platform skips EVO preauth/capture and only locks the order.',
+    },
     'idempotency-key': {
       type: 'string',
       required: true,

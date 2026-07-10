@@ -19,12 +19,15 @@ import { registerGetCommand as registerPmGetCommand } from './payment-methods/ge
 import { registerDisableCommand as registerPmDisableCommand } from './payment-methods/disable.js';
 import { registerDropinCreateCommand } from './payment-methods/dropin-create.js';
 import { registerDropinStatusCommand } from './payment-methods/dropin-status.js';
+import { registerUnionpayEnrollCommand } from './payment-methods/unionpay-enroll.js';
+import { registerUnionpayStatusCommand } from './payment-methods/unionpay-status.js';
 
 // payment-tokens commands
 import { registerCreateCommand } from './payment-tokens/create.js';
 import { registerListCommand as registerPtListCommand } from './payment-tokens/list.js';
 import { registerGetCommand as registerPtGetCommand } from './payment-tokens/get.js';
 import { registerRevokeCommand } from './payment-tokens/revoke.js';
+import { registerUnionpayCreateCommand } from './payment-tokens/unionpay-create.js';
 
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
@@ -77,6 +80,9 @@ async function main() {
   // Drop-in non-blocking commands (programmatic callers; not in SKILL/README).
   registerDropinCreateCommand(pmCmd, deps);
   registerDropinStatusCommand(pmCmd, deps);
+  // UnionPay non-blocking commands (programmatic callers; not in SKILL/README).
+  registerUnionpayEnrollCommand(pmCmd, deps);
+  registerUnionpayStatusCommand(pmCmd, deps);
 
   // payment-tokens command group
   const ptCmd = program.command('payment-tokens').description('Payment token management');
@@ -84,6 +90,8 @@ async function main() {
   registerPtListCommand(ptCmd, deps);
   registerPtGetCommand(ptCmd, deps);
   registerRevokeCommand(ptCmd, deps);
+  // UnionPay non-blocking command (programmatic callers; not in SKILL/README).
+  registerUnionpayCreateCommand(ptCmd, deps);
 
   // Parse and execute
   await program.parseAsync(process.argv);

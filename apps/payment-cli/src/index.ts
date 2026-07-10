@@ -12,7 +12,7 @@ import {
   getCurrentVersion,
 } from '@agenzo/cli-core';
 
-import { registerPayCommand } from './charge/pay.js';
+import { registerPayCommand } from './payments/capture.js';
 
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag.
@@ -50,8 +50,11 @@ async function main() {
     process.env.AGENZO_FORMAT = resolveFormat(flag);
   });
 
-  // capture command (top-level verb, no subcommand)
-  registerPayCommand(program, deps);
+  // payments command group (noun) — capture verb lives under it, so the
+  // orchestrator's `payment__payments__capture` tool name resolves to:
+  // `agenzo-payment-cli payments capture`.
+  const paymentsCmd = program.command('payments').description('Payment token capture');
+  registerPayCommand(paymentsCmd, deps);
 
   await program.parseAsync(process.argv);
 }

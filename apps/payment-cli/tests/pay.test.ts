@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { registerPayCommand } from '../src/charge/pay.js';
+import { registerPayCommand } from '../src/payments/capture.js';
 import { buildProgram, captureStdout, captureStderr, mockApiClient } from '../../token-cli/tests/helpers.js';
 
 afterEach(() => {

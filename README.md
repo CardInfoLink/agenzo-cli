@@ -15,10 +15,12 @@
 | `admin-cli` | `@agenzo/admin-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/admin-cli.svg)](https://www.npmjs.com/package/@agenzo/admin-cli) | `agenzo-admin-cli` | Bearer token | Implemented |
 | `token-cli` | `@agenzo/token-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/token-cli.svg)](https://www.npmjs.com/package/@agenzo/token-cli) | `agenzo-token-cli` | API key | Implemented |
 | `merchant-cli` | `@agenzo/merchant-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/merchant-cli.svg)](https://www.npmjs.com/package/@agenzo/merchant-cli) | `agenzo-merchant-cli` | API key | Implemented |
+| `payment-cli` | `@agenzo/payment-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/payment-cli.svg)](https://www.npmjs.com/package/@agenzo/payment-cli) | `agenzo-payment-cli` | API key | Implemented |
 
 - **admin-cli** — control plane: `auth` / `config` / `orgs` / `developers` / `keys` / `accounts`.
 - **token-cli** — `payment-methods` (add payment method: Evo 3DS or UnionPay enrollment) and `payment-tokens` (VCN / Network Token / X402).
 - **merchant-cli** — merchant fulfillment: `services` (discover capabilities), `ride-elife` (ride-hailing), and `hotel-redaug` (international hotel booking via Redaug).
+- **payment-cli** — `payments` (capture a previously created payment token via Evo or UnionPay).
 
 ## Conventions
 
@@ -70,12 +72,20 @@
 
 `hotel-redaug` typical workflow: `find-destination` → `search` → `hotel-detail` (optional) → `quote` → `create-order` → `pay-order` → `get` (poll until CONFIRMED) → `cancel` / `checkout` (optional).
 
+### payment-cli (runtime plane / API key)
+
+| Noun | Verbs |
+|---|---|
+| `payments` | `capture` |
+
+`payments capture` charges a previously created payment token (from `agenzo-token-cli payment-tokens create`). Amount / currency / fee are fixed at token creation time — this verb only submits the charge. Supports `--payment-brand evo` (default) and `--payment-brand unionpay`.
+
 ## Authentication
 
 | Plane | CLI | Auth |
 |---|---|---|
 | Control plane | `agenzo-admin-cli` | Bearer token (via `auth login`) |
-| Runtime plane | `agenzo-token-cli`, `agenzo-merchant-cli` | API key (`--api-key`) |
+| Runtime plane | `agenzo-token-cli`, `agenzo-merchant-cli`, `agenzo-payment-cli` | API key (`--api-key`) |
 
 The default API host is `https://agent.everonet.com` (production). To use the test environment, run `agenzo-admin-cli config set-host https://agent-dev.agenzo.com`.
 

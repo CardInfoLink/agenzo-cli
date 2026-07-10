@@ -1,7 +1,7 @@
 {
   "name": "@agenzo/payment-cli",
-  "version": "0.2.0",
-  "description": "Payment charge CLI for the Agenzo platform (pay a payment token)",
+  "version": "0.3.0",
+  "description": "Payment capture CLI for the Agenzo platform (capture a payment token)",
   "type": "module",
   "engines": {
     "node": ">=22"

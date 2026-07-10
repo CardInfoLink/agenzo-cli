@@ -13,10 +13,12 @@ Agenzo provides three command-line tools, split by product area:
 | `admin-cli` | `@agenzo/admin-cli` | `agenzo-admin-cli` | Bearer Token | [doc/admin-cli.md](doc/admin-cli.md) |
 | `token-cli` | `@agenzo/token-cli` | `agenzo-token-cli` | API Key | [doc/token-cli.md](doc/token-cli.md) |
 | `merchant-cli` | `@agenzo/merchant-cli` | `agenzo-merchant-cli` | API Key | [doc/merchant-cli.md](doc/merchant-cli.md) |
+| `payment-cli` | `@agenzo/payment-cli` | `agenzo-payment-cli` | API Key | [doc/payment-cli.md](doc/payment-cli.md) |
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
 - **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …).
+- **payment-cli** — payments (capture a previously created payment token via Evo or UnionPay).
 
 ### hotel-redaug: create-order → pay-order flow
 
@@ -56,6 +58,7 @@ For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` return
 | Control Plane | `agenzo-admin-cli` | `auth`, `orgs`, `developers`, `keys`, `accounts`, `config` | Bearer Token (via `auth login`) |
 | Runtime Plane | `agenzo-token-cli` | `payment-methods`, `payment-tokens` | API Key (`--api-key` flag) |
 | Runtime Plane | `agenzo-merchant-cli` | `ride-elife`, `hotel-redaug` | API Key (`--api-key` flag) |
+| Runtime Plane | `agenzo-payment-cli` | `payments` | API Key (`--api-key` flag) |
 
 ## End-to-end Onboarding Flow
 

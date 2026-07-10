@@ -155,23 +155,37 @@ function formatCentsPlain(cents: number | undefined | null): string {
 // ============================================================
 
 /**
- * `payment-tokens get <payment_token_id>` — show a payment token (§3.4.3).
+ * `payment-tokens get [payment_token_id]` — show a payment token (§3.4.3).
  *
  * Reads: GET /payment-tokens/<id> (X-Api-Key).
  * Output: keyValue with formatting that DIFFERS from create output (Property 7).
+ *
+ * The token id may be supplied either as the positional `<payment_token_id>`
+ * (CLI operators) or via `--id <id>` (programmatic callers like the agent
+ * orchestrator, whose CLI gateway only passes `--flag value` pairs and
+ * cannot send positional arguments — mirrors unionpay-status / dropin-status).
  */
 export function registerGetCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
-    .command('get <payment_token_id>')
+    .command('get [payment_token_id]')
     .description('Get a payment token by ID')
     .option('--api-key <key>', 'API key for authentication')
+    .option(
+      '--id <id>',
+      'Payment token id to query (alternative to the positional <payment_token_id>, for programmatic callers that pass flags only)',
+    )
     .option('--reveal', 'Reveal full VCN card number and CVC in the output');
 
   attachSchemaHelp(cmd, ptGetSchema);
 
-  cmd.action(async (paymentTokenId: string) => {
+  cmd.action(async (paymentTokenIdArg: string | undefined) => {
     const opts = cmd.optsWithGlobals();
     const format = resolveFormat(opts.format as string | undefined);
+
+    const paymentTokenId = await PromptEngine.resolveInput(
+      paymentTokenIdArg ?? (opts.id as string | undefined),
+      { message: 'Payment token id:' },
+    );
 
     // Resolve API key — prompt interactively if not provided via flag
     const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {

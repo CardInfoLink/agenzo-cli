@@ -8,26 +8,24 @@ API key format, idempotency).
 
 ## Command matrix
 
-1 command (top-level).
-
-| Command | Type | Description |
-|---|---|---|
-| `capture` | Write | Capture (charge) a previously created payment token |
+| Noun | Verb | Type | Description |
+|---|---|---|---|
+| `payments` | `capture` | Write | Capture (charge) a previously created payment token |
 
 ## Prerequisite: create a payment token first
 
-`capture` does **not** accept an amount or currency — the amount, currency, and any fee
+`payments capture` does **not** accept an amount or currency — the amount, currency, and any fee
 are fixed when the payment token was created (`agenzo-token-cli payment-tokens create`).
-`capture` only submits the charge for that exact token:
+`payments capture` only submits the charge for that exact token:
 
 ```
-[token-cli] payment-methods add → payment-tokens create → [payment-cli] capture
+[token-cli] payment-methods add → payment-tokens create → [payment-cli] payments capture
 ```
 
-## `capture`
+## `payments capture`
 
 ```bash
-agenzo-payment-cli capture \
+agenzo-payment-cli payments capture \
   --api-key sk_test_... \
   --payment-token-id ptk_abc123 \
   --idempotency-key <unique-per-charge> \
@@ -52,7 +50,7 @@ On success, prints the charge identifier, final status, and the amount breakdown
 (principal / fee / total — all taken from the token, not recomputed at pay time):
 
 ```bash
-agenzo-payment-cli capture --api-key sk_test_... --payment-token-id ptk_abc123 \
+agenzo-payment-cli payments capture --api-key sk_test_... --payment-token-id ptk_abc123 \
   --idempotency-key charge-2026-07-03-001 --yes --format json
 ```
 

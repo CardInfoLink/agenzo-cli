@@ -184,6 +184,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--special-requests <text>', 'Free-text special requests (non-binding)')
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
+      '--payment-token-id <id>',
+      'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips EVO preauth/capture and only locks the order + records this credential (funds already charged).',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
@@ -238,6 +242,7 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
+    if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
 
     // Confirm before the write unless --yes. This locks inventory at the quoted
     // rate — the user must have already picked this hotel/rate (from search +
@@ -245,8 +250,11 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     // made. The prompt goes to stderr; declining maps to CLIENT_ABORTED (exit 5)
     // via the top-level envelope.
     if (!isYes) {
+      const chargeNote = opts.paymentTokenId !== undefined
+        ? 'Payment has already been captured via UPI Agent Pay; this only locks the room.'
+        : 'This locks the rate but does NOT charge anything yet.';
       const confirmed = await confirm({
-        message: `Create this hotel order for ${totalAmount} ${currency} (check-in ${checkIn}, check-out ${checkOut})? This locks the rate but does NOT charge anything yet.`,
+        message: `Create this hotel order for ${totalAmount} ${currency} (check-in ${checkIn}, check-out ${checkOut})? ${chargeNote}`,
         default: false,
       });
       if (!confirmed) {
