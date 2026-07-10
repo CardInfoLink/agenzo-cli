@@ -437,7 +437,9 @@ function collectSourceFiles(dir: string): string[] {
 
 describe('§6.4 cli-core reuse (structural)', () => {
   const sourceFiles = collectSourceFiles(SRC_DIR);
-  const sources = sourceFiles.map((f) => ({ path: f, text: readFileSync(f, 'utf8') }));
+  // Normalize path separators to '/' so cross-platform (Windows) `endsWith('/index.ts')`
+  // and similar suffix checks behave identically to POSIX.
+  const sources = sourceFiles.map((f) => ({ path: f.replace(/\\/g, '/'), text: readFileSync(f, 'utf8') }));
 
   it('TC-CORE-01: no local core/ copy exists; shared infra symbols are imported from @agenzo/cli-core', () => {
     // No app-local re-implementation of cli-core infrastructure.
