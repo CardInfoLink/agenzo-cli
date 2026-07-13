@@ -35,13 +35,6 @@ coverage/
 scripts/test-commands.sh
 
 
-# CodeGraph
-.codegraph/
-
-# GitNexus (code intelligence index)
+# GitNexus 本地索引缓存（可由 gitnexus analyze 再生，不入库）
 .gitnexus/
-
-# Claude/Cursor AI config (not Kiro)
-.claude/
-CLAUDE.md
-AGENTS.md
+.codegraph/
