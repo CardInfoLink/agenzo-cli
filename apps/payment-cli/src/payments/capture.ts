@@ -86,14 +86,20 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
       type: 'password',
     });
 
-    // --- Resolve payment token id ---
-    const paymentTokenId = await PromptEngine.resolveInput(
-      opts.paymentTokenId as string | undefined,
-      {
+    // --- Resolve payment token id (required; --yes with no value is a hard error) ---
+    let paymentTokenId = opts.paymentTokenId as string | undefined;
+    if (!paymentTokenId) {
+      if (isYes) {
+        throw new CliError(
+          'PARAM_INVALID',
+          'Missing required --payment-token-id for payments capture (required in --yes mode).',
+        );
+      }
+      paymentTokenId = await PromptEngine.resolveInput(undefined, {
         message: 'Payment token ID (ptk_...):',
         validate: (v) => v.trim().length > 0 || 'Payment token ID is required',
-      },
-    );
+      });
+    }
 
     // --- Idempotency key (required for write; never auto-generated) ---
     let idempotencyKey = opts.idempotencyKey as string | undefined;
