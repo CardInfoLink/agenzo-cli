@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "total_members": 65,
-  "total_unique_codes": 65,
+  "total_members": 70,
+  "total_unique_codes": 70,
   "members": [
     {
       "name": "ACCESS_DENIED",
@@ -178,6 +178,12 @@
       "default_message": "An unexpected error occurred. Please try again later."
     },
     {
+      "name": "INVALID_ARGUMENT",
+      "code": "1950",
+      "http_status": 400,
+      "default_message": "The request arguments are invalid."
+    },
+    {
       "name": "INVALID_OPERATION_PAYLOAD",
       "code": "1855",
       "http_status": 400,
@@ -232,6 +238,12 @@
       "default_message": "No rooms are available for the selected hotel and dates."
     },
     {
+      "name": "NOT_FOUND",
+      "code": "1953",
+      "http_status": 404,
+      "default_message": "The requested resource was not found."
+    },
+    {
       "name": "OPERATION_NOT_FOUND",
       "code": "1851",
       "http_status": 404,
@@ -242,6 +254,18 @@
       "code": "1854",
       "http_status": 422,
       "default_message": "operator_id is required for this operation."
+    },
+    {
+      "name": "ORDER_CREATE_FAILED",
+      "code": "1951",
+      "http_status": 502,
+      "default_message": "Order creation failed. Please try again later."
+    },
+    {
+      "name": "PAYMENT_FAILED",
+      "code": "1952",
+      "http_status": 402,
+      "default_message": "Payment failed. Please check your balance or payment method and try again."
     },
     {
       "name": "PAYMENT_METHOD_DISABLED",
@@ -266,6 +290,12 @@
       "code": "1910",
       "http_status": 501,
       "default_message": "Pay-per-call billing is not available yet. Use a monthly_settlement developer."
+    },
+    {
+      "name": "PERMISSION_DENIED",
+      "code": "1954",
+      "http_status": 403,
+      "default_message": "You do not have permission to access this resource."
     },
     {
       "name": "PRICE_CHANGED",
@@ -459,6 +489,11 @@
     "1924",
     "1925",
     "1926",
+    "1950",
+    "1951",
+    "1952",
+    "1953",
+    "1954",
     "1999"
   ],
   "duplicate_codes": {}

@@ -104,10 +104,14 @@ agenzo-merchant-cli ride-elife cancel --api-key "$API_KEY" --yes \
 ### Hotel booking end-to-end example
 
 The core Agent loop is `search → quote → create-order → pay-order → get`. Amounts are decimal currency
-units (e.g. `320.00` = 320.00 yuan). `pay-order` takes only `--order-id`; the billing path is chosen
-server-side by the developer's `billing_mode`:
-- **monthly_settlement**: deducted from the monthly-settlement account.
-- **pay_per_call**: the user pays via shared EVO parameters using the `order_id` as the EVO merchantTransID; the platform verifies that payment for the same `order_id` before confirming.
+units (e.g. `320.00` = 320.00 yuan). **`create-order` settles payment AND locks the room** — the funds
+path is chosen server-side by the developer's `billing_mode`:
+
+- **monthly_settlement**: the total is deducted from the developer's monthly-settlement account balance.
+- **pay_per_call**: the total is authorized + captured on the developer's bound card via the platform's own EVO integration (server-side; no EVO parameters pass through this CLI).
+
+`pay-order` takes only `--order-id` and triggers supplier confirmation / ticket issuance — funds were
+already settled in `create-order`, so both billing modes use the same `pay-order` call.
 
 ```bash
 # 1. Search hotels by coordinates + stay dates (or use --destination-id from find-destination).
@@ -123,7 +127,7 @@ agenzo-merchant-cli hotel-redaug quote --api-key "$API_KEY" \
   --check-in 2026-02-10 --check-out 2026-02-12 \
   --adults 2 --room-num 1 --nationality CN
 
-# 3. Create Order (write op: locks rate, no charge; returns order_id + payable amount).
+# 3. Create Order (write op: settles payment + locks the room; returns order_id + fc_order_code).
 agenzo-merchant-cli hotel-redaug create-order --api-key "$API_KEY" --yes \
   --product-token "$PRODUCT_TOKEN" \
   --total-amount 640.00 --currency CNY \
@@ -138,8 +142,8 @@ agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" \
   --idempotency-key "hotel-pay-$(date +%s)"
 
-# 4b. Pay Order — pay_per_call path (user already paid via EVO using order_id
-#     as the EVO merchantTransID). Same command, no other flag.
+# 4b. Pay Order — pay_per_call path (funds already captured on the bound card in
+#     create-order; pay-order just triggers supplier confirmation). Same command.
 agenzo-merchant-cli hotel-redaug pay-order --api-key "$API_KEY" --yes \
   --order-id "$ORDER_ID" \
   --idempotency-key "hotel-pay-$(date +%s)"

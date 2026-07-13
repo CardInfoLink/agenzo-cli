@@ -37,11 +37,32 @@ const HOTEL_VERBS = [
   'get-checkout',
   'list-orders',
 ];
+const FLIGHT_VERBS = [
+  'find-airport',
+  'list-airports',
+  'list-airlines',
+  'list-nationalities',
+  'search',
+  'more-offers',
+  'verify',
+  'create-order',
+  'pay-order',
+  'get-order',
+  'cancel-order',
+  'list-orders',
+  'change-search',
+  'change-apply',
+  'change-detail',
+  'change-cancel',
+  'refund-apply',
+  'refund-detail',
+  'refund-confirm',
+];
 
 /** Register the service nouns/verbs on the program so the gate has a local map. */
 function registerNouns(
   program: Command,
-  opts: { ride?: string[] | null; hotel?: string[] | null } = {},
+  opts: { ride?: string[] | null; hotel?: string[] | null; flight?: string[] | null } = {},
 ): void {
   if (opts.ride !== null) {
     const ride = program.command('ride-elife');
@@ -50,6 +71,10 @@ function registerNouns(
   if (opts.hotel !== null) {
     const hotel = program.command('hotel-redaug');
     for (const v of opts.hotel ?? HOTEL_VERBS) hotel.command(v);
+  }
+  if (opts.flight !== null) {
+    const flight = program.command('flight-flink');
+    for (const v of opts.flight ?? FLIGHT_VERBS) flight.command(v);
   }
 }
 
@@ -68,7 +93,7 @@ function mockDiscovery(impl?: (path: string) => Promise<unknown>): ApiClient {
 function setupList(
   opts: {
     discovery?: ApiClient;
-    nouns?: { ride?: string[] | null; hotel?: string[] | null };
+    nouns?: { ride?: string[] | null; hotel?: string[] | null; flight?: string[] | null };
   } = {},
 ) {
   const program = buildProgram();
@@ -82,7 +107,7 @@ function setupList(
 function setupGet(
   opts: {
     discovery?: ApiClient;
-    nouns?: { ride?: string[] | null; hotel?: string[] | null };
+    nouns?: { ride?: string[] | null; hotel?: string[] | null; flight?: string[] | null };
   } = {},
 ) {
   const program = buildProgram();
@@ -196,7 +221,7 @@ describe('services list', () => {
   });
 
   it('TC-SVC-LST-GATE: a service whose noun is not registered locally is hidden (fallback)', async () => {
-    const { program } = setupList({ nouns: { hotel: null } }); // only ride-elife registered
+    const { program } = setupList({ nouns: { hotel: null, flight: null } }); // only ride-elife registered
 
     const out = captureStdout();
     captureStderr();

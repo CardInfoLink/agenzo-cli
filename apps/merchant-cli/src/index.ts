@@ -43,6 +43,28 @@ import { registerHotelListCitiesCommand } from './hotel-redaug/list-cities.js';
 import { registerHotelDetailCommand } from './hotel-redaug/hotel-detail.js';
 import { registerHotelSkillCommand } from './hotel-redaug/skill.js';
 
+// flight-flink commands (injection-style register, D6)
+import { registerFindAirportCommand } from './flight-flink/find-airport.js';
+import { registerListAirportsCommand } from './flight-flink/list-airports.js';
+import { registerListAirlinesCommand } from './flight-flink/list-airlines.js';
+import { registerListNationalitiesCommand } from './flight-flink/list-nationalities.js';
+import { registerSearchCommand as registerFlightSearchCommand } from './flight-flink/search.js';
+import { registerMoreOffersCommand } from './flight-flink/more-offers.js';
+import { registerVerifyCommand } from './flight-flink/verify.js';
+import { registerCreateOrderCommand as registerFlightCreateOrderCommand } from './flight-flink/create-order.js';
+import { registerPayOrderCommand as registerFlightPayOrderCommand } from './flight-flink/pay-order.js';
+import { registerGetOrderCommand as registerFlightGetOrderCommand } from './flight-flink/get-order.js';
+import { registerCancelOrderCommand as registerFlightCancelOrderCommand } from './flight-flink/cancel-order.js';
+import { registerListOrdersCommand as registerFlightListOrdersCommand } from './flight-flink/list-orders.js';
+import { registerChangeSearchCommand } from './flight-flink/change-search.js';
+import { registerChangeApplyCommand } from './flight-flink/change-apply.js';
+import { registerChangeDetailCommand } from './flight-flink/change-detail.js';
+import { registerChangeCancelCommand } from './flight-flink/change-cancel.js';
+import { registerRefundApplyCommand } from './flight-flink/refund-apply.js';
+import { registerRefundDetailCommand } from './flight-flink/refund-detail.js';
+import { registerRefundConfirmCommand } from './flight-flink/refund-confirm.js';
+import { registerFlightSkillCommand } from './flight-flink/skill.js';
+
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
 // is constructed; may be undefined if an error is thrown before then.
@@ -78,7 +100,7 @@ async function main() {
     .name('agenzo-merchant-cli')
     .version(getCurrentVersion())
     .description(
-      'Agenzo merchant fulfillment plane: service discovery (services), ride ordering (ride-elife), and hotel booking (hotel-redaug)',
+      'Agenzo merchant fulfillment plane: service discovery (services), ride ordering (ride-elife), hotel booking (hotel-redaug), and flight booking (flight-flink)',
     )
     .option('--verbose', 'Show verbose logs')
     .option('--yes', 'Skip confirmation prompts (for automation/AI Agents)')
@@ -198,6 +220,51 @@ Key notes:
   registerHotelListCitiesCommand(hotelCmd, deps);
   registerHotelDetailCommand(hotelCmd, deps);
   registerHotelSkillCommand(hotelCmd);
+
+  // flight-flink command group (Flink flight booking) — 18 verbs
+  const flightCmd = program.command('flight-flink').description(
+    `Flight booking (Flink) — international flight search, price verification, two-step create-then-pay ticketing, plus change (rebooking) and refund.
+
+Workflow (typical order):
+  1. find-airport      Resolve a place name → IATA city/airport codes
+  2. search            Search flights (one-way/round-trip/multi-city). journeys carries ALL legs;
+                       relay --journey-id for round-trip/multi-city until price_key_ready is true
+  3. verify            Verify the fare → authoritative product_token + price_changed flag
+  4. create-order      Create the order using verify's product_token (locks the fare, no charge)
+  5. pay-order         Settle by --order-no (triggers ticketing); order → PAID
+  6. get-order         Poll by --order-no until TICKETED (or use --watch for NDJSON)
+     cancel-order      (optional) Cancel an un-ticketed order (+ refund)
+     change-*          (optional) change-search → change-apply → change-detail; confirm via pay-order, cancel via change-cancel
+     refund-*          (optional) refund-apply → refund-detail → refund-confirm (1=confirm, 2=cancel)
+     list-orders       List the developer's flight orders
+
+Key notes:
+  • product_token from search/verify is opaque — pass it unchanged; verify's token supersedes search's
+  • passengers is a JSON array; gender/id_type are STRINGS ("1"/"2"); child/infant need adult_passenger_name
+  • Ticketing is asynchronous — never claim "booked" until get-order returns TICKETED
+  • create-order and pay-order are separate steps; create-order does NOT charge
+  • Write verbs require --idempotency-key; reuse the SAME key when retrying the same intent`,
+  );
+  registerFindAirportCommand(flightCmd, deps);
+  registerListAirportsCommand(flightCmd, deps);
+  registerListAirlinesCommand(flightCmd, deps);
+  registerListNationalitiesCommand(flightCmd, deps);
+  registerFlightSearchCommand(flightCmd, deps);
+  registerMoreOffersCommand(flightCmd, deps);
+  registerVerifyCommand(flightCmd, deps);
+  registerFlightCreateOrderCommand(flightCmd, deps);
+  registerFlightPayOrderCommand(flightCmd, deps);
+  registerFlightGetOrderCommand(flightCmd, deps);
+  registerFlightCancelOrderCommand(flightCmd, deps);
+  registerFlightListOrdersCommand(flightCmd, deps);
+  registerChangeSearchCommand(flightCmd, deps);
+  registerChangeApplyCommand(flightCmd, deps);
+  registerChangeDetailCommand(flightCmd, deps);
+  registerChangeCancelCommand(flightCmd, deps);
+  registerRefundApplyCommand(flightCmd, deps);
+  registerRefundDetailCommand(flightCmd, deps);
+  registerRefundConfirmCommand(flightCmd, deps);
+  registerFlightSkillCommand(flightCmd);
 
   // Parse and execute
   await program.parseAsync(process.argv);
