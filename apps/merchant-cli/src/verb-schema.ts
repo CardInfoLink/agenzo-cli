@@ -998,10 +998,16 @@ export const hotelDetailSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'hotel-detail',
   description:
-    'Get detailed information about a specific hotel including facilities, images, location, check-in/check-out times. Use to show the user hotel details before quoting/booking',
+    "Get detailed information about a specific hotel including facilities, images, location, check-in/check-out times. Use to show the user hotel details before quoting/booking. hotel_id is stable but hotel_name/room_name may change upstream without notice. special_instructions (when requested via --settings hotelTextPolicies) MUST be shown to the user — the upstream data provider does not accept liability for booking issues caused by it not being displayed.",
   flags: {
     'hotel-id': { type: 'string', required: true, description: 'Hotel ID from search results (search.response.hotels[].hotel_id)' },
     'with-images': { type: 'bool', required: false, default: true, description: 'Include hotel images in the response (set false to reduce payload)' },
+    settings: {
+      type: 'string',
+      required: false,
+      description:
+        'Optional on-demand upstream fields, comma-separated or JSON array — request only what you need: hotelFacilityNew, breakfast, importantNotices, parking, chargingParking, hotelCertificates, comment, hotelMeetingInfos, hotelVideoInfos, hotelTextPolicies (includes special_instructions), hotelStructuredPolicies.childPolicy, hotelStructuredPolicies.extraBedPolicy, hotelStructuredPolicies.petPolicy. Omitted codes are NOT returned by upstream (an upstream requirement, not a display choice). Pass hotelTextPolicies to get special_instructions.',
+    },
   },
   response: {
     hotel_id: { type: 'string|int', description: 'Hotel identifier.' },
@@ -1080,6 +1086,45 @@ export const hotelDetailSchema: VerbSchema = {
         },
       },
     },
+    comment: {
+      type: 'array',
+      description: "Guest review scores per channel. Empty unless --settings included 'comment'.",
+      items: {
+        channel: { type: 'string|null', description: 'Review source channel (e.g. EPS).' },
+        average_score: { type: 'float|null', description: 'Average review score for that channel.' },
+      },
+    },
+    hotel_certificates: {
+      type: 'array',
+      description: "Hotel business certificates/qualifications, when the property has any. Empty unless --settings included 'hotelCertificates' (and the property may simply have none).",
+      items: {
+        unify_code: { type: 'string|null', description: 'Unified business registration code.' },
+        certification_name: { type: 'string|null', description: 'Certificate name.' },
+        file_url: { type: 'string|null', description: 'Certificate image URL.' },
+      },
+    },
+    hotel_text_policies: {
+      type: 'array',
+      description: "Free-text hotel policies keyed by code (hotelPolicy/instructions/specialInstructions/mandatoryFees/optionalFees/cleanAndSafety/importantNotices/ageLimit/checkInCheckOut). Empty unless --settings included 'hotelTextPolicies'. special_instructions below is also pulled from this same data, surfaced separately because it MUST be shown to the user.",
+      items: {
+        code: { type: 'string|null', description: 'Policy code, e.g. "specialInstructions".' },
+        code_name: { type: 'string|null', description: 'Display name of the policy code (e.g. "特别入住说明").' },
+        text: { type: 'string|null', description: 'Policy text (may contain HTML list markup from upstream).' },
+      },
+    },
+    hotel_structured_policies: {
+      type: 'object|null',
+      description: "Structured child/extra-bed/pet policies (raw upstream shape, snake_cased). null unless --settings included the relevant hotelStructuredPolicies.* code(s).",
+      properties: {
+        child_policy: { type: 'object|null', description: 'Child stay/breakfast policy.' },
+        extra_bed_policy: { type: 'object|null', description: 'Extra-bed charge policy by age range.' },
+        pet_policy: { type: 'object|null', description: 'Pet/service-animal policy.' },
+      },
+    },
+    special_instructions: {
+      type: 'string|null',
+      description: "IMPORTANT: the property's 'special check-in instructions' (upstream code specialInstructions, distinct from the general 'instructions' code). The Agent/caller MUST surface this to the user in the booking UI when present — the upstream data provider does not accept liability for booking problems caused by this not being displayed. Only populated when --settings included 'hotelTextPolicies'; null otherwise (does not mean the hotel has none — it means it wasn't requested).",
+    },
   },
   example: {
     command: 'agenzo-merchant-cli hotel-redaug hotel-detail --hotel-id 10583772',
@@ -1088,6 +1133,7 @@ export const hotelDetailSchema: VerbSchema = {
   error_recovery: {
     UPSTREAM_ERROR: 'Transient upstream error. Retry once after ~2s backoff.',
     PARAM_INVALID: 'Ensure --hotel-id is a non-empty string, then retry.',
+    HOTEL_NOT_FOUND: 'The hotel is no longer available from the supplier (no matching hotel node in the upstream response). Do not retry with the same hotel_id — drop it from any local cache/mapping and re-search.',
   },
 };
 
