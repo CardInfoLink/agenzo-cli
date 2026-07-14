@@ -25,6 +25,12 @@ export interface BankAccountInfo {
 const SWIFT_PATTERN = /^[A-Za-z0-9]{8}([A-Za-z0-9]{3})?$/;
 // ISO 3166-1 alpha-2 country code.
 const COUNTRY_PATTERN = /^[A-Za-z]{2}$/;
+// Bank account number / IBAN: alphanumeric only, 4-34 chars (IBAN max per
+// ISO 13616; 4 chars as a practical floor for real-world account numbers).
+// No spaces/hyphens/punctuation — mirrors the backend BankAccountInfo schema.
+const ACCOUNT_NUMBER_PATTERN = /^[A-Za-z0-9]{4,34}$/;
+// Routing number (e.g. US ABA): digits only.
+const ROUTING_NUMBER_PATTERN = /^[0-9]{1,34}$/;
 
 /** CLI flags accepted by `developers create` / `developers update` for the bank account. */
 export interface BankAccountFlags {
@@ -43,6 +49,17 @@ function validateSwiftCode(value: string): boolean | string {
 
 function validateCountry(value: string): boolean | string {
   return COUNTRY_PATTERN.test(value.trim()) || 'Country must be an ISO 3166-1 alpha-2 code (e.g. US, CN)';
+}
+
+function validateAccountNumber(value: string): boolean | string {
+  return (
+    ACCOUNT_NUMBER_PATTERN.test(value.trim()) ||
+    'Account number must be 4-34 alphanumeric characters, no spaces or punctuation'
+  );
+}
+
+function validateRoutingNumber(value: string): boolean | string {
+  return ROUTING_NUMBER_PATTERN.test(value.trim()) || 'Routing number must be digits only';
 }
 
 function nonBlank(fieldLabel: string) {
@@ -83,7 +100,7 @@ export async function resolveBankAccount(
     ? requireFlag(flags.bankAccountNumber, '--bank-account-number')
     : await PromptEngine.resolveInput(flags.bankAccountNumber, {
         message: 'Bank account — account number / IBAN:',
-        validate: nonBlank('Account number'),
+        validate: validateAccountNumber,
       });
 
   const bankName = nonInteractive
@@ -118,11 +135,25 @@ export async function resolveBankAccount(
     if (countryCheck !== true) {
       throw new ValidationError(String(countryCheck));
     }
+    const accountNumberCheck = validateAccountNumber(accountNumber);
+    if (accountNumberCheck !== true) {
+      throw new ValidationError(String(accountNumberCheck));
+    }
+  }
+
+  // Optional fields (bank_address / routing_number) are collected via flags
+  // only, never prompted — but routing_number's format is still checked
+  // whenever it's supplied, interactive or not.
+  if (flags.bankRoutingNumber) {
+    const routingCheck = validateRoutingNumber(flags.bankRoutingNumber);
+    if (routingCheck !== true) {
+      throw new ValidationError(String(routingCheck));
+    }
   }
 
   const bankAccount: BankAccountInfo = {
     beneficiary_name: beneficiaryName.trim(),
-    account_number: accountNumber.trim(),
+    account_number: accountNumber.trim().toUpperCase(),
     bank_name: bankName.trim(),
     bank_country: bankCountry.trim().toUpperCase(),
     swift_code: swiftCode.trim().toUpperCase(),

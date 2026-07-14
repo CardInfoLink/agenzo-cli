@@ -84,6 +84,48 @@ describe('resolveBankAccount', () => {
     );
     expect(result.swift_code).toBe('TESTUS33XXX');
   });
+
+  it.each(['1234-5678', '1234 5678', '1234$5678', '12'])(
+    'rejects malformed account number %s under --yes',
+    async (badAccountNumber) => {
+      await expect(
+        resolveBankAccount({ ...VALID_FLAGS, bankAccountNumber: badAccountNumber }, commandWithYes(true)),
+      ).rejects.toThrow(/Account number/);
+    },
+  );
+
+  it('normalizes account_number to uppercase', async () => {
+    const result = await resolveBankAccount(
+      { ...VALID_FLAGS, bankAccountNumber: 'abc123def456' },
+      commandWithYes(true),
+    );
+    expect(result.account_number).toBe('ABC123DEF456');
+  });
+
+  it('accepts an IBAN-shaped account number', async () => {
+    const result = await resolveBankAccount(
+      { ...VALID_FLAGS, bankAccountNumber: 'DE89370400440532013000' },
+      commandWithYes(true),
+    );
+    expect(result.account_number).toBe('DE89370400440532013000');
+  });
+
+  it.each(['ABC12345', '021-000-021', '021 000 021'])(
+    'rejects malformed routing number %s when supplied',
+    async (badRoutingNumber) => {
+      await expect(
+        resolveBankAccount({ ...VALID_FLAGS, bankRoutingNumber: badRoutingNumber }, commandWithYes(true)),
+      ).rejects.toThrow(/Routing number/);
+    },
+  );
+
+  it('accepts a numeric routing number', async () => {
+    const result = await resolveBankAccount(
+      { ...VALID_FLAGS, bankRoutingNumber: '021000021' },
+      commandWithYes(true),
+    );
+    expect(result.routing_number).toBe('021000021');
+  });
 });
 
 describe('resolveOptionalBankAccount', () => {
