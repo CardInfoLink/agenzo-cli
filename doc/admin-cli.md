@@ -43,12 +43,16 @@ agenzo-admin-cli auth login --email user@example.com
 ### Step 2: Create Developer
 
 ```bash
-agenzo-admin-cli developers create --developer-name "My Agent" --developer-email agent@example.com
+agenzo-admin-cli developers create --developer-name "My Agent" --developer-email agent@example.com \
+  --bank-beneficiary-name "My Agent LLC" --bank-account-number 1234567890123456 \
+  --bank-name "Test Bank" --bank-country US --bank-swift-code TESTUS33
 ```
 
 - **Ask: `--developer-email`** — MUST ask the user which email to use. If the user declines, fall back to the login email from Step 1.
 - Returns `developer_id` — save it for Step 3.
 - `--billing-mode` (optional): `pay_per_call` (default) or `monthly_settlement`. A `monthly_settlement` developer is auto-provisioned a settlement account (see Settlement Accounts).
+- **Bank account is mandatory for every developer, regardless of `--billing-mode`** — it's the payout target for transfers to this developer. Required flags: `--bank-beneficiary-name`, `--bank-account-number` (or IBAN), `--bank-name`, `--bank-country` (ISO alpha-2, e.g. `US`), `--bank-swift-code` (8 or 11 alphanumeric characters). Optional: `--bank-address`, `--bank-routing-number` (e.g. US ABA). If any flag is missing, the CLI prompts interactively; in `--yes` mode a missing required flag fails with `PARAM_INVALID` (exit 1).
+- One developer has exactly one bank account. The full account number is never returned by any command — responses always mask it to the last 4 characters (e.g. `************3456`).
 - One org can have multiple developers
 - Same email can only create one developer per org
 
@@ -78,12 +82,20 @@ agenzo-admin-cli orgs update --email new@example.com   # Update org email (requi
 ## Developers
 
 ```bash
-agenzo-admin-cli developers create --developer-name "My Agent" --developer-email agent@example.com --billing-mode monthly_settlement
+agenzo-admin-cli developers create --developer-name "My Agent" --developer-email agent@example.com --billing-mode monthly_settlement \
+  --bank-beneficiary-name "My Agent LLC" --bank-account-number 1234567890123456 \
+  --bank-name "Test Bank" --bank-country US --bank-swift-code TESTUS33
 agenzo-admin-cli developers list
 agenzo-admin-cli developers get <developer_id>
 agenzo-admin-cli developers update <developer_id> --name "New Name"
 agenzo-admin-cli developers update <developer_id> --email new@example.com
+# Replace the bank account wholesale (all --bank-* flags required together; one account per developer):
+agenzo-admin-cli developers update <developer_id> \
+  --bank-beneficiary-name "My Agent LLC" --bank-account-number 9999888877776666 \
+  --bank-name "New Bank" --bank-country US --bank-swift-code NEWBUS33
 ```
+
+- `developers update` leaves the stored bank account untouched unless at least one `--bank-*` flag is supplied — in that case all required bank fields must resolve (flag or interactive prompt) since the account is replaced wholesale, not patched field-by-field.
 
 ## API Keys
 

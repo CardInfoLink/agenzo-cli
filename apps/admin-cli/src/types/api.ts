@@ -38,6 +38,21 @@ export interface Organization {
 
 // ---- Developer ----
 
+/**
+ * Bank account as returned by the server (account_number is masked to its
+ * last 4 characters — never returned in full by any developer-facing
+ * endpoint).
+ */
+export interface BankAccountView {
+  beneficiary_name: string;
+  account_number: string; // masked, e.g. "************3456"
+  bank_name: string;
+  bank_country: string;
+  swift_code: string;
+  bank_address?: string | null;
+  routing_number?: string | null;
+}
+
 export interface Developer {
   id: string;
   organization_id?: string;
@@ -45,6 +60,7 @@ export interface Developer {
   email: string;
   status: string;
   billing_mode?: string; // pay_per_call | monthly_settlement
+  bank_account?: BankAccountView | null;
   created_at: string;
   updated_at: string;
 }
