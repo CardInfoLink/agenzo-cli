@@ -184,6 +184,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--special-requests <text>', 'Free-text special requests (non-binding)')
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
+      '--bed-type <code>',
+      "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen); forwarded verbatim to upstream createOrder bedType.",
+    )
+    .option(
       '--payment-token-id <id>',
       'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips EVO preauth/capture and only locks the order + records this credential (funds already charged).',
     )
@@ -242,6 +246,7 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
+    if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
 
     // Confirm before the write unless --yes. This locks inventory at the quoted

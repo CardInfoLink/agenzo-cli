@@ -569,6 +569,11 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
+    'bed-type': {
+      type: 'string',
+      required: false,
+      description: "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen). Forwarded verbatim to upstream createOrder bedType; upstream recommends passing the product-dimension bed type at booking.",
+    },
     'payment-token-id': {
       type: 'string',
       required: false,
