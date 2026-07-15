@@ -24,6 +24,8 @@ const CLI_NAME = 'agenzo-merchant-cli';
 const NOUN = 'ride-elife';
 /** Hotel noun (command group) — the `hotel-redaug/*` verbs share this. */
 export const HOTEL_NOUN = 'hotel-redaug';
+/** Flight noun (command group) — the `flight-flink/*` verbs share this. */
+export const FLIGHT_NOUN = 'flight-flink';
 
 // ============================================================
 // Schema shape (§4.4.1.3 verb-level schema)
@@ -1220,3 +1222,284 @@ export const unifiedOrdersGetSchema: VerbSchema = {
     INTERNAL_ERROR: "The order's provider detail lookup is temporarily unavailable. Retry once after a short delay.",
   },
 };
+
+// ============================================================
+// flight-flink verb schemas (§4.4.1.3) — one per verb.
+// Amounts are integers (upstream convention). gender/id_type are STRINGS.
+// ============================================================
+
+/** Build a compact flight VerbSchema (keeps the 18 entries readable). */
+function flightSchema(
+  verb: string,
+  description: string,
+  flags: Record<string, FlagSchema>,
+  response: Record<string, unknown>,
+  example: ExampleSchema,
+  extra: Partial<Pick<VerbSchema, 'error_recovery' | 'polling'>> = {},
+): VerbSchema {
+  return { cli: CLI_NAME, noun: FLIGHT_NOUN, verb, description, flags, response, example, ...extra };
+}
+
+export const flightFindAirportSchema = flightSchema(
+  'find-airport',
+  'Resolve free-text into city/airport candidates (city hits carry children airports).',
+  { keyword: { type: 'string', required: true, description: 'Free-text place/airport/city name.' } },
+  { airports: { type: 'array', description: 'City/airport candidates with IATA codes.' } },
+  { command: 'agenzo-merchant-cli flight-flink find-airport --keyword beijing', output_summary: 'Returns candidate city/airport IATA codes.' },
+);
+
+export const flightListAirportsSchema = flightSchema(
+  'list-airports',
+  'Paged airport dictionary (requires page + page-size).',
+  {
+    page: { type: 'int', required: false, default: 1, description: '1-based page.' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page (1-100).' },
+    keyword: { type: 'string', required: false, description: 'Optional name filter.' },
+  },
+  { airports: { type: 'array', description: 'Airport records.' } },
+  { command: 'agenzo-merchant-cli flight-flink list-airports --page 1 --page-size 20', output_summary: 'Paged airport dictionary.' },
+);
+
+export const flightListAirlinesSchema = flightSchema(
+  'list-airlines',
+  'Paged airline dictionary (requires page + page-size).',
+  {
+    page: { type: 'int', required: false, default: 1, description: '1-based page.' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page (1-100).' },
+    keyword: { type: 'string', required: false, description: 'Optional name filter.' },
+  },
+  { airlines: { type: 'array', description: 'Airline records.' } },
+  { command: 'agenzo-merchant-cli flight-flink list-airlines --page 1 --page-size 20', output_summary: 'Paged airline dictionary.' },
+);
+
+export const flightListNationalitiesSchema = flightSchema(
+  'list-nationalities',
+  'Nationality list (no params).',
+  {},
+  { nationalities: { type: 'array', description: 'Nationality codes/names.' } },
+  { command: 'agenzo-merchant-cli flight-flink list-nationalities', output_summary: 'Nationality list.' },
+);
+
+export const flightSearchSchema = flightSchema(
+  'search',
+  'Search flights (one-way/round-trip/multi-city). journeys always carries all legs; journey-id accumulates progress and only the final search returns a real priceKey (product_token).',
+  {
+    'trip-type': { type: 'int', required: true, description: '1=one-way, 2=round-trip, 3=multi-city.' },
+    journeys: { type: 'json', required: true, description: 'JSON array of {date, origin, destination, origin_type?, destination_type?}. origin/destination are IATA 3-letter codes; *_type 1=city, 2=airport.' },
+    'cabin-class': { type: 'string', required: false, default: 'economy', description: 'economy | premium_economy | business | first.' },
+    'adult-num': { type: 'int', required: false, default: 1, description: 'Adults (1-9).' },
+    'child-num': { type: 'int', required: false, default: 0, description: 'Children (0-9).' },
+    'infant-num': { type: 'int', required: false, default: 0, description: 'Infants (0-9).' },
+    airline: { type: 'string', required: false, description: 'Airline 2-letter code filter.' },
+    'transfer-number': { type: 'int', required: false, default: 0, description: '0=any,1=direct,2=1 stop,3=2 stops.' },
+    'journey-id': { type: 'json', required: false, description: 'JSON array of already-selected journey ids (relay for round-trip/multi-city).' },
+  },
+  {
+    offers: { type: 'array', description: 'Offers; each has product_token (when price_key_ready), total_sale_price, currency.' },
+    price_key_ready: { type: 'bool', description: 'True only when all legs are selected (final search).' },
+    journey_ids: { type: 'array', description: 'journeyId values to relay into the next search.' },
+  },
+  { command: "agenzo-merchant-cli flight-flink search --trip-type 1 --journeys '[{\"date\":\"2026-08-01\",\"origin\":\"PEK\",\"destination\":\"SHA\"}]'", output_summary: 'Returns offers[]; use a product_token where price_key_ready is true, then verify.' },
+);
+
+export const flightMoreOffersSchema = flightSchema(
+  'more-offers',
+  'More fare offers for a priceKey (carried by product_token).',
+  { 'product-token': { type: 'string', required: true, description: 'Opaque token from search.' } },
+  { offers: { type: 'array', description: 'Additional fare candidates.' } },
+  { command: 'agenzo-merchant-cli flight-flink more-offers --product-token pt_...', output_summary: 'Additional fare offers.' },
+);
+
+export const flightVerifySchema = flightSchema(
+  'verify',
+  'Pre-booking price verification. Returns the authoritative product_token and a price_changed flag; pass the returned token to create-order.',
+  { 'product-token': { type: 'string', required: true, description: 'Opaque token from search.' } },
+  {
+    product_token: { type: 'string', description: 'Authoritative token to pass to create-order.' },
+    total_price: { type: 'int', description: 'Verified total price (integer).' },
+    currency: { type: 'string', description: 'Currency code.' },
+    price_changed: { type: 'bool', description: 'True if the price changed since search; re-confirm with the user.' },
+  },
+  { command: 'agenzo-merchant-cli flight-flink verify --product-token pt_...', output_summary: 'Returns the authoritative product_token + price_changed.' },
+);
+
+export const flightCreateOrderSchema = flightSchema(
+  'create-order',
+  'Create a flight order without charging (locks the fare, status AWAITING_PAYMENT). Forward the verify product_token and its total/currency verbatim.',
+  {
+    'product-token': { type: 'string', required: true, description: 'Authoritative token from verify.' },
+    'total-amount': { type: 'string', required: true, description: 'Verified total price (decimal units).' },
+    currency: { type: 'string', required: true, description: 'ISO 4217 currency code.' },
+    'trip-type': { type: 'int', required: false, default: 1, description: '1/2/3.' },
+    'contact-name': { type: 'string', required: true, description: 'Contact name.' },
+    'contact-region': { type: 'string', required: true, description: 'Contact phone country code (no +).' },
+    'contact-phone': { type: 'string', required: true, description: 'Contact phone.' },
+    'contact-email': { type: 'string', required: true, description: 'Contact email.' },
+    passengers: { type: 'json', required: true, description: 'JSON array of passengers. gender/id_type are STRINGS ("1"/"2"). child/infant require adult_passenger_name.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
+  },
+  {
+    order_no: { type: 'string', description: 'Our order reference (ffo_...).' },
+    upstream_order_no: { type: 'string', description: 'Supplier order number.' },
+    status: { type: 'string', description: 'AWAITING_PAYMENT after a successful create.' },
+    total_amount: { type: 'float', description: 'Total amount.' },
+    currency: { type: 'string', description: 'Currency code.' },
+  },
+  { command: "agenzo-merchant-cli flight-flink create-order --product-token pt_... --total-amount 1200 --currency CNY --contact-name 'ZHANG SAN' --contact-region 86 --contact-phone 138... --contact-email a@b.com --passengers '[...]' --idempotency-key k1", output_summary: 'Returns order_no; then pay-order to ticket.' },
+  {
+    error_recovery: {
+      PRICE_CHANGED: 'Price changed since verify. Re-run verify and confirm the new price with the user before retrying.',
+      ORDER_CREATE_FAILED: 'Upstream create failed; funds released. Safe to retry with the same idempotency-key.',
+      IDEMPOTENCY_CONFLICT: 'Same key reused with different params. Use a fresh idempotency-key.',
+    },
+  },
+);
+
+export const flightPayOrderSchema = flightSchema(
+  'pay-order',
+  'Settle a created order by --order-no (triggers upstream ticketing). AWAITING_PAYMENT → PAID.',
+  {
+    'order-no': { type: 'string', required: true, description: 'Our order reference from create-order.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
+  },
+  { order_no: { type: 'string', description: 'Our order reference.' }, status: { type: 'string', description: 'PAID on success.' } },
+  { command: 'agenzo-merchant-cli flight-flink pay-order --order-no ffo_... --idempotency-key k2', output_summary: 'Order becomes PAID; poll get-order until TICKETED.' },
+);
+
+export const flightGetOrderSchema = flightSchema(
+  'get-order',
+  'Query flight order status by --order-no. Ticketing is asynchronous — poll until TICKETED.',
+  {
+    'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    watch: { type: 'bool', required: false, default: false, description: 'Poll until terminal, one NDJSON line per update.' },
+    'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between polls.' },
+    'watch-timeout': { type: 'int', required: false, default: 600, description: 'Max seconds to poll.' },
+  },
+  {
+    order_no: { type: 'string', description: 'Our order reference.' },
+    status: { type: 'string', description: 'AWAITING_PAYMENT | PAID | TICKETING | TICKETED | CANCELLED | FAILED.' },
+    ticket_infos: { type: 'array', description: 'Ticket numbers once TICKETED.' },
+  },
+  { command: 'agenzo-merchant-cli flight-flink get-order --order-no ffo_...', output_summary: 'Returns status; poll until TICKETED.' },
+  {
+    polling: {
+      recommended_interval_seconds: 5,
+      terminal_statuses: ['TICKETED', 'CANCELLED', 'FAILED'],
+      in_progress_statuses: ['AWAITING_PAYMENT', 'PAID', 'TICKETING'],
+    },
+  },
+);
+
+export const flightCancelOrderSchema = flightSchema(
+  'cancel-order',
+  'Cancel an un-ticketed order by --order-no (with refund). A ticketed order is rejected upstream.',
+  {
+    'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    reason: { type: 'string', required: false, description: 'Optional cancellation reason.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
+  },
+  { order_no: { type: 'string', description: 'Our order reference.' }, status: { type: 'string', description: 'CANCELLED on success.' }, refund_amount: { type: 'float|null', description: 'Refunded amount.' } },
+  { command: 'agenzo-merchant-cli flight-flink cancel-order --order-no ffo_... --idempotency-key k3', output_summary: 'Order becomes CANCELLED; refund issued.' },
+);
+
+export const flightListOrdersSchema = flightSchema(
+  'list-orders',
+  "List the developer's flight orders (local read, no upstream call).",
+  {
+    status: { type: 'string', required: false, description: 'Optional status filter.' },
+    page: { type: 'int', required: false, default: 1, description: '1-based page.' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page (1-100).' },
+  },
+  { orders: { type: 'array', description: 'Flight order summaries.' }, total: { type: 'int', description: 'Total count.' } },
+  { command: 'agenzo-merchant-cli flight-flink list-orders', output_summary: 'Paged flight orders.' },
+);
+
+export const flightChangeSearchSchema = flightSchema(
+  'change-search',
+  'Search rebook-eligible flights for an order.',
+  {
+    'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    date: { type: 'string', required: true, description: 'Target change date YYYY-MM-DD.' },
+    passenger: { type: 'string', required: true, description: 'passengerCode.' },
+    'segment-id': { type: 'string', required: true, description: 'Comma-separated segment ids.' },
+    'cabin-class': { type: 'string', required: false, default: 'economy', description: 'Cabin class.' },
+  },
+  { flights: { type: 'array', description: 'Rebook-eligible flights.' } },
+  { command: 'agenzo-merchant-cli flight-flink change-search --order-no ffo_... --date 2026-08-05 --passenger P1 --segment-id S1', output_summary: 'Rebook options.' },
+);
+
+export const flightChangeApplySchema = flightSchema(
+  'change-apply',
+  'Submit a change request. Returns change_order_no, status 0 (pending review).',
+  {
+    'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    passenger: { type: 'string', required: true, description: 'passengerCode.' },
+    'segment-id': { type: 'string', required: true, description: 'Comma-separated segment ids.' },
+    'product-token': { type: 'string', required: true, description: 'Change priceKey token.' },
+    'contact-name': { type: 'string', required: true, description: 'Contact name.' },
+    'contact-region': { type: 'string', required: true, description: 'Contact region.' },
+    'contact-phone': { type: 'string', required: true, description: 'Contact phone.' },
+    'contact-email': { type: 'string', required: true, description: 'Contact email.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
+  },
+  { change_order_no: { type: 'string', description: 'Change order number.' }, status: { type: 'int', description: '0 = pending review.' } },
+  { command: 'agenzo-merchant-cli flight-flink change-apply --order-no ffo_... --passenger P1 --segment-id S1 --product-token pt_... --contact-name X --contact-region 86 --contact-phone 138 --contact-email a@b.com --idempotency-key k4', output_summary: 'Returns change_order_no; pay-order type=1 to confirm.' },
+);
+
+export const flightChangeDetailSchema = flightSchema(
+  'change-detail',
+  'Change request detail by --change-order-no.',
+  { 'change-order-no': { type: 'string', required: true, description: 'Change order number.' } },
+  { status: { type: 'int', description: 'Change status.' } },
+  { command: 'agenzo-merchant-cli flight-flink change-detail --change-order-no C1', output_summary: 'Change request detail.' },
+);
+
+export const flightChangeCancelSchema = flightSchema(
+  'change-cancel',
+  'Cancel a change request (immediate terminal).',
+  {
+    'change-order-no': { type: 'string', required: true, description: 'Change order number.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
+  },
+  { status: { type: 'int', description: 'Terminal 5 (cancelled).' } },
+  { command: 'agenzo-merchant-cli flight-flink change-cancel --change-order-no C1 --idempotency-key k5', output_summary: 'Change request cancelled.' },
+);
+
+export const flightRefundApplySchema = flightSchema(
+  'refund-apply',
+  'Submit a refund request. Returns refund_order_no, status 0 (pending review).',
+  {
+    'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    passenger: { type: 'string', required: true, description: 'passengerCode.' },
+    'segment-id': { type: 'string', required: true, description: 'Comma-separated segment ids.' },
+    'reason-type': { type: 'int', required: true, description: 'Refund reason type code.' },
+    reason: { type: 'string', required: false, description: 'Free-text reason.' },
+    'contact-name': { type: 'string', required: true, description: 'Contact name.' },
+    'contact-region': { type: 'string', required: true, description: 'Contact region.' },
+    'contact-phone': { type: 'string', required: true, description: 'Contact phone.' },
+    'contact-email': { type: 'string', required: true, description: 'Contact email.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
+  },
+  { refund_order_no: { type: 'string', description: 'Refund order number.' }, status: { type: 'int', description: '0 = pending review.' } },
+  { command: 'agenzo-merchant-cli flight-flink refund-apply --order-no ffo_... --passenger P1 --segment-id S1 --reason-type 1 --contact-name X --contact-region 86 --contact-phone 138 --contact-email a@b.com --idempotency-key k6', output_summary: 'Returns refund_order_no; refund-confirm 1 to confirm.' },
+);
+
+export const flightRefundDetailSchema = flightSchema(
+  'refund-detail',
+  'Refund request detail by --refund-order-no.',
+  { 'refund-order-no': { type: 'string', required: true, description: 'Refund order number.' } },
+  { status: { type: 'int', description: 'Refund status.' } },
+  { command: 'agenzo-merchant-cli flight-flink refund-detail --refund-order-no R1', output_summary: 'Refund request detail.' },
+);
+
+export const flightRefundConfirmSchema = flightSchema(
+  'refund-confirm',
+  'Confirm ("1") or cancel ("2") a refund. Cancel takes effect immediately to terminal 5.',
+  {
+    'refund-order-no': { type: 'string', required: true, description: 'Refund order number.' },
+    confirm: { type: 'string', required: true, description: '"1" confirm / "2" cancel.' },
+    'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
+  },
+  { status: { type: 'int', description: 'Refund status after the action.' } },
+  { command: 'agenzo-merchant-cli flight-flink refund-confirm --refund-order-no R1 --confirm 1 --idempotency-key k7', output_summary: 'Refund confirmed or cancelled.' },
+);

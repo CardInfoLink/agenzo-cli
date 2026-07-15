@@ -226,6 +226,81 @@ is chosen server-side by the developer's `billing_mode`:
 | `pay_per_call` | Platform queries EVO for the `order_id` → verifies exact amount/currency → upstream `payOrder`. If not yet paid → `PAYMENT_NOT_COMPLETED`. |
 | anything else | `BILLING_MODE_MISMATCH` (only the two modes above are valid). |
 
+## flight-flink
+
+International flight booking (via Flink/事信 provider). Two-step create-then-pay ticketing with multi-segment journeyId relay for round-trip/multi-city, plus change (rebooking) and refund flows.
+
+### Command matrix
+
+| Verb | Write | Idempotency-Key | Description |
+|------|-------|-----------------|-------------|
+| `find-airport` | No | — | Resolve keyword → IATA city/airport candidates |
+| `list-airports` | No | — | Paginated airport dictionary |
+| `list-airlines` | No | — | Paginated airline dictionary |
+| `list-nationalities` | No | — | Nationality list |
+| `search` | No | — | Flight search (one-way/round-trip/multi-city with journeyId relay) |
+| `more-offers` | No | — | Additional fare offers for a priceKey |
+| `verify` | No | — | Verify price; returns authoritative product_token |
+| `create-order` | Yes | Required | Lock fare (no charge); status → AWAITING_PAYMENT |
+| `pay-order` | Yes | Required | Settle + trigger ticketing; status → PAID |
+| `get-order` | No | — | Query order status (poll until TICKETED) |
+| `cancel-order` | Yes | Required | Cancel un-ticketed order; refund issued |
+| `list-orders` | No | — | List flight orders (local, no upstream) |
+| `change-search` | No | — | Search rebook-eligible flights |
+| `change-apply` | Yes | Required | Apply a rebooking (returns change_order_no) |
+| `change-detail` | No | — | Query change request status |
+| `change-cancel` | Yes | Required | Cancel a pending change request |
+| `refund-apply` | Yes | Required | Apply a refund (returns refund_order_no) |
+| `refund-detail` | No | — | Query refund request status |
+| `refund-confirm` | Yes | Required | Confirm (1) or cancel (2) a refund application |
+
+### Workflow
+
+```
+find-airport → search (relay journey-id for multi-leg until price_key_ready)
+  → verify → create-order → pay-order → get-order (poll until TICKETED)
+```
+
+- **search**: `--journeys` always carries ALL legs. For round-trip/multi-city, pass `--journey-id` from the previous search result to accumulate progress. Only the final leg's offer has `price_key_ready=true`.
+- **verify**: Returns the authoritative `product_token` (may differ from search's). If `price_changed`, re-confirm price with user. Always pass verify's token to create-order.
+- **create-order**: Locks fare without charging. `--passengers` is a JSON array; `gender`/`id_type` are strings; child/infant require `adult_passenger_name`.
+- **pay-order**: Same billing-mode routing as hotel (server-side, no EVO params through CLI).
+- **get-order**: Ticketing is async. Single-pax ~100s, multi-pax 150s+. Use `--watch`.
+- **cancel-order**: Only for un-ticketed orders (AWAITING_PAYMENT / PAID). Ticketed → use `refund-apply`.
+
+### Parameters to ask for (flight-flink)
+
+| Verb | Must ask user | Can auto-generate / default |
+|------|--------------|----------------------------|
+| `find-airport` | keyword | — |
+| `search` | trip-type, journeys (origin/destination/date per leg) | journey-id (from prior search) |
+| `verify` | — (product_token from search) | — |
+| `create-order` | contact-name, contact-phone, passengers (name/gender/id/birthday) | idempotency-key, total-amount+currency from verify |
+| `pay-order` | — (order-no from create-order) | idempotency-key |
+| `cancel-order` | — (order-no) | idempotency-key |
+| `refund-apply` | passenger, segment-id, reason-type, contact-* | idempotency-key |
+| `refund-confirm` | confirm (1 or 2) | idempotency-key |
+
+### flight-flink billing
+
+Same as hotel: `create-order` locks fare, `pay-order` settles + tickets. The billing path is
+determined server-side by the developer's `billing_mode`:
+
+- **monthly_settlement**: deducted from settlement account on pay-order.
+- **pay_per_call**: captured on bound card via platform's EVO integration (server-side).
+
+### flight-flink specific errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `INVALID_ORDER_STATE` | Order not in AWAITING_PAYMENT | Check status via get-order; only AWAITING_PAYMENT can be paid |
+| `PAYORDER_FAILED` | Upstream payOrder rejected (e.g. fare expired) | Re-search and re-book |
+| `BOOKING_FAILED` | Upstream createOrder rejected | Re-verify and retry |
+| `PRICE_CHANGED` | Authoritative price differs from request | Re-verify, confirm new price with user |
+| `NO_AVAILABILITY` | No flights match | Adjust search criteria |
+| `ORDER_CREATE_FAILED` | Upstream order creation error (timeout/rejection) | Retry with same idempotency-key |
+| `PAYMENT_FAILED` | Ticketing/settlement failed | Poll get-order; re-book if order is FAILED |
+
 ## Merchant-specific errors
 
 | Error | Cause | Fix |

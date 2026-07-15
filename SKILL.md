@@ -17,7 +17,7 @@ Agenzo provides three command-line tools, split by product area:
 
 - **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
 - **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
-- **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …).
+- **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …), flight-flink (find-airport / search / verify / create-order / pay-order / get-order / cancel-order / change-* / refund-* / list-orders).
 - **payment-cli** — payments (capture a previously created payment token via Evo or UnionPay).
 
 ### hotel-redaug: create-order → pay-order flow
@@ -32,6 +32,19 @@ The `hotel-redaug` capability splits booking into two independent steps:
 `pay-order` depends on `create-order`'s output `order_id`. The two verbs MUST be called in sequence: `create-order` first, then `pay-order`.
 
 For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` returns `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to poll until the payment is confirmed and the order reaches `PAID` status.
+
+### flight-flink: search → verify → create-order → pay-order flow
+
+The `flight-flink` capability books international flights via a search → verify → create-then-pay ticketing flow:
+
+1. **`find-airport`** — resolve free-text to IATA city/airport codes.
+2. **`search`** — one-way/round-trip/multi-city. `journeys` always carries all legs; relay `--journey-id` between searches for round-trip/multi-city until `price_key_ready` is true. Only offers with `price_key_ready` carry a real `product_token`.
+3. **`verify`** — pre-booking price verification; returns the authoritative `product_token` and a `price_changed` flag. Pass the returned token to `create-order`.
+4. **`create-order`** — creates the order (locks the fare) WITHOUT charging; returns `order_no`. Enters `AWAITING_PAYMENT`.
+5. **`pay-order`** — settles by `--order-no` and triggers upstream ticketing; order → `PAID`.
+6. **`get-order`** — ticketing is asynchronous; poll (`--watch`) until `TICKETED`.
+
+Change (`change-search` → `change-apply` → `change-detail`, confirm via `pay-order` / cancel via `change-cancel`) and refund (`refund-apply` → `refund-detail` → `refund-confirm`) flows are also available. Passengers are a JSON array; `gender`/`id_type` are strings; child/infant passengers require `adult_passenger_name`. Run `agenzo-merchant-cli flight-flink skill` for the full orchestration guide. `product_token` is opaque — pass it unchanged; verify's token supersedes search's.
 
 ## Behavior Rules (all CLIs)
 
@@ -57,7 +70,7 @@ For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` return
 |-------|-----|----------|-------------|
 | Control Plane | `agenzo-admin-cli` | `auth`, `orgs`, `developers`, `keys`, `accounts`, `config` | Bearer Token (via `auth login`) |
 | Runtime Plane | `agenzo-token-cli` | `payment-methods`, `payment-tokens` | API Key (`--api-key` flag) |
-| Runtime Plane | `agenzo-merchant-cli` | `ride-elife`, `hotel-redaug` | API Key (`--api-key` flag) |
+| Runtime Plane | `agenzo-merchant-cli` | `ride-elife`, `hotel-redaug`, `flight-flink` | API Key (`--api-key` flag) |
 | Runtime Plane | `agenzo-payment-cli` | `payments` | API Key (`--api-key` flag) |
 
 ## End-to-end Onboarding Flow

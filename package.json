@@ -25,6 +25,9 @@
     "fast-check": "^4.7.0",
     "tsup": "^8.5.1",
     "typescript": "^5.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }
