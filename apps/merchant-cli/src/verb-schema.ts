@@ -570,7 +570,8 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
     'special-instructions': { type: 'string', required: false, description: 'Special check-in instructions snapshot from hotel-detail (special_instructions). Stored on the order for the order-detail page only; platform-local, not sent upstream (FCG 客户自测点5)' },
-    tips: { type: 'string', required: false, description: "Rate-level notices (提示信息) captured at booking from the chosen quote rate, as a JSON array [{title,text}]. Stored on the order for the order-detail page only; platform-local, not sent upstream (FCG 客户自测点5)", constraints: 'JSON array of {title (string, optional), text (string, optional)}; else PARAM_INVALID' },
+    tips: { type: 'string', required: false, description: "Supplementary rate-level notices (tips[].tipsDetails[]) captured at booking from the chosen quote rate, as a JSON array [{title,text}]. Stored on the order for the order-detail page only; platform-local, not sent upstream. NOT the 提示信息 field — that is --reminder", constraints: 'JSON array of {title (string, optional), text (string, optional)}; else PARAM_INVALID' },
+    reminder: { type: 'string', required: false, description: "FCG 客户自测点5 提示信息: the chosen quote rate's reminder HTML string, captured at booking. Stored on the order for the order-detail page only; platform-local, not sent upstream; rendered as HTML" },
     'bed-type': {
       type: 'string',
       required: false,

@@ -232,7 +232,11 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     )
     .option(
       '--tips <json>',
-      "Rate-level notices (提示信息) as a JSON array [{title,text}] from the chosen quote rate. Stored on the order for the order-detail page ONLY — platform-local, not sent upstream.",
+      "Supplementary rate-level notices as a JSON array [{title,text}] from the chosen quote rate (tips[].tipsDetails[]). Stored on the order for the order-detail page ONLY — platform-local, not sent upstream.",
+    )
+    .option(
+      '--reminder <html>',
+      "客户自测点5 提示信息: the chosen quote rate's reminder HTML string. Stored on the order for the order-detail page ONLY — platform-local, not sent upstream.",
     )
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
@@ -298,8 +302,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
     if (opts.specialInstructions !== undefined) body.special_instructions = opts.specialInstructions as string;
-    // 提示信息快照：解析并校验为 [{title?,text?}]，随请求体传给平台落库（订单详情页展示；仅本地、不上送上游）。
+    // 补充须知快照：解析并校验为 [{title?,text?}]，随请求体传给平台落库（订单详情页展示；仅本地、不上送上游）。
     if (opts.tips !== undefined) body.tips = parseTips(opts.tips as string);
+    // 提示信息快照（客户自测点5）：上游 reminder HTML 字符串，原样传给平台落库、订单详情页按 HTML 渲染。
+    if (opts.reminder !== undefined) body.reminder = opts.reminder as string;
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
     if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
