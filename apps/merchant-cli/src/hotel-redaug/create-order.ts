@@ -66,6 +66,50 @@ export function parsePriceItems(raw: string): PriceItem[] {
   return parsed as PriceItem[];
 }
 
+/**
+ * Parse and shape-validate `--tips`.
+ *
+ * The raw flag MUST be a JSON array of objects, each optionally carrying
+ * `title` (string) and `text` (string). Any deviation — non-JSON, a non-array,
+ * a non-object element, or a mistyped title/text — raises `PARAM_INVALID`
+ * before any request is issued.
+ *
+ * These are the rate-level notices (提示信息) captured at booking time from the
+ * chosen quote rate. They are platform-local (persisted on the order for the
+ * order-detail page) and are NOT forwarded to the upstream supplier.
+ *
+ * Exported so tests can exercise it directly.
+ */
+export function parseTips(raw: string): Array<{ title?: string; text?: string }> {
+  const INVALID = '--tips must be a JSON array of {title (string, optional), text (string, optional)}.';
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+
+  for (const el of parsed) {
+    if (typeof el !== 'object' || el === null || Array.isArray(el)) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+    const item = el as Record<string, unknown>;
+    if (
+      (item.title !== undefined && typeof item.title !== 'string') ||
+      (item.text !== undefined && typeof item.text !== 'string')
+    ) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+  }
+
+  return parsed as Array<{ title?: string; text?: string }>;
+}
+
 // ============================================================
 // Response type
 // ============================================================
@@ -182,6 +226,14 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--contact-email <email>', 'Booking contact email')
     .option('--arrive-time <time>', 'Expected arrival time (HH:mm, hotel local time)')
     .option('--special-requests <text>', 'Free-text special requests (non-binding)')
+    .option(
+      '--special-instructions <text>',
+      "Special check-in instructions snapshot from hotel-detail (special_instructions). Stored on the order for the order-detail page ONLY — platform-local, not sent upstream.",
+    )
+    .option(
+      '--tips <json>',
+      "Rate-level notices (提示信息) as a JSON array [{title,text}] from the chosen quote rate. Stored on the order for the order-detail page ONLY — platform-local, not sent upstream.",
+    )
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
       '--bed-type <code>',
@@ -245,6 +297,9 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.contactEmail !== undefined) body.contact_email = opts.contactEmail as string;
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
+    if (opts.specialInstructions !== undefined) body.special_instructions = opts.specialInstructions as string;
+    // 提示信息快照：解析并校验为 [{title?,text?}]，随请求体传给平台落库（订单详情页展示；仅本地、不上送上游）。
+    if (opts.tips !== undefined) body.tips = parseTips(opts.tips as string);
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
     if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
