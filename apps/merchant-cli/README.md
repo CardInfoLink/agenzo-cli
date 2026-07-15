@@ -186,6 +186,72 @@ agenzo-merchant-cli hotel-redaug get-checkout --api-key "$API_KEY" \
   --task-order-code "$TASK_ORDER_CODE" --watch --watch-interval 10 --watch-timeout 600
 ```
 
+### Flight booking end-to-end example (flight-flink)
+
+The flow is `find-airport → search → verify → create-order → pay-order → get-order (poll until TICKETED)`.
+Amounts are decimal currency units (e.g. `1200.00` = 1200.00 yuan). `create-order` locks the fare without
+charging; `pay-order` settles + triggers ticketing (asynchronous — poll `get-order` until status=TICKETED).
+
+```bash
+# 1. Resolve a city/airport keyword to IATA codes.
+agenzo-merchant-cli flight-flink find-airport --api-key "$API_KEY" --keyword "beijing"
+
+# 2. Search one-way flights (trip-type 1=OW, 2=RT, 3=multi-city).
+#    journeys always carries ALL legs; for multi-city, relay --journey-id from each result.
+agenzo-merchant-cli flight-flink search --api-key "$API_KEY" \
+  --trip-type 1 \
+  --journeys '[{"date":"2026-08-01","origin":"PEK","originType":"2","destination":"SHA","destinationType":"2"}]'
+
+# 3. Verify price (returns authoritative product_token; if price_changed, re-confirm with user).
+agenzo-merchant-cli flight-flink verify --api-key "$API_KEY" \
+  --product-token "$PRODUCT_TOKEN"
+
+# 4. Create Order (write op: locks fare, NO charge; status → AWAITING_PAYMENT).
+agenzo-merchant-cli flight-flink create-order --api-key "$API_KEY" --yes \
+  --product-token "$VERIFIED_TOKEN" \
+  --total-amount 1200.00 --currency CNY \
+  --contact-name "ZHANG SAN" --contact-region 86 \
+  --contact-phone "13800138000" --contact-email "a@example.com" \
+  --passengers '[{"firstName":"SAN","lastName":"ZHANG","gender":"1","birthday":"1990-01-01","id_type":"1","id_number":"E12345678","nationality":"CN","type":"adult","expiration":"2032-01-01"}]' \
+  --idempotency-key "flight-create-$(date +%s)"
+
+# 5. Pay Order (settles + triggers ticketing; status → PAID).
+agenzo-merchant-cli flight-flink pay-order --api-key "$API_KEY" --yes \
+  --order-no "$ORDER_NO" \
+  --idempotency-key "flight-pay-$(date +%s)"
+
+# 6. Poll status until TICKETED (ticket_infos populated). Single-pax ~100s, multi-pax ~150s+.
+agenzo-merchant-cli flight-flink get-order --api-key "$API_KEY" --order-no "$ORDER_NO" \
+  --watch --watch-interval 10 --watch-timeout 300
+
+# 7. List flight orders (local read, pagination + optional status filter).
+agenzo-merchant-cli flight-flink list-orders --api-key "$API_KEY" --page 1 --page-size 20
+
+# 8. Cancel an un-ticketed order (ticketed orders → use refund-apply instead).
+agenzo-merchant-cli flight-flink cancel-order --api-key "$API_KEY" --yes \
+  --order-no "$ORDER_NO" \
+  --idempotency-key "flight-cancel-$(date +%s)"
+
+# 9. Change (rebooking): search → apply → detail; confirm via pay-order or cancel via change-cancel.
+agenzo-merchant-cli flight-flink change-search --api-key "$API_KEY" \
+  --order-no "$ORDER_NO" --date 2026-08-05 --passenger P1 --segment-id S1
+agenzo-merchant-cli flight-flink change-apply --api-key "$API_KEY" --yes \
+  --order-no "$ORDER_NO" --passenger P1 --segment-id S1 \
+  --product-token "$CHANGE_TOKEN" \
+  --contact-name "ZHANG SAN" --contact-region 86 --contact-phone 138 --contact-email a@b.com \
+  --idempotency-key "flight-change-$(date +%s)"
+
+# 10. Refund: apply → detail → confirm (--confirm 1 to proceed, 2 to cancel).
+agenzo-merchant-cli flight-flink refund-apply --api-key "$API_KEY" --yes \
+  --order-no "$ORDER_NO" --passenger P1 --segment-id S1 \
+  --reason-type 1 \
+  --contact-name "ZHANG SAN" --contact-region 86 --contact-phone 138 --contact-email a@b.com \
+  --idempotency-key "flight-refund-$(date +%s)"
+agenzo-merchant-cli flight-flink refund-confirm --api-key "$API_KEY" --yes \
+  --refund-order-no "$REFUND_ORDER_NO" --confirm 1 \
+  --idempotency-key "flight-refund-confirm-$(date +%s)"
+```
+
 ## Global flags
 
 | Flag | Default | Description |
@@ -261,13 +327,15 @@ merchant-cli **has no host / config commands** and does not govern environments.
 
 ## Machine-readable verb schema
 
-Every `ride-elife` and `hotel-redaug` verb supports `--help --format json`, emitting that verb's machine-readable schema (`cli` / `noun` / `verb` / `description` / `flags` / `response` / `example`, some with `error_recovery` / `polling`):
+Every `ride-elife`, `hotel-redaug`, and `flight-flink` verb supports `--help --format json`, emitting that verb's machine-readable schema (`cli` / `noun` / `verb` / `description` / `flags` / `response` / `example`, some with `error_recovery` / `polling`):
 
 ```bash
 agenzo-merchant-cli ride-elife quote --help --format json
 agenzo-merchant-cli ride-elife book --help --format json
 agenzo-merchant-cli hotel-redaug quote --help --format json
 agenzo-merchant-cli hotel-redaug create-order --help --format json   # write verb: error_recovery
+agenzo-merchant-cli flight-flink search --help --format json
+agenzo-merchant-cli flight-flink create-order --help --format json
 agenzo-merchant-cli hotel-redaug pay-order --help --format json      # write verb: error_recovery
 agenzo-merchant-cli hotel-redaug get --help --format json             # long-running: polling block
 ```
