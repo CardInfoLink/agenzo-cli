@@ -14,12 +14,13 @@ import {
 import type { Developer } from '../types/api.js';
 import { AuthService } from '../auth/auth-service.js';
 import { resolveBillingMode } from './billing-mode.js';
+import { addBankAccountOptions, resolveBankAccount } from './bank-account.js';
 
 export function registerCreateCommand(
   parent: Command,
   deps: { apiClient: ApiClient; authService: AuthService; configManager: ConfigManager },
 ): void {
-  parent
+  const cmd = parent
     .command('create')
     .description('Create a developer')
     .option('--developer-name <name>', 'Developer name')
@@ -32,8 +33,8 @@ export function registerCreateCommand(
       '--settlement-currency <code>',
       'ISO 4217 currency for the settlement account (e.g. USD, CNY). Only for monthly_settlement. Defaults to platform setting (USD).',
     )
-    .option('--idempotency-key <key>', 'Idempotency key forwarded as the Idempotency-Key header')
-    .action(async (options, command: Command) => {
+    .option('--idempotency-key <key>', 'Idempotency key forwarded as the Idempotency-Key header');
+  addBankAccountOptions(cmd).action(async (options, command: Command) => {
       const format = resolveFormat(command.optsWithGlobals().format);
 
       const name = await PromptEngine.resolveInput(options.developerName, {
@@ -46,6 +47,21 @@ export function registerCreateCommand(
       // Validate --billing-mode locally (defaults to pay_per_call). An invalid
       // value throws ValidationError -> PARAM_INVALID / exit 1.
       const billingMode = resolveBillingMode(options.billingMode);
+
+      // Bank account is mandatory regardless of billing_mode — every developer
+      // needs a payout target on file before it can receive transfers.
+      const bankAccount = await resolveBankAccount(
+        {
+          bankBeneficiaryName: options.bankBeneficiaryName,
+          bankAccountNumber: options.bankAccountNumber,
+          bankName: options.bankName,
+          bankCountry: options.bankCountry,
+          bankSwiftCode: options.bankSwiftCode,
+          bankAddress: options.bankAddress,
+          bankRoutingNumber: options.bankRoutingNumber,
+        },
+        command,
+      );
 
       // --idempotency-key is mandatory on every server write; the CLI never
       // auto-generates it. When absent, prompt for it interactively. In
@@ -72,6 +88,7 @@ export function registerCreateCommand(
             name,
             email,
             billing_mode: billingMode,
+            bank_account: bankAccount,
             ...(options.settlementCurrency
               ? { settlement_currency: options.settlementCurrency as string }
               : {}),
@@ -101,6 +118,8 @@ export function registerCreateCommand(
             ['Email', String(dev.email ?? '-')],
             ['Status', String(dev.status ?? '-')],
             ['Billing Mode', String(dev.billing_mode ?? '-')],
+            ['Bank Account', String(dev.bank_account?.account_number ?? '-')],
+            ['Bank Name', String(dev.bank_account?.bank_name ?? '-')],
           ]),
       };
 

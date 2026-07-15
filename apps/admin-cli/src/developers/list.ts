@@ -39,8 +39,14 @@ export function registerListCommand(
           if (developers.length === 0) {
             return Formatter.status('info', 'No developers found');
           }
-          const headers = ['ID', 'Name', 'Email', 'Status'];
-          const rows = developers.map((d) => [d.id, d.name, d.email, d.status]);
+          const headers = ['ID', 'Name', 'Email', 'Status', 'Bank Account'];
+          const rows = developers.map((d) => [
+            d.id,
+            d.name,
+            d.email,
+            d.status,
+            d.bank_account?.account_number ?? '-',
+          ]);
           return Formatter.table(headers, rows);
         },
       };
