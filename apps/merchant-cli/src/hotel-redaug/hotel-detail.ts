@@ -27,6 +27,33 @@ function need(value: string | undefined, flag: string): string {
   return value;
 }
 
+/**
+ * Parse `--settings` (comma-separated or JSON array string) into a string[].
+ * Validation of allowed codes happens server-side (provider); this is pure
+ * parsing, no whitelist duplicated here.
+ */
+function parseSettings(value: string | undefined): string[] | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) {
+        return parsed;
+      }
+    } catch {
+      // fall through to comma-split below
+    }
+    throw new CliError('PARAM_INVALID', 'Invalid --settings JSON array.');
+  }
+  return trimmed
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 // ============================================================
 // Output helpers (table formatter)
 // ============================================================
@@ -60,6 +87,15 @@ function formatHotelDetail(data: HotelDetailResponse): string {
   ];
 
   lines.push(Formatter.keyValue(kvPairs));
+
+  // Special check-in instructions — MUST be shown to the user when present
+  // (upstream data provider does not accept liability for booking issues
+  // caused by this not being displayed). Only non-null when --settings
+  // included 'hotelTextPolicies'.
+  if (data.special_instructions) {
+    lines.push('');
+    lines.push(Formatter.status('warning', `Special Check-in Instructions: ${data.special_instructions}`));
+  }
 
   // Facilities table
   const facilities = data.facilities ?? [];
@@ -128,6 +164,40 @@ function formatHotelDetail(data: HotelDetailResponse): string {
     lines.push(Formatter.status('info', 'No room-type details available'));
   }
 
+  // Review scores — only present when --settings included 'comment'.
+  const comments = data.comment ?? [];
+  if (comments.length > 0) {
+    lines.push('');
+    lines.push('Review Scores:');
+    const headers = ['Channel', 'Average Score'];
+    const rows = comments.map((c) => [String(c.channel ?? '-'), String(c.average_score ?? '-')]);
+    lines.push(Formatter.table(headers, rows));
+  }
+
+  // Certificates/qualifications — only present when --settings included 'hotelCertificates'.
+  const certs = data.hotel_certificates ?? [];
+  if (certs.length > 0) {
+    lines.push('');
+    lines.push('Certificates:');
+    const headers = ['Name', 'Unify Code'];
+    const rows = certs.map((c) => [String(c.certification_name ?? '-'), String(c.unify_code ?? '-')]);
+    lines.push(Formatter.table(headers, rows));
+  }
+
+  // Text policies (hotelPolicy/instructions/mandatoryFees/etc) — only present when
+  // --settings included 'hotelTextPolicies'. specialInstructions is shown separately
+  // above (must-display), so it is excluded here to avoid duplication.
+  const textPolicies = (data.hotel_text_policies ?? []).filter(
+    (p) => p.code !== 'specialInstructions',
+  );
+  if (textPolicies.length > 0) {
+    lines.push('');
+    lines.push('Hotel Policies:');
+    const headers = ['Policy', 'Text'];
+    const rows = textPolicies.map((p) => [String(p.code_name ?? p.code ?? '-'), String(p.text ?? '-')]);
+    lines.push(Formatter.table(headers, rows));
+  }
+
   return lines.join('\n');
 }
 
@@ -151,7 +221,15 @@ export function registerHotelDetailCommand(parent: Command, deps: { apiClient: A
     .description('Get detailed information about a specific hotel (facilities, images, etc.)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--hotel-id <id>', 'Hotel ID (required)')
-    .option('--with-images [value]', 'Include hotel images (default: true)', true);
+    .option('--with-images [value]', 'Include hotel images (default: true)', true)
+    .option(
+      '--settings <list>',
+      'Optional on-demand upstream fields, comma-separated or JSON array ' +
+        '(hotelFacilityNew, breakfast, importantNotices, parking, chargingParking, ' +
+        'hotelCertificates, comment, hotelMeetingInfos, hotelVideoInfos, hotelTextPolicies, ' +
+        'hotelStructuredPolicies.childPolicy, hotelStructuredPolicies.extraBedPolicy, ' +
+        'hotelStructuredPolicies.petPolicy). Pass hotelTextPolicies to get special_instructions.',
+    );
 
   attachSchemaHelp(cmd, hotelDetailSchema);
 
@@ -173,11 +251,16 @@ export function registerHotelDetailCommand(parent: Command, deps: { apiClient: A
     const rawWithImages = opts.withImages;
     const withImages = rawWithImages !== 'false' && rawWithImages !== false;
 
+    const settings = parseSettings(opts.settings as string | undefined);
+
     // Build request body (snake_case keys match platform contract).
     const body: Record<string, unknown> = {
       hotel_id: hotelId,
       with_images: withImages,
     };
+    if (settings !== undefined) {
+      body.settings = settings;
+    }
 
     const result = await deps.apiClient.post<HotelDetailResponse>(
       '/hotel/detail',

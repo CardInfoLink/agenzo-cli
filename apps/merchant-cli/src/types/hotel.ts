@@ -365,6 +365,37 @@ export interface HotelRoom {
   images: HotelImage[];
 }
 
+/** Guest review score for one channel (only present when --settings included 'comment'). */
+export interface HotelComment {
+  channel?: string | null;
+  average_score?: number | null;
+}
+
+/** Business certificate/qualification (only present when --settings included 'hotelCertificates'). */
+export interface HotelCertificate {
+  unify_code?: string | null;
+  certification_name?: string | null;
+  file_url?: string | null;
+}
+
+/**
+ * Free-text hotel policy keyed by code (hotelPolicy/instructions/specialInstructions/
+ * mandatoryFees/optionalFees/cleanAndSafety/importantNotices/ageLimit/checkInCheckOut).
+ * Only present when --settings included 'hotelTextPolicies'.
+ */
+export interface HotelTextPolicy {
+  code?: string | null;
+  code_name?: string | null;
+  text?: string | null;
+}
+
+/** Raw upstream structured child/extra-bed/pet policies, snake_cased (shape not modeled deeper). */
+export interface HotelStructuredPolicies {
+  child_policy?: Record<string, unknown> | null;
+  extra_bed_policy?: Record<string, unknown> | null;
+  pet_policy?: Record<string, unknown> | null;
+}
+
 export interface HotelDetailResponse {
   hotel_id: string | number;
   hotel_name?: string | null;
@@ -389,4 +420,21 @@ export interface HotelDetailResponse {
   images: HotelImage[];
   /** Room types with static info (area/floor/beds/occupancy/images). */
   rooms: HotelRoom[];
+  /** Empty unless --settings included 'comment'. */
+  comment?: HotelComment[];
+  /** Empty unless --settings included 'hotelCertificates' (property may simply have none). */
+  hotel_certificates?: HotelCertificate[];
+  /** Empty unless --settings included 'hotelTextPolicies'. */
+  hotel_text_policies?: HotelTextPolicy[];
+  /** null unless --settings included the relevant hotelStructuredPolicies.* code(s). */
+  hotel_structured_policies?: HotelStructuredPolicies | null;
+  /**
+   * IMPORTANT — the property's "special check-in instructions" (upstream code
+   * specialInstructions, distinct from the general "instructions" code). MUST be
+   * surfaced to the user in the booking UI when present: the upstream data
+   * provider does not accept liability for booking issues caused by this not
+   * being displayed. Only populated when --settings included 'hotelTextPolicies';
+   * null otherwise (does NOT mean the hotel has none — means it wasn't requested).
+   */
+  special_instructions?: string | null;
 }

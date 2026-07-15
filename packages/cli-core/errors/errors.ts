@@ -205,6 +205,7 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
   CHECKOUT_NOT_ALLOWED: 'A partial check-out is not allowed in the current state.',
   CHECKOUT_TASK_NOT_FOUND: 'Check-out application not found.',
   PAY_PER_CALL_NOT_AVAILABLE: 'Pay-per-call billing is not available; use monthly_settlement.',
+  HOTEL_NOT_FOUND: 'This hotel is no longer available from the supplier.',
   NOT_IMPLEMENTED: 'This operation is not implemented yet.',
 };
 

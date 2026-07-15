@@ -717,6 +717,118 @@ describe('hotel-redaug hotel-detail', () => {
     ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
     expect(api.post).not.toHaveBeenCalled();
   });
+
+  it('--settings comma-separated is parsed into a string array and sent verbatim', async () => {
+    const api = mockApiClient({ '/hotel/detail': HOTEL_DETAIL_RESP });
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1',
+      '--settings', 'comment,hotelTextPolicies', '--format', 'json',
+    ]);
+
+    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(body.settings).toEqual(['comment', 'hotelTextPolicies']);
+  });
+
+  it('--settings JSON array form is parsed the same as comma-separated', async () => {
+    const api = mockApiClient({ '/hotel/detail': HOTEL_DETAIL_RESP });
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1',
+      '--settings', '["comment","hotelTextPolicies"]', '--format', 'json',
+    ]);
+
+    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(body.settings).toEqual(['comment', 'hotelTextPolicies']);
+  });
+
+  it('omitting --settings sends no settings field at all', async () => {
+    const api = mockApiClient({ '/hotel/detail': HOTEL_DETAIL_RESP });
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1', '--format', 'json',
+    ]);
+
+    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(body).not.toHaveProperty('settings');
+  });
+
+  it('--format table surfaces special_instructions prominently when present (must-display requirement)', async () => {
+    const api = mockApiClient({
+      '/hotel/detail': {
+        ...HOTEL_DETAIL_RESP,
+        special_instructions: 'Guests must bring a printed booking confirmation.',
+      },
+    });
+    const program = hotelProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1',
+      '--settings', 'hotelTextPolicies', '--format', 'table',
+    ]);
+
+    const text = out.text();
+    expect(text).toContain('Special Check-in Instructions');
+    expect(text).toContain('Guests must bring a printed booking confirmation.');
+  });
+
+  it('--format table omits the special-instructions line when null (not requested)', async () => {
+    const api = mockApiClient({ '/hotel/detail': { ...HOTEL_DETAIL_RESP, special_instructions: null } });
+    const program = hotelProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1', '--format', 'table']);
+
+    expect(out.text()).not.toContain('Special Check-in Instructions');
+  });
+
+  it('--format table renders review scores and text policies when present, excluding specialInstructions from the generic policy table', async () => {
+    const api = mockApiClient({
+      '/hotel/detail': {
+        ...HOTEL_DETAIL_RESP,
+        comment: [{ channel: 'EPS', average_score: 4.2 }],
+        hotel_certificates: [{ unify_code: 'U1', certification_name: 'Business License', file_url: 'http://c/1.jpg' }],
+        hotel_text_policies: [
+          { code: 'hotelPolicy', code_name: 'Hotel Policy', text: 'No pets.' },
+          { code: 'specialInstructions', code_name: 'Special Instructions', text: 'Bring ID.' },
+        ],
+        special_instructions: 'Bring ID.',
+      },
+    });
+    const program = hotelProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'hotel-detail', '--api-key', 'k', '--hotel-id', 'h1',
+      '--settings', 'comment,hotelCertificates,hotelTextPolicies', '--format', 'table',
+    ]);
+
+    const text = out.text();
+    expect(text).toContain('Review Scores');
+    expect(text).toContain('4.2');
+    expect(text).toContain('Certificates');
+    expect(text).toContain('Business License');
+    expect(text).toContain('Hotel Policies');
+    expect(text).toContain('No pets.');
+    // specialInstructions must appear once (in the dedicated warning line), not duplicated
+    // in the generic "Hotel Policies" table.
+    const policiesSectionStart = text.indexOf('Hotel Policies:');
+    const policiesSection = text.slice(policiesSectionStart);
+    expect(policiesSection).not.toContain('Bring ID.');
+  });
 });
 
 // ============================================================
