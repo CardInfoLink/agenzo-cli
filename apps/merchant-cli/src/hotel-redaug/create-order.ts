@@ -66,6 +66,43 @@ export function parsePriceItems(raw: string): PriceItem[] {
   return parsed as PriceItem[];
 }
 
+/**
+ * Parse and shape-validate `--tips` (客户自测点5 提示信息).
+ *
+ * The raw flag MUST be a JSON array of objects, each optionally carrying
+ * `title` and `text` (strings). Snapshot of the chosen rate's tips, persisted
+ * on the order for the order-detail page; NOT forwarded upstream.
+ */
+export function parseTips(raw: string): Array<{ title?: string; text?: string }> {
+  const INVALID = '--tips must be a JSON array of {title (string, optional), text (string, optional)}.';
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+
+  for (const el of parsed) {
+    if (typeof el !== 'object' || el === null || Array.isArray(el)) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+    const item = el as Record<string, unknown>;
+    if (
+      (item.title !== undefined && typeof item.title !== 'string') ||
+      (item.text !== undefined && typeof item.text !== 'string')
+    ) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+  }
+
+  return parsed as Array<{ title?: string; text?: string }>;
+}
+
 // ============================================================
 // Response type
 // ============================================================
@@ -182,7 +219,15 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--contact-email <email>', 'Booking contact email')
     .option('--arrive-time <time>', 'Expected arrival time (HH:mm, hotel local time)')
     .option('--special-requests <text>', 'Free-text special requests (non-binding)')
+    .option(
+      '--tips <json>',
+      "客户自测点5 提示信息: the chosen quote rate's tips as a JSON array [{title,text}]. Stored on the order for the order-detail page ONLY — platform-local, not sent upstream.",
+    )
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
+    .option(
+      '--bed-type <code>',
+      "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen); forwarded verbatim to upstream createOrder bedType.",
+    )
     .option(
       '--payment-token-id <id>',
       'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips EVO preauth/capture and only locks the order + records this credential (funds already charged).',
@@ -241,7 +286,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.contactEmail !== undefined) body.contact_email = opts.contactEmail as string;
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
+    // 提示信息快照（客户自测点5）：解析并校验 tips JSON,传给平台落库、订单详情页展示。
+    if (opts.tips !== undefined) body.tips = parseTips(opts.tips as string);
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
+    if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
 
     // Confirm before the write unless --yes. This locks inventory at the quoted

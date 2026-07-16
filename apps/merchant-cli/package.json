@@ -1,6 +1,6 @@
 {
   "name": "@agenzo/merchant-cli",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Merchant fulfillment CLI for the Agenzo platform",
   "type": "module",
   "engines": {

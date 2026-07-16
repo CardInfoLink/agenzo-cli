@@ -569,6 +569,12 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
+    tips: { type: 'string', required: false, description: "FCG 客户自测点5 提示信息: the chosen quote rate's tips (tips[].tipsDetails[]) as a JSON array [{title,text}], captured at booking. Stored on the order for the order-detail page only; platform-local, not sent upstream", constraints: 'JSON array of {title (string, optional), text (string, optional)}; else PARAM_INVALID' },
+    'bed-type': {
+      type: 'string',
+      required: false,
+      description: "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen). Forwarded verbatim to upstream createOrder bedType; upstream recommends passing the product-dimension bed type at booking.",
+    },
     'payment-token-id': {
       type: 'string',
       required: false,
