@@ -332,23 +332,22 @@ describe('hotel-redaug cancel', () => {
     expect(headers).toEqual({ 'Idempotency-Key': 'cancel-1' });
   });
 
-  it('declined confirmation → CLIENT_ABORTED, 0 requests', async () => {
-    confirmMock.mockResolvedValue(false);
+  it('no interactive confirm prompt — cancel proceeds directly without --yes', async () => {
+    // 取消确认交互已移除，命令不再阻塞 stdin：即使不带 --yes 也直接下发请求，且从不调用 confirm。
     const api = mockApiClient({ '/hotel/ord_h1/cancel': CANCEL_CONFIRMED_RESP });
     const program = hotelProgram(api);
     captureStdout();
     captureStderr();
 
-    await expect(
-      program.parseAsync([
-        ...BASE, 'cancel', '--api-key', 'k',
-        '--order-id', 'ord_h1', '--fc-order-code', 'fc_1', '--idempotency-key', 'c1',
-      ]),
-    ).rejects.toMatchObject({ code: 'CLIENT_ABORTED' });
-    expect(api.post).not.toHaveBeenCalled();
+    await program.parseAsync([
+      ...BASE, 'cancel', '--api-key', 'k',
+      '--order-id', 'ord_h1', '--fc-order-code', 'fc_1', '--idempotency-key', 'c1',
+    ]);
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 
-  it('--yes skips the prompt', async () => {
+  it('--yes also proceeds without prompting', async () => {
     const api = mockApiClient({ '/hotel/ord_h1/cancel': CANCEL_CONFIRMED_RESP });
     const program = hotelProgram(api);
     captureStdout();

@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import { confirm } from '@inquirer/prompts';
 import {
   ApiClient,
   ConfigManager,
@@ -114,10 +113,9 @@ function formatCancel(data: CancelHotelResponse): string {
  * `Idempotency-Key` header (key forwarded verbatim, never in the body), and a
  * snake_case body carrying `fc_order_code` (and `reason` when supplied).
  * Required-flag validation (`--order-id`, `--fc-order-code`) raises
- * `PARAM_INVALID` before any request is sent. Cancelling may incur a fee, so
- * the non-`--yes` path MUST confirm (with an explicit fee warning) before the
- * write; `--yes` skips it. A declined confirm maps to `CLIENT_ABORTED` (exit 5);
- * a missing `--idempotency-key` under `--yes` throws
+ * `PARAM_INVALID` before any request is sent. There is NO interactive cancel
+ * confirmation prompt (it was removed so the command never blocks on stdin);
+ * cancel proceeds directly. A missing `--idempotency-key` under `--yes` throws
  * `PARAM_IDEMPOTENCY_KEY_REQUIRED` before any request, otherwise it is prompted.
  *
  * Renders `CancelHotelResponse` (both the confirmed and the accepted-but-pending
@@ -162,18 +160,9 @@ export function registerHotelCancelCommand(parent: Command, deps: { apiClient: A
     // enters the body). --idempotency-key is NEVER in the body.
     if (opts.reason !== undefined) body.reason = opts.reason as string;
 
-    // Confirm before the write unless --yes. Cancelling may incur a fee, so the
-    // prompt warns explicitly (requirement 6.4). The prompt goes to stderr;
-    // declining maps to CLIENT_ABORTED (exit 5) via the top-level envelope.
-    if (!isYes) {
-      const confirmed = await confirm({
-        message: `Cancel hotel order ${orderId}? A cancellation fee may apply.`,
-        default: false,
-      });
-      if (!confirmed) {
-        throw new CliError('CLIENT_ABORTED', 'Cancellation aborted by user.');
-      }
-    }
+    // No interactive cancel confirmation — cancel proceeds directly (the extra
+    // "A cancellation fee may apply" y/N prompt was removed so the command never
+    // blocks on stdin in non-interactive/automation contexts).
 
     // Idempotency key (requirement 13.1-13.6): resolved before the request via
     // the reused merchant-cli policy. Under --yes a missing key is a hard error
