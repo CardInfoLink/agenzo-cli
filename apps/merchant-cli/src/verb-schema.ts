@@ -1471,6 +1471,26 @@ export const flightChangeCancelSchema = flightSchema(
   { command: 'agenzo-merchant-cli flight-flink change-cancel --change-order-no C1 --idempotency-key k5', output_summary: 'Change request cancelled.' },
 );
 
+export const flightChangePaySchema = flightSchema(
+  'change-pay',
+  'Pay a change request fee (charges like a normal order) and trigger change ticketing. flink pay type=1.',
+  {
+    'change-order-no': { type: 'string', required: true, description: 'Change order number.' },
+    'order-no': { type: 'string', required: true, description: 'Original order reference (ownership check).' },
+    amount: { type: 'float', required: true, description: 'Change fee total (change-detail price_total, decimal units).' },
+    currency: { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code.' },
+    'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id (EVO path).' },
+    'payment-token-id': { type: 'string', required: false, description: 'Optional UPI network-token id (unionpay charge path).' },
+    'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
+  },
+  {
+    change_order_no: { type: 'string', description: 'Change order number.' },
+    status: { type: 'string', description: 'PROCESSING after payment.' },
+    payment_status: { type: 'string', description: 'SETTLED on success.' },
+  },
+  { command: 'agenzo-merchant-cli flight-flink change-pay --change-order-no C1 --order-no ffo_... --amount 120 --currency USD --idempotency-key k6', output_summary: 'Change fee charged; change ticketing triggered.' },
+);
+
 export const flightRefundApplySchema = flightSchema(
   'refund-apply',
   'Submit a refund request. Returns refund_order_no, status 0 (pending review).',

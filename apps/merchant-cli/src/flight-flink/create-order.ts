@@ -27,6 +27,7 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     .option('--contact-email <email>', 'Booking contact email')
     .option('--passengers <json>', 'JSON array of passengers (gender/id_type are strings)')
     .option('--payment-method-id <id>', 'Optional bound-card id (pay_per_call only)')
+    .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
     .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header');
   attachSchemaHelp(cmd, flightCreateOrderSchema);
 
@@ -51,6 +52,9 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
       passengers: jsonArray(need(opts.passengers as string | undefined, 'passengers'), 'passengers'),
     };
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
+    // UPI(unionpay) 扣款路径：透传已 ACTIVE 的 network token id；platform create-order
+    // 据 payment_token_id 非空走 ChargeService 实扣（跳过 EVO 预授权/捕获）。
+    if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
 
     if (!isYes) {
       const ok = await confirm({

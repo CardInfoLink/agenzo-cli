@@ -60,6 +60,7 @@ import { registerChangeSearchCommand } from './flight-flink/change-search.js';
 import { registerChangeApplyCommand } from './flight-flink/change-apply.js';
 import { registerChangeDetailCommand } from './flight-flink/change-detail.js';
 import { registerChangeCancelCommand } from './flight-flink/change-cancel.js';
+import { registerChangePayCommand } from './flight-flink/change-pay.js';
 import { registerRefundApplyCommand } from './flight-flink/refund-apply.js';
 import { registerRefundDetailCommand } from './flight-flink/refund-detail.js';
 import { registerRefundConfirmCommand } from './flight-flink/refund-confirm.js';
@@ -261,6 +262,7 @@ Key notes:
   registerChangeApplyCommand(flightCmd, deps);
   registerChangeDetailCommand(flightCmd, deps);
   registerChangeCancelCommand(flightCmd, deps);
+  registerChangePayCommand(flightCmd, deps);
   registerRefundApplyCommand(flightCmd, deps);
   registerRefundDetailCommand(flightCmd, deps);
   registerRefundConfirmCommand(flightCmd, deps);
