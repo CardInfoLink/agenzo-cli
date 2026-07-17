@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "total_members": 70,
-  "total_unique_codes": 70,
+  "total_members": 71,
+  "total_unique_codes": 71,
   "members": [
     {
       "name": "ACCESS_DENIED",
@@ -62,6 +62,12 @@
       "code": "1903",
       "http_status": 502,
       "default_message": "The ride booking could not be completed. Please try again later."
+    },
+    {
+      "name": "BOOKING_RESTRICTED",
+      "code": "1928",
+      "http_status": 409,
+      "default_message": "This booking does not meet the property's booking conditions (e.g. minimum length of stay). Please adjust your dates or choose a different room and try again."
     },
     {
       "name": "CANCELLATION_NOT_ALLOWED",
@@ -232,16 +238,16 @@
       "default_message": "The blockchain network does not match."
     },
     {
-      "name": "NO_AVAILABILITY",
-      "code": "1920",
-      "http_status": 409,
-      "default_message": "No rooms are available for the selected hotel and dates."
-    },
-    {
       "name": "NOT_FOUND",
       "code": "1953",
       "http_status": 404,
       "default_message": "The requested resource was not found."
+    },
+    {
+      "name": "NO_AVAILABILITY",
+      "code": "1920",
+      "http_status": 409,
+      "default_message": "No rooms are available for the selected hotel and dates."
     },
     {
       "name": "OPERATION_NOT_FOUND",
@@ -489,6 +495,7 @@
     "1924",
     "1925",
     "1926",
+    "1928",
     "1950",
     "1951",
     "1952",
