@@ -103,6 +103,28 @@ export function parseTips(raw: string): Array<{ title?: string; text?: string }>
   return parsed as Array<{ title?: string; text?: string }>;
 }
 
+/**
+ * Parse and shape-validate `--cancellation` (取消条款快照).
+ *
+ * A JSON object mirroring the chosen rate's cancellation
+ * ({restriction_type, restriction_day, restriction_time, penalties[]}). Stored
+ * on the order so the order-detail page can show the free-cancel deadline and
+ * the backend can gate cancellation by hotel-local time. Not sent upstream.
+ */
+export function parseCancellation(raw: string): Record<string, unknown> {
+  const INVALID = '--cancellation must be a JSON object.';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 // ============================================================
 // Response type
 // ============================================================
@@ -225,6 +247,14 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     )
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
+      '--cancellation <json>',
+      "Cancellation policy JSON from the chosen rate ({restriction_type,restriction_day,restriction_time,penalties[]}); stored on the order for cancellation gating and free-cancel deadline display. Not sent upstream.",
+    )
+    .option(
+      '--hotel-timezone <tz>',
+      "Hotel timezone from quote (e.g. 'UTC-5'); stored to compute the free-cancellation deadline in hotel-local time.",
+    )
+    .option(
       '--bed-type <code>',
       "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen); forwarded verbatim to upstream createOrder bedType.",
     )
@@ -288,6 +318,9 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
     // 提示信息快照（客户自测点5）：解析并校验 tips JSON,传给平台落库、订单详情页展示。
     if (opts.tips !== undefined) body.tips = parseTips(opts.tips as string);
+    // 取消条款快照 + 酒店时区：落库供订单详情「免费取消截止」展示与取消过期判定。
+    if (opts.cancellation !== undefined) body.cancellation = parseCancellation(opts.cancellation as string);
+    if (opts.hotelTimezone !== undefined) body.hotel_timezone = opts.hotelTimezone as string;
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
     if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
