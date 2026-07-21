@@ -30,12 +30,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
-      # npm run test 在 CI 里失败：apps/merchant-cli/tests/hotel-schema-split-smoke.test.ts
-      # 硬编码跨仓相对路径 ../../../../agenzo-providers/...，假设本地把 agenzo-cli 与
-      # agenzo-providers clone 在同一父目录，CI runner 无此目录必然失败（35/46 测试文件失败）。
-      # 此为该仓库首次接入 CI 暴露的既有结构性问题，非本次改动引入，待确认修复方式后移除
-      # continue-on-error。
       - run: npm run test
-        continue-on-error: true
       - run: npm run check:error-codes
       - run: npm audit --audit-level=high || true
