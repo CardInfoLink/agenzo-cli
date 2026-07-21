@@ -30,6 +30,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
+      # workspace 内部包（如 @agenzo/cli-core）需先 build 生成 dist/，否则依赖它的
+      # apps/* 测试在 vitest 里解析不到 entry（package.json main 指向 dist/index.js）。
+      - run: npm run build
       - run: npm run test
       - run: npm run check:error-codes
       - run: npm audit --audit-level=high || true
