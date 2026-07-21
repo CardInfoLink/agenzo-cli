@@ -9,7 +9,6 @@ on:
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
-    continue-on-error: true  # 首次接入扫出 8 处历史发现（测试假数据/E2E 快照文档），待人工确认后收紧
     steps:
       - uses: actions/checkout@v4
         with:
