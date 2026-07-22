@@ -11,16 +11,23 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Load the provider schema JSON
+// Load the provider schema JSON. This is a cross-repo contract check: it only
+// runs when agenzo-providers is checked out as a sibling directory (the local
+// dev convention). CI runners (and anyone who only clones agenzo-cli) don't
+// have that sibling checkout, so the whole suite is skipped rather than
+// failing on a missing file — see agenzo-cli issue tracking cross-repo schema
+// sync for a longer-term fix (contract snapshot / published package).
 const SCHEMA_PATH = path.resolve(
   __dirname,
   '../../../../agenzo-providers/providers/redaug/redaug_provider/schema/hotel-redaug.json',
 );
-const schema = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf-8'));
+const SCHEMA_AVAILABLE = fs.existsSync(SCHEMA_PATH);
+const schema = SCHEMA_AVAILABLE ? JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf-8')) : {};
 const verbs = schema.verbs as Record<string, unknown>;
-const schemaText = fs.readFileSync(SCHEMA_PATH, 'utf-8');
+const schemaText = SCHEMA_AVAILABLE ? fs.readFileSync(SCHEMA_PATH, 'utf-8') : '';
+const d = SCHEMA_AVAILABLE ? describe : describe.skip;
 
-describe('hotel-redaug schema: create-order verb (Req 7.6)', () => {
+d('hotel-redaug schema: create-order verb (Req 7.6)', () => {
   it('create-order verb exists', () => {
     expect(verbs).toHaveProperty('create-order');
   });
@@ -60,7 +67,7 @@ describe('hotel-redaug schema: create-order verb (Req 7.6)', () => {
   });
 });
 
-describe('hotel-redaug schema: pay-order verb (Req 7.7)', () => {
+d('hotel-redaug schema: pay-order verb (Req 7.7)', () => {
   it('pay-order verb exists', () => {
     expect(verbs).toHaveProperty('pay-order');
   });
@@ -106,7 +113,7 @@ describe('hotel-redaug schema: pay-order verb (Req 7.7)', () => {
   });
 });
 
-describe('hotel-redaug schema: book verb removed (Req 10.1, 10.5)', () => {
+d('hotel-redaug schema: book verb removed (Req 10.1, 10.5)', () => {
   it('book verb does NOT exist', () => {
     expect(verbs).not.toHaveProperty('book');
   });
@@ -136,7 +143,7 @@ describe('hotel-redaug schema: book verb removed (Req 10.1, 10.5)', () => {
   });
 });
 
-describe('hotel-redaug schema: workflow describes create-then-pay (Req 7.7, 10.1)', () => {
+d('hotel-redaug schema: workflow describes create-then-pay (Req 7.7, 10.1)', () => {
   it('workflow.steps includes create-order and pay-order verbs in sequence', () => {
     const steps = schema.workflow.steps as Array<{ verb: string }>;
     const verbsInSteps = steps.map((s) => s.verb);
@@ -184,7 +191,7 @@ describe('hotel-redaug schema: workflow describes create-then-pay (Req 7.7, 10.1
   });
 });
 
-describe('hotel-redaug schema: description and selection_hints (Req 10.1)', () => {
+d('hotel-redaug schema: description and selection_hints (Req 10.1)', () => {
   it('summary describes create-then-pay flow', () => {
     const summary = schema.summary as string;
     expect(summary.toLowerCase()).toContain('create-then-pay');

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # gitleaks/gitleaks-action 对组织账号（CardInfoLink）要求付费 license，
+      # 直接跑官方 gitleaks 二进制规避（个人/组织均免费，无需申领）。
+      - name: gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --source . --no-banner --redact -v
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      # workspace 内部包（如 @agenzo/cli-core）需先 build 生成 dist/，否则依赖它的
+      # apps/* 测试在 vitest 里解析不到 entry（package.json main 指向 dist/index.js）。
+      - run: npm run build
+      - run: npm run test
+      - run: npm run check:error-codes
+      - run: npm audit --audit-level=high || true
