@@ -1,0 +1,47 @@
+# agenzo-cli 最低合并门禁
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+
+default:
+  interruptible: true
+  timeout: 15m
+
+stages:
+  - check
+
+variables:
+  NPM_CONFIG_REGISTRY: "https://registry.npmmirror.com"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm-cache"
+
+secret-scan:
+  stage: check
+  tags: [golang-ci-1]
+  image:
+    name: zricethezav/gitleaks:latest
+    entrypoint: [""]
+  script:
+    - gitleaks detect --source . --no-banner --redact -v
+
+quality-gate:
+  stage: check
+  tags: [golang-ci-1]
+  image: node:22-slim
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm-cache/]
+    policy: pull-push
+  before_script:
+    - npm ci --prefer-offline
+  script:
+    - npm run type-check
+    - npm test
+    - npm run build
+    - npm run check:error-codes
+    - npm audit --audit-level=high

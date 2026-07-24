@@ -123,3 +123,16 @@ Load [SKILL.md](SKILL.md) into the agent context. It covers the end-to-end onboa
 - [doc/admin-cli.md](doc/admin-cli.md)
 - [doc/token-cli.md](doc/token-cli.md)
 - [doc/merchant-cli.md](doc/merchant-cli.md)
+## CI gate
+
+GitLab CI blocks on TypeScript errors, Vitest failures, workspace build failures, error-code contract drift, leaked secrets, and High/Critical npm vulnerabilities.
+
+```bash
+npm run type-check
+npm test
+npm run build
+npm run check:error-codes
+npm audit --audit-level=high
+```
+
+Dependency security fixes must commit the updated `package-lock.json` and pass the High/Critical audit gate. The cross-repository gate and temporary-exception register is maintained in [`agenzo-platform/docs/governance/ci-gates.md`](../agenzo-platform/docs/governance/ci-gates.md).

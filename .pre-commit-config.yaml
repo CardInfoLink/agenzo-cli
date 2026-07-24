@@ -1,13 +1,27 @@
-# Pre-commit — vitest（commit 前跑单测）
+# Pre-commit — 类型、单测与错误码契约
 #
 # 一次性：npm ci && npx pre-commit install（或 pip install pre-commit && pre-commit install）
 repos:
   - repo: local
     hooks:
+      - id: type-check
+        name: TypeScript 类型检查
+        entry: npm run type-check
+        language: system
+        files: \.(ts|tsx)$
+        pass_filenames: false
+        require_serial: true
       - id: vitest
         name: vitest
         entry: npm run test
         language: system
         files: \.(ts|tsx|js|jsx|mjs|cjs)$
+        pass_filenames: false
+        require_serial: true
+      - id: error-code-contract
+        name: 错误码契约
+        entry: npm run check:error-codes
+        language: system
+        files: ^(contracts/|scripts/check-error-codes\.mjs|apps/|packages/)
         pass_filenames: false
         require_serial: true
