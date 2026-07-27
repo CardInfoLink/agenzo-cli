@@ -317,3 +317,70 @@ describe('ApiClient success payload unwrapping', () => {
     }
   });
 });
+
+/**
+ * traceparent 续链 — orchestrator 以子进程调用 CLI 时经 TRACEPARENT 环境变量传递
+ * W3C trace 上下文，CLI 必须转发为请求头，否则链路在 CLI 这一跳断开。
+ */
+describe('ApiClient traceparent forwarding', () => {
+  const VALID = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+
+  /** Helper: 捕获实际发出的请求头。 */
+  function mockFetchCapturingHeaders(): { headers: () => Record<string, string> } {
+    const spy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ code: '0', message: 'ok', data: {} }),
+    });
+    vi.stubGlobal('fetch', spy);
+    return {
+      headers: () =>
+        (spy.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>,
+    };
+  }
+
+  afterEach(() => {
+    delete process.env.TRACEPARENT;
+  });
+
+  it('forwards a valid TRACEPARENT env var as the traceparent header', async () => {
+    process.env.TRACEPARENT = VALID;
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['traceparent']).toBe(VALID);
+    // X-Request-Id 仍是本次 CLI 调用自己的关联 id，与 trace 串联互不干扰
+    expect(captured.headers()['X-Request-Id']).toBeTruthy();
+  });
+
+  it('trims surrounding whitespace before forwarding', async () => {
+    process.env.TRACEPARENT = `  ${VALID}  `;
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['traceparent']).toBe(VALID);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', ''],
+    ['malformed', 'garbage'],
+    ['wrong trace-id length', '00-abc-00f067aa0ba902b7-01'],
+    ['missing flags', '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7'],
+  ])('does not send the header when TRACEPARENT is %s', async (_label, value) => {
+    if (value === undefined) {
+      delete process.env.TRACEPARENT;
+    } else {
+      process.env.TRACEPARENT = value;
+    }
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['traceparent']).toBeUndefined();
+  });
+});
