@@ -1,6 +1,12 @@
 import { NetworkError, UpgradeRequiredError } from '../errors/errors.js';
 import { getCurrentVersion, isBelow, UPGRADE_COMMAND } from '../version/version.js';
 
+/**
+ * W3C Trace Context `traceparent` 格式：`<version>-<trace-id>-<parent-id>-<flags>`。
+ * 全零 trace-id 按规范无效，由下游解析时一并拒绝。
+ */
+const TRACEPARENT_PATTERN = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
+
 export interface ApiClientConfig {
   baseUrl: string;
   timeout?: number; // Default 30000ms
@@ -74,6 +80,14 @@ export class ApiClient {
       'User-Agent': `agenzo-admin-cli/${getCurrentVersion()}`,
       'X-Request-Id': this.requestId,
     };
+    // 续链上游 trace：orchestrator 以子进程方式调用 CLI 时，把 W3C traceparent 放在
+    // TRACEPARENT 环境变量里（见 orchestrator app/backend_gateway/universal.py）。
+    // 不转发的话 platform 只能看到本进程自生成的 X-Request-Id，链路在 CLI 这里断开。
+    // 格式非法时不发，避免把脏值写进下游 trace_id。
+    const traceparent = process.env.TRACEPARENT;
+    if (traceparent && TRACEPARENT_PATTERN.test(traceparent.trim())) {
+      headers['traceparent'] = traceparent.trim();
+    }
     if (auth.type === 'bearer') {
       headers['Authorization'] = `Bearer ${auth.token}`;
     } else if (auth.type === 'api-key') {
