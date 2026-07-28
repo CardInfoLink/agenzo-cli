@@ -7,9 +7,35 @@ import { getCurrentVersion, isBelow, UPGRADE_COMMAND } from '../version/version.
  */
 const TRACEPARENT_PATTERN = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 
+/** HTTP 超时默认值（毫秒）。可被构造参数或 AGENZO_CLI_HTTP_TIMEOUT_MS 覆盖。 */
+export const DEFAULT_HTTP_TIMEOUT_MS = 60000;
+
+/**
+ * 从环境变量读 HTTP 超时；缺失或非法（非数字、<=0）时返回 null 交由调用方回落默认值。
+ *
+ * CLI 通常是被 orchestrator spawn 的子进程，环境变量是最自然的注入口——与
+ * TRACEPARENT 走同一条路。这也是递减 deadline 的前置：上游要能按剩余预算
+ * 压缩本跳超时，就必须有地方把值传进来。
+ */
+export function httpTimeoutFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  const raw = env.AGENZO_CLI_HTTP_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 export interface ApiClientConfig {
   baseUrl: string;
-  timeout?: number; // Default 30000ms
+  /**
+   * HTTP 超时（毫秒）。优先级：本字段 > AGENZO_CLI_HTTP_TIMEOUT_MS > 60000。
+   *
+   * 显式传值优先于环境变量，这样调用方能对单个 client 做例外（如长轮询），
+   * 不受进程级设置牵连。
+   */
+  timeout?: number;
 }
 
 export interface ApiResponse<T> {
@@ -71,7 +97,7 @@ export class ApiClient {
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    this.timeout = config.timeout ?? 60000;
+    this.timeout = config.timeout ?? httpTimeoutFromEnv() ?? DEFAULT_HTTP_TIMEOUT_MS;
     this.requestId = crypto.randomUUID();
   }
 
