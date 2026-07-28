@@ -410,8 +410,10 @@ describe('ApiClient HTTP timeout configuration', () => {
     expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBe(
       DEFAULT_HTTP_TIMEOUT_MS,
     );
-    // 回归：注释曾写 30000 而代码是 60000，两者必须一致
-    expect(DEFAULT_HTTP_TIMEOUT_MS).toBe(60000);
+    // 写死具体数字是刻意的：本项是跨服务超时阶梯的一层（App 120s > orchestrator
+    // 90s > 本项 70s > provider 45s），单独调会破坏层级余量，所以必须连带改测试，
+    // 逼调整成为有意识的决定。也顺带防住"注释与代码漂移"（曾注释 30000 而代码 60000）。
+    expect(DEFAULT_HTTP_TIMEOUT_MS).toBe(70000);
   });
 
   it('reads AGENZO_CLI_HTTP_TIMEOUT_MS', () => {

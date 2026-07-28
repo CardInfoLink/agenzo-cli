@@ -7,8 +7,16 @@ import { getCurrentVersion, isBelow, UPGRADE_COMMAND } from '../version/version.
  */
 const TRACEPARENT_PATTERN = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 
-/** HTTP 超时默认值（毫秒）。可被构造参数或 AGENZO_CLI_HTTP_TIMEOUT_MS 覆盖。 */
-export const DEFAULT_HTTP_TIMEOUT_MS = 60000;
+/**
+ * HTTP 超时默认值（毫秒）。可被构造参数或 AGENZO_CLI_HTTP_TIMEOUT_MS 覆盖。
+ *
+ * 这个值是跨服务超时阶梯的一层，不能单独调：
+ *   App 120s > orchestrator 90s > **本项 70s** > provider 45s > ledger 5s
+ * 每层都要比下一层留出余量，好让下游的结构化错误有机会回传上来；两层取同值会导致
+ * 上游在下游写出错误原因之前就放弃。完整依据见 platform 仓
+ * docs/00-平台设计文档/01-跨仓文档/16-信任边界与超时预算设计.md。
+ */
+export const DEFAULT_HTTP_TIMEOUT_MS = 70000;
 
 /**
  * 从环境变量读 HTTP 超时；缺失或非法（非数字、<=0）时返回 null 交由调用方回落默认值。
