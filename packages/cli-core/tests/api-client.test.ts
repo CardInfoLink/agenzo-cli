@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiClient } from '../api-client/client.js';
+import {
+  ApiClient,
+  DEFAULT_HTTP_TIMEOUT_MS,
+  httpTimeoutFromEnv,
+} from '../api-client/client.js';
 import type { ApiError, UpstreamError } from '../api-client/client.js';
 
 /**
@@ -382,5 +386,66 @@ describe('ApiClient traceparent forwarding', () => {
     await client.get('/v1/ping', { type: 'none' });
 
     expect(captured.headers()['traceparent']).toBeUndefined();
+  });
+});
+
+/**
+ * HTTP 超时可配 — 递减 deadline 的前置。
+ *
+ * 此前超时恒为 60s：四个 app 入口都没传 timeout，也没有任何环境变量入口，
+ * 调用方无法覆盖。deadline 传播要求上游能按剩余预算压缩本跳超时，值传下来
+ * 却没地方生效就没有意义。
+ */
+describe('ApiClient HTTP timeout configuration', () => {
+  afterEach(() => {
+    delete process.env.AGENZO_CLI_HTTP_TIMEOUT_MS;
+  });
+
+  /** 读取实例上生效的超时值（private 字段，测试里按运行时结构取）。 */
+  function effectiveTimeout(c: ApiClient): number {
+    return (c as unknown as { timeout: number }).timeout;
+  }
+
+  it('falls back to the documented default', () => {
+    expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBe(
+      DEFAULT_HTTP_TIMEOUT_MS,
+    );
+    // 回归：注释曾写 30000 而代码是 60000，两者必须一致
+    expect(DEFAULT_HTTP_TIMEOUT_MS).toBe(60000);
+  });
+
+  it('reads AGENZO_CLI_HTTP_TIMEOUT_MS', () => {
+    process.env.AGENZO_CLI_HTTP_TIMEOUT_MS = '15000';
+
+    expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBe(15000);
+  });
+
+  it('lets an explicit config value win over the env var', () => {
+    process.env.AGENZO_CLI_HTTP_TIMEOUT_MS = '15000';
+
+    // 调用方对单个 client 做例外（如长轮询）不应被进程级设置牵连
+    expect(
+      effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com', timeout: 90000 })),
+    ).toBe(90000);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['whitespace', '   '],
+    ['not a number', 'soon'],
+    ['zero', '0'],
+    ['negative', '-1'],
+    ['infinity', 'Infinity'],
+  ])('ignores a %s env value and uses the default', (_label, value) => {
+    process.env.AGENZO_CLI_HTTP_TIMEOUT_MS = value;
+
+    expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBe(
+      DEFAULT_HTTP_TIMEOUT_MS,
+    );
+  });
+
+  it('parses the env var without touching process.env', () => {
+    expect(httpTimeoutFromEnv({ AGENZO_CLI_HTTP_TIMEOUT_MS: '2500' })).toBe(2500);
+    expect(httpTimeoutFromEnv({})).toBeNull();
   });
 });
