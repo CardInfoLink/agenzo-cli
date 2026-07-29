@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ApiClient,
+  DEADLINE_HEADER,
+  DEADLINE_RESERVE_MS,
   DEFAULT_HTTP_TIMEOUT_MS,
+  deadlineFromEnv,
   httpTimeoutFromEnv,
 } from '../api-client/client.js';
 import type { ApiError, UpstreamError } from '../api-client/client.js';
@@ -449,5 +452,149 @@ describe('ApiClient HTTP timeout configuration', () => {
   it('parses the env var without touching process.env', () => {
     expect(httpTimeoutFromEnv({ AGENZO_CLI_HTTP_TIMEOUT_MS: '2500' })).toBe(2500);
     expect(httpTimeoutFromEnv({})).toBeNull();
+  });
+});
+
+/**
+ * 递减 deadline — 链路第三跳。
+ *
+ * orchestrator 经 DEADLINE_MS 环境变量把剩余预算交给本进程（与 TRACEPARENT 同一
+ * 机制），本进程据此压缩自己的 HTTP 超时，并把扣掉自身耗时后的余量作为
+ * X-Deadline-Ms 传给 platform。
+ */
+describe('ApiClient deadline propagation', () => {
+  const originalDeadline = process.env.DEADLINE_MS;
+
+  afterEach(() => {
+    if (originalDeadline === undefined) {
+      delete process.env.DEADLINE_MS;
+    } else {
+      process.env.DEADLINE_MS = originalDeadline;
+    }
+    delete process.env.AGENZO_CLI_HTTP_TIMEOUT_MS;
+  });
+
+  function effectiveTimeout(c: ApiClient): number {
+    return (c as unknown as { timeout: number }).timeout;
+  }
+
+  function mockFetchCapturingHeaders() {
+    const spy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: '0', message: 'ok', data: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', spy);
+    return {
+      headers: () => (spy.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>,
+    };
+  }
+
+  describe('parsing DEADLINE_MS', () => {
+    it('reads a positive integer', () => {
+      expect(deadlineFromEnv({ DEADLINE_MS: '5000' })).toBe(5000);
+    });
+
+    it.each([
+      ['absent', undefined],
+      ['empty', ''],
+      ['not a number', 'soon'],
+      ['zero', '0'],
+      ['negative', '-1'],
+      ['float', '1500.5'],
+      ['scientific', '1e3'],
+    ])('treats a %s value as unset', (_label, value) => {
+      // 拒浮点串是刻意的：协议规定整数毫秒，容忍浮点会让不同语言的实现取整分歧
+      expect(deadlineFromEnv(value === undefined ? {} : { DEADLINE_MS: value })).toBeNull();
+    });
+  });
+
+  describe('shrinking our own timeout', () => {
+    it('a tight budget wins over the configured timeout', () => {
+      process.env.DEADLINE_MS = '3000';
+
+      const timeout = effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }));
+
+      expect(timeout).toBeLessThanOrEqual(3000 - DEADLINE_RESERVE_MS);
+    });
+
+    it('an ample budget does not raise the configured timeout', () => {
+      // 预算代表上游还愿意等多久，本跳没有权限超出自己的配置上限
+      process.env.DEADLINE_MS = '600000';
+
+      expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBe(
+        DEFAULT_HTTP_TIMEOUT_MS,
+      );
+    });
+
+    it('never yields a non-positive timeout', () => {
+      // 预算已小于回程预留时，超时不能变成 0 或负数（那会让请求立刻 abort）
+      process.env.DEADLINE_MS = '50';
+
+      expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBeGreaterThan(
+        0,
+      );
+    });
+
+    it('leaves the timeout alone when no budget is injected', () => {
+      delete process.env.DEADLINE_MS;
+
+      expect(effectiveTimeout(new ApiClient({ baseUrl: 'https://api.test.com' }))).toBe(
+        DEFAULT_HTTP_TIMEOUT_MS,
+      );
+    });
+  });
+
+  describe('forwarding to platform', () => {
+    it('sends the remaining budget as X-Deadline-Ms', async () => {
+      process.env.DEADLINE_MS = '30000';
+      const client = new ApiClient({ baseUrl: 'https://api.test.com' });
+      const captured = mockFetchCapturingHeaders();
+
+      await client.get('/v1/ping', { type: 'none' });
+
+      const sent = Number(captured.headers()[DEADLINE_HEADER]);
+      expect(sent).toBeGreaterThan(0);
+      // 必须严格小于收到的量：扣掉本进程已用时间与回程预留
+      expect(sent).toBeLessThanOrEqual(30000 - DEADLINE_RESERVE_MS);
+    });
+
+    it('omits the header when no budget is injected', async () => {
+      delete process.env.DEADLINE_MS;
+      const client = new ApiClient({ baseUrl: 'https://api.test.com' });
+      const captured = mockFetchCapturingHeaders();
+
+      await client.get('/v1/ping', { type: 'none' });
+
+      expect(captured.headers()[DEADLINE_HEADER]).toBeUndefined();
+    });
+
+    it('still sends 0 once the budget is spent', async () => {
+      // 发 0 而不是省略：让下游立刻返回 DEADLINE_EXCEEDED，而不是白跑一趟才超时
+      process.env.DEADLINE_MS = '1';
+      const client = new ApiClient({ baseUrl: 'https://api.test.com' });
+      const captured = mockFetchCapturingHeaders();
+
+      await client.get('/v1/ping', { type: 'none' });
+
+      expect(captured.headers()[DEADLINE_HEADER]).toBe('0');
+    });
+
+    it('does not disturb the existing trace and request id headers', async () => {
+      process.env.DEADLINE_MS = '30000';
+      const client = new ApiClient({ baseUrl: 'https://api.test.com' });
+      const captured = mockFetchCapturingHeaders();
+
+      await client.get('/v1/ping', { type: 'none' });
+
+      expect(captured.headers()['X-Request-Id']).toBeTruthy();
+      expect(captured.headers()[DEADLINE_HEADER]).toBeTruthy();
+    });
+  });
+
+  it('uses the same header name as py-commons', () => {
+    // 六仓必须对头名一致，写错一个字母就是静默断链
+    expect(DEADLINE_HEADER).toBe('x-deadline-ms');
   });
 });

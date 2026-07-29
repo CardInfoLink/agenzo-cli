@@ -35,6 +35,33 @@ export function httpTimeoutFromEnv(
   return parsed;
 }
 
+/** 递减 deadline 的 HTTP 头名（剩余毫秒）。与 py-commons 的 DEADLINE_HEADER 对齐。 */
+export const DEADLINE_HEADER = 'x-deadline-ms';
+
+/**
+ * 出站前为回程预留的毫秒数：下游返回后本进程还要解析 JSON、渲染输出、写回 stdout。
+ * 与 py-commons 的 DEFAULT_RESERVE_MS 取同值，六仓对"预留多少"保持一致。
+ */
+export const DEADLINE_RESERVE_MS = 200;
+
+/**
+ * 从环境变量读上游给的剩余预算（毫秒）；缺失或非法时返回 null。
+ *
+ * orchestrator spawn 本进程时经 DEADLINE_MS 注入（见其 backend_gateway/universal.py），
+ * 与 TRACEPARENT 同一机制。不接受浮点串——协议规定整数毫秒，容忍浮点会让不同语言的
+ * 实现出现取整分歧。
+ */
+export function deadlineFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  const raw = env.DEADLINE_MS;
+  if (raw === undefined || raw.trim() === '') return null;
+  if (!/^\d+$/.test(raw.trim())) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 export interface ApiClientConfig {
   baseUrl: string;
   /**
@@ -102,11 +129,36 @@ export class ApiClient {
    * a single trace_id server-side and can be followed as one chain in logs.
    */
   private readonly requestId: string;
+  /**
+   * 上游给的剩余预算（毫秒），来自 `DEADLINE_MS`；未注入时为 null。
+   *
+   * 进程启动时读一次而不是每请求读：一次 CLI 调用就是链路上的一跳，预算属于这一跳
+   * 整体。每请求重读会让多步流程（如 `payment-methods add` 的 create + poll + get）
+   * 各自拿到完整预算，等于凭空放大了本跳的时间上限。
+   */
+  private readonly deadlineMs: number | null;
+  /** 本进程开始时刻（单调时钟），用于算已用时间。 */
+  private readonly startedAt: number;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    this.timeout = config.timeout ?? httpTimeoutFromEnv() ?? DEFAULT_HTTP_TIMEOUT_MS;
+    this.deadlineMs = deadlineFromEnv();
+    this.startedAt = performance.now();
+    // 超时优先级：显式传参 > AGENZO_CLI_HTTP_TIMEOUT_MS > 默认值，再由剩余预算收紧。
+    // 预算只能压小不能放大——它代表上游还愿意等多久，本跳没有权限超出。
+    const configured = config.timeout ?? httpTimeoutFromEnv() ?? DEFAULT_HTTP_TIMEOUT_MS;
+    this.timeout =
+      this.deadlineMs === null
+        ? configured
+        : Math.min(configured, Math.max(1, this.deadlineMs - DEADLINE_RESERVE_MS));
     this.requestId = crypto.randomUUID();
+  }
+
+  /** 交给下游的剩余毫秒：扣掉本进程已用时间与回程预留；无预算时返回 null。 */
+  private remainingDeadlineMs(): number | null {
+    if (this.deadlineMs === null) return null;
+    const elapsed = performance.now() - this.startedAt;
+    return Math.max(0, Math.round(this.deadlineMs - elapsed - DEADLINE_RESERVE_MS));
   }
 
   private buildHeaders(auth: AuthMode): Record<string, string> {
@@ -114,6 +166,13 @@ export class ApiClient {
       'User-Agent': `agenzo-admin-cli/${getCurrentVersion()}`,
       'X-Request-Id': this.requestId,
     };
+    // 递减 deadline：把扣除本进程已用时间后的剩余量传给 platform，它再往下传给
+    // provider / ledger。每一跳都只能收紧，链路末端因此不会超出 App 的等待上限。
+    // 已耗尽时仍然发（值为 0），让下游能立刻返回 DEADLINE_EXCEEDED 而不是白跑一趟。
+    const remaining = this.remainingDeadlineMs();
+    if (remaining !== null) {
+      headers[DEADLINE_HEADER] = String(remaining);
+    }
     // 续链上游 trace：orchestrator 以子进程方式调用 CLI 时，把 W3C traceparent 放在
     // TRACEPARENT 环境变量里（见 orchestrator app/backend_gateway/universal.py）。
     // 不转发的话 platform 只能看到本进程自生成的 X-Request-Id，链路在 CLI 这里断开。
