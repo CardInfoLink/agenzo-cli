@@ -12,7 +12,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:error-codes": "node scripts/check-error-codes.mjs"
+    "check:error-codes": "node scripts/check-error-codes.mjs",
+    "release": "node scripts/publish-packages.mjs"
   },
   "workspaces": [
     "packages/*",
