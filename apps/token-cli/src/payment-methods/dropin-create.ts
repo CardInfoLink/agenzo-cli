@@ -35,7 +35,11 @@ export function registerDropinCreateCommand(
     .command('dropin-create')
     .description('Mint a Drop-in session and return the session id (no polling)')
     .option('--api-key <key>', 'API Key for authentication')
-    .option('--email <email>', 'Email used as the Drop-in session reference');
+    .option('--email <email>', 'Email used as the Drop-in session reference')
+    .option(
+      '--member <id>',
+      'End-user member id this card belongs to (optional; scopes the bound card to the member so it appears in list --member <id>)',
+    );
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();
@@ -52,10 +56,12 @@ export function registerDropinCreateCommand(
 
     // POST /payment-methods/dropin/create — backend creates a PENDING PM and
     // mints the Drop-in session for the front-end SDK. Returns synchronously.
+    // --member (optional) scopes the bound card to the end-user so it surfaces
+    // in list --member <id> (parity with unionpay-enroll / manual binds).
     const sessionResult = await deps.apiClient.post<DropinCreateResponse>(
       '/payment-methods/dropin/create',
       { type: 'api-key', key: apiKey },
-      { email },
+      { email, ...(opts.member ? { member_id: String(opts.member) } : {}) },
     );
 
     if (!sessionResult.success) {

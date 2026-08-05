@@ -575,6 +575,11 @@ export const hotelCreateOrderSchema: VerbSchema = {
       required: false,
       description: "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen). Forwarded verbatim to upstream createOrder bedType; upstream recommends passing the product-dimension bed type at booking.",
     },
+    'payment-method-id': {
+      type: 'string',
+      required: false,
+      description: 'Optional bound-card id (pay_per_call / EVO path). When set, the platform settles this order by pre-authorizing + capturing on that specific bound card; omit to let billing_mode decide.',
+    },
     'payment-token-id': {
       type: 'string',
       required: false,
