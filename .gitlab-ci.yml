@@ -28,6 +28,54 @@ secret-scan:
   script:
     - gitleaks detect --source . --no-banner --redact -v
 
+# ---------------------------------------------------------------------------
+# 护栏的 CI 一侧（2026-08-10 从 ledger-service 搬来，见 harness/INSTALL.md）
+#
+# **为什么必须有这一份**：只有 pre-commit 一道的检查等于可选的检查 ——
+# `SKIP=doc-refs git commit` 之后没有任何东西会再核对一次。
+# 源仓踩过这个：`facts-match` 长期只有本机一道，而它守的正是「文档数字过期」，
+# 那个数字确实过期了三次没人发现。
+#
+# 搬来的三个脚本只用 Python 标准库，`python:3.12-slim` 够用，不装任何依赖。
+# ---------------------------------------------------------------------------
+.harness-job:
+  stage: check
+  tags: [golang-ci-1]
+  image: python:3.12-slim
+  before_script:
+    - python3 --version
+
+护栏安装完整性:
+  extends: .harness-job
+  # 退出码：0 声明与实现一致 / 1 有该装没装且没写理由 / 2 装了的装置规则缺失或没接通。
+  # **不加 allow_failure** —— 声明与实现不一致是确定性判定，没有误报空间。
+  script:
+    - python3 scripts/check_install.py
+
+文档交叉引用:
+  extends: .harness-job
+  # 同上，失效引用是确定性判定，拦合并。
+  script:
+    - python3 scripts/check_doc_refs.py
+
+文件归属:
+  extends: .harness-job
+  # 本机那道带 --warn-only（观察期），**CI 这道不带** ——
+  # 用 allow_failure 提供「黄」这第三种状态：报得出来又不阻塞。
+  # 观察期结束（误报清零）后去掉 allow_failure，并把本机那道的 --warn-only 一起去掉。
+  allow_failure: true
+  script:
+    - python3 scripts/check_layout.py
+
+事故台账未闭环:
+  extends: .harness-job
+  # 未闭环事故是「发现的问题」，不该拦合并（还债需要时间），但必须一直可见。
+  # 脚本自己仍按 0/1/2 返回：**退 2 = 台账坏了，那不是「没有未闭环事故」**。
+  allow_failure: true
+  script:
+    - python3 scripts/incidents.py
+    - python3 scripts/incidents.py --check
+
 quality-gate:
   stage: check
   tags: [golang-ci-1]

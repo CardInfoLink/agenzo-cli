@@ -1,9 +1,59 @@
-# Pre-commit — 类型、单测与错误码契约
+# Pre-commit — 本仓的 TS 工具链 + 从 ledger-service 搬来的护栏
 #
 # 一次性：npm ci && npx pre-commit install（或 pip install pre-commit && pre-commit install）
+#
+# ── 护栏部分（2026-08-10 从 ledger-service 搬来，见 harness/INSTALL.md）──
+#
+# 与源仓写法的两处差异，都是 INSTALL.md 第 8 节 ① 要求的：
+#   1. Python 路径用系统 `python3` —— 本仓是纯 TypeScript 项目，没有 .venv
+#   2. **整段去掉 `scripts/harness_metrics.py wrap <id> --`** ——
+#      那是 metrics-wrapper 那道装置，本仓刻意没装（见 harness/installed.json）。
+#      留着它每道钩子都会恒失败并报「找不到文件」，而根因看起来像脚本没拷全。
+#
+# 搬来的三个脚本只用 Python 标准库，不需要装任何依赖。
+# 要绕某一道用显式的 `SKIP=<id> git commit ...`，不要用 --no-verify（那个不留痕）。
+#
+# **护栏排在 TS 那三道之前**：它们是纯文件读（毫秒级），
+# 而 type-check / vitest 要几秒到几十秒 —— 快的先跑，错得早发现。
 repos:
   - repo: local
     hooks:
+      # 安装完整性：装了哪些装置、规则文件在不在、钩子接没接上、
+      # 探测到的语言有没有声明谁在管。它是回答「规则会不会缺失」的那道。
+      - id: install-check
+        name: 护栏安装完整性（声明与实现是否一致）
+        entry: python3 scripts/check_install.py
+        language: system
+        files: ^(harness/.*\.json|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        require_serial: true
+      # 文档交叉引用：§章节号 / 链接 / 锚点 / 行数上限 / 裸事故编号 / 行内路径 /
+      # 代码围栏配平。受检范围在 harness/doc-targets.json —— 与下面的 files:
+      # 是两个独立开关，扩了那边不等于扩了这边。
+      - id: doc-refs
+        name: 文档交叉引用检查
+        entry: python3 scripts/check_doc_refs.py
+        language: system
+        files: \.(md|json)$
+        pass_filenames: false
+        require_serial: true
+      # 文件归属：新文件必须先在 harness/layout.json 里声明分类。
+      # **先只警告观察**（--warn-only），误报清零再去掉它改成拦截。
+      # verbose: true 是必需的：只警告 = 退出码 0，而 pre-commit 会吞掉
+      # 退出码 0 的输出 —— 不加它这道检查在本地提交时没有任何声音。
+      - id: layout-check
+        name: 文件归属检查（新文件必须先声明分类·仅警告）
+        entry: python3 scripts/check_layout.py --warn-only
+        language: system
+        pass_filenames: false
+        require_serial: true
+        verbose: true
+      # ── 以下是本仓原有的 TS 工具链，不是搬来的 ──
+      # harness/installed.json 的 `语言覆盖` 声明 typescript 的类型与测试由
+      # type-check / vitest 管，check_install.py 会核对这两个 id 真的存在。
+      #
+      # **事故台账（incidents.py）刻意不在这里** —— 台账里长期会有未闭环项，
+      # 放进 pre-commit 会永久拦住所有提交。它的位置是 CI（allow_failure，标黄）。
       - id: type-check
         name: TypeScript 类型检查
         entry: npm run type-check

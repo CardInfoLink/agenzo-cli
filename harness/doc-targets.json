@@ -1,0 +1,21 @@
+{
+  "_note": "doc-refs 的受检目标。本仓有 doc/ 与 docs/ 两个目录：doc/ 是四个 CLI 的用户文档，docs/ 是护栏自己的。两个都要收 —— 目标写少了 check_doc_refs.py 会扫更少的文件并照样打印「通过」。",
+  "目标": [
+    "doc",
+    "docs",
+    "contracts",
+    "README.md",
+    "AGENTS.md",
+    "SKILL.md",
+    "apps/admin-cli/README.md",
+    "apps/merchant-cli/README.md",
+    "apps/token-cli/README.md"
+  ],
+  "刻意不收进来": {
+    "apps/payment-cli/README.md": "**它不存在** —— 四个 CLI 里只有 payment-cli 没有 README。这是装护栏时 doc-refs 的第三态报出来的（受检目标不存在 → 退 2，而不是静默缩小范围）。补了 README 之后要回来把这一行挪进「目标」。",
+    "harness": "目录里是 JSON 规则文件，doc-refs 会把 JSON 字符串里的路径也当引用查。portable.json 是从 ledger-service 整份拷来的，里面写着 .kiro/steering/code-review-checklist.md 这类源仓才有的路径 —— 收进来会报一堆本仓根本不该有的失效引用。见 INSTALL.md 第 7 节。",
+    ".claude/skills": "GitNexus 自动生成的 skill 文档，内容由工具维护，本仓不改。",
+    "CLAUDE.md": "与 AGENTS.md 内容相同（gitnexus 生成两份），收一份就够，避免同一处失效引用报两遍。",
+    "apps/*/docs/": "四个 CLI 的测试设计与快照文档，内容是历史记录（e2e-snapshot / command-matrix），引用的是当时的后端接口。等它们被整理成现行文档再收。"
+  }
+}

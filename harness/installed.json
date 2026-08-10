@@ -1,0 +1,31 @@
+{
+  "版本": "0.1.0",
+  "说明": "本仓装了哪些可搬装置。check_install.py 据此判断规则文件缺没缺、钩子接没接上。",
+  "装置": [
+    "install-check",
+    "doc-refs",
+    "layout-check",
+    "incidents"
+  ],
+  "刻意不装": {
+    "facts-match": "本仓文档里还没有被反复抄写的数字（钩子道数、CI job 数都没写进文档）。现在装它的正则匹配不到任何东西 —— 那是空跑，比没装更糟。**第一次在文档里写下「N 道钩子」这类数字时装它。**",
+    "gitnexus-fresh": "本仓有 .codegraph/ 而没有 .gitnexus/，这道检查读的是 .gitnexus/meta.json，装了必然恒退 2（第三态）。要装先跑 `node .gitnexus/run.cjs analyze` 建索引。",
+    "metrics-wrapper": "它要把每道钩子的 entry 都改成经过 harness_metrics.py。本仓这次才第一次接上三道护栏钩子、还会调整，耗时数据也没有分析价值。**装 ai-review 时必须一起装**（kiro_review.py 硬依赖它读 harness/budget.json）。",
+    "arch-check": "**空规则集是正确起点，但连规则文件都还不该有。** 本仓台账现在只有一条（INC-001，缺 README），还长不出架构约束。抄 ledger 的 R1/R2/R3 等于搬错约束 —— 那三条是账本域的（分录不可改 / 金额整数 / 租户隔离），CLI 仓一条都不适用。等台账里出现「某类改动反复出事」再装。",
+    "sdd-trace": "本仓没有 .kiro/specs/*/tasks.md，装了恒退 2（第三态）。先有 spec 再装这道。",
+    "ai-review": "**下一批装。** 前置已探过（scripts/ai_review_preflight.py）：目标仓有 .gitlab-ci.yml、源仓 job 里 DEV_HOST/DEV_USER/REVIEW_USER 都是写死的可以直接抄。**还没确认的是两个 CI 变量**（agenzo_testing_key、AI_REVIEW_GITLAB_TOKEN）—— 那要 Maintainer 权限才读得到，探针刻意不猜。"
+  },
+  "语言覆盖说明": "可搬的十道装置里**没有一道在检查代码本身**（都是文档 / 台账 / 归属 / 事实 / 审查流程）。所以「声明与实现一致」不等于「TypeScript 代码被检查了」。这一段声明的是「谁在管」，check_install.py 会核对声明的钩子 id 真的存在于 .pre-commit-config.yaml。",
+  "语言覆盖": {
+    "typescript": {
+      "风格": "无：本仓没装 eslint / prettier，也没有本仓专用的风格约定。**这是一个显式的决定，不是忘了** —— 装 eslint 要先定规则集，而定规则集应该由本仓作者拍，不是装护栏时顺手加。",
+      "类型": "type-check",
+      "测试": "vitest",
+      "备注": "type-check（tsc --noEmit）与 vitest 两道钩子是本仓**原有**的，不是这次加的 —— 也就是说这两格不是为了让检查变绿而造的空壳钩子，它们本来就在跑。"
+    }
+  },
+  "本次安装的欠账": {
+    "CI": "护栏的三道检查还没接进 .gitlab-ci.yml。**只有 pre-commit 一道等于可选的检查** —— `SKIP=doc-refs git commit` 之后没有任何东西会再核对一次。这一步在同一个 MR 里做。",
+    "pre-commit install": "钩子已写进 .pre-commit-config.yaml，但本机是否跑过 `pre-commit install` 由使用者自己确认。"
+  }
+}
