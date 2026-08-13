@@ -124,6 +124,8 @@ find-destination [→ hotel-filters] → search → hotel-detail → quote
 ```
 
 - `hotel-detail` before `quote`: `quote`'s `rates[].room_name` is a bare label with no room detail. Pair each rate with `hotel-detail`'s `rooms[]` (match on `room_name`) so the user picks a rate with real room info in front of them.
+- `--nationality` is the guest's ISO 3166-1 alpha-2 code (`CN` / `JP` / `US` ...). **Ask the user** — never infer it from their language, name or destination. Omitting it defaults to `CN`, which changes rate eligibility and can make the property refuse check-in, and the supplier disclaims liability when a wrong or defaulted nationality was sent. Pass the same code to `create-order`.
+- `breakfast_num` inside `price_items[]` is an upstream enum, not a count to normalize: `-1` = bed breakfast, `0` = no breakfast, `1+` = that many breakfasts. These are distinct breakfast products — copy the value verbatim into `create-order` and never collapse `-1` to `0`.
 - `product_token` is opaque — pass it unchanged to `create-order`; `--price-items` must be copied **verbatim** from `quote` as a JSON array.
 - `create-order` locks inventory and charges nothing. There is no combined "book" verb.
 - All amounts are decimal units, never cents.
