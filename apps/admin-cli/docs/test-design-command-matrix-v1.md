@@ -67,7 +67,7 @@ agenzo-admin-cli --version
 
 ### 3.2 Backend Environment
 
-- Testing host: `https://agent-test.everonet.com` (or local `http://localhost:8000`).
+- Testing host: `https://agent-dev.agenzo.com` (or local `http://localhost:8000`).
 - API path: `/api/v3/agent-pay` (default).
 - At least one email inbox capable of receiving mail for magic-link login (use team-agreed test email per existing conventions).
 
@@ -387,17 +387,17 @@ Covers: Req 3.1; cli-design §2.4.3.
 
 | Case | Scenario | Input | Expected |
 | --- | --- | --- | --- |
-| TC-CFG-SET-01 | Host matches existing credential | `config set-host https://agent.everonet.com` (credential exists for this host) | Writes `api_host`; auto `setActiveOrg(match)`; data=`{api_host,active_org}`; exit 0 |
-| TC-CFG-SET-02 | Host has no matching credential | `config set-host https://agent-test.everonet.com` (no credential) | Writes host; clears `active_org`; stderr hint `Please run login.`; exit 0 |
+| TC-CFG-SET-01 | Host matches existing credential | `config set-host https://agent.agenzo.com` (credential exists for this host) | Writes `api_host`; auto `setActiveOrg(match)`; data=`{api_host,active_org}`; exit 0 |
+| TC-CFG-SET-02 | Host has no matching credential | `config set-host https://agent-dev.agenzo.com` (no credential) | Writes host; clears `active_org`; stderr hint `Please run login.`; exit 0 |
 | TC-CFG-SET-03 | Missing host positional argument | `config set-host` | Missing parameter → `PARAM_*`; exit 1 |
-| TC-CFG-SET-04 | No scheme | `config set-host agent.everonet.com` | Validation failure; exit 1; config not written |
+| TC-CFG-SET-04 | No scheme | `config set-host agent.agenzo.com` | Validation failure; exit 1; config not written |
 | TC-CFG-SET-05 | No API call | Packet capture | This command makes no HTTP requests |
 | TC-CFG-SET-06 | Rejects idem flag | `config set-host <h> --idempotency-key k` | Rejected; non-0 |
 | TC-CFG-SET-07 | Output deduplication (regression GAPA-049) | `config set-host <h>` (table) | Status lines (✓/ℹ) appear in stderr only once each; stdout contains only payload projection (API Host/Active Org), no status icons |
 | TC-CFG-SET-08 | Rejects public HTTP | `config set-host http://example.com` | Validation failure; exit 1; config not written (only `http://localhost` / `http://127.0.0.1` allowed for local development) |
 
 ```bash
-agenzo-admin-cli config set-host https://agent-test.everonet.com --format json; echo "exit=$?"
+agenzo-admin-cli config set-host https://agent-dev.agenzo.com --format json; echo "exit=$?"
 jq .api_host ~/.agenzo-admin-cli/config.json   # should be the new host
 ```
 
@@ -428,7 +428,7 @@ Covers: Req 3.2; cli-design §2.4.5.
 
 | Case | Scenario | Input | Expected |
 | --- | --- | --- | --- |
-| TC-CFG-RST-01 | Reset with matching credential | Currently on test host, default host credential exists, execute `config reset-host` | Host written back to `https://agent.everonet.com`; switches to matching org; exit 0 |
+| TC-CFG-RST-01 | Reset with matching credential | Currently on test host, default host credential exists, execute `config reset-host` | Host written back to `https://agent.agenzo.com`; switches to matching org; exit 0 |
 | TC-CFG-RST-02 | Reset with no match | No default host credential | Host written back to default; clears active_org; prompts login; exit 0 |
 | TC-CFG-RST-03 | Equivalent to set-host | Compare `reset-host` and `set-host <default>` behavior | Identical behavior |
 | TC-CFG-RST-04 | Rejects idem flag | `config reset-host --idempotency-key k` | Rejected; non-0 |
@@ -436,7 +436,7 @@ Covers: Req 3.2; cli-design §2.4.5.
 
 ```bash
 agenzo-admin-cli config reset-host --format json; echo "exit=$?"
-jq .api_host ~/.agenzo-admin-cli/config.json   # == https://agent.everonet.com
+jq .api_host ~/.agenzo-admin-cli/config.json   # == https://agent.agenzo.com
 ```
 
 ---

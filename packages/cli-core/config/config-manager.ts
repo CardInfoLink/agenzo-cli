@@ -14,13 +14,13 @@ const DEFAULT_API_PATH = '/api/admin/v1';
 const DEFAULT_CONFIG: AppConfig = {
   active_org: null,
   active_developer_id: null,
-  api_host: 'https://agent.everonet.com',
+  api_host: 'https://agent.agenzo.com',
   api_path: DEFAULT_API_PATH,
 };
 
 export const BUILTIN_PROFILES: Record<string, string> = {
-  production: 'https://agent.everonet.com',
-  testing: 'https://agent-test.everonet.com',
+  production: 'https://agent.agenzo.com',
+  testing: 'https://agent-dev.agenzo.com',
 };
 
 /**

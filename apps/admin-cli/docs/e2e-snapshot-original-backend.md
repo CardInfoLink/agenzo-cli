@@ -93,9 +93,9 @@ Exit: 0
 
 ### Table
 ```
-✓ API host reset to: https://agent.everonet.com
+✓ API host reset to: https://agent.agenzo.com
 ℹ No organization found for this host. Please run login.
-API Host    https://agent.everonet.com
+API Host    https://agent.agenzo.com
 Active Org  (none)
 ```
 
@@ -103,8 +103,8 @@ Active Org  (none)
 ```json
 {
   "profile": "production",
-  "endpoint": "https://agent.everonet.com",
-  "api_host": "https://agent.everonet.com",
+  "endpoint": "https://agent.agenzo.com",
+  "api_host": "https://agent.agenzo.com",
   "active_org": null
 }
 ```

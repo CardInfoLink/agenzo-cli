@@ -1,283 +1,260 @@
 # token-cli — Payment Methods & Tokens (`agenzo-token-cli`)
 
-`@agenzo/token-cli` — runtime plane: manage payment methods (`payment-methods`) and mint payment tokens (`payment-tokens`). **API Key** auth (`--api-key`, the full `sk_<env>_...` string from [admin-cli](admin-cli.md) `keys create`).
+`@agenzo/token-cli` — runtime plane: manage payment methods (`payment-methods`) and mint payment tokens (`payment-tokens`). **API Key** auth: every verb takes `--api-key` (the full `sk_<env>_...` string from [admin-cli](admin-cli.md) `keys create`). There is no login/session — the key is passed per command (prompted interactively if omitted).
 
 See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exit codes, idempotency).
 
 ## Command matrix
 
-8 commands, all API-Key auth (`--api-key`):
+13 commands, all API-Key auth (`--api-key`):
 
 | Noun | Verb | Type | Description |
 |---|---|---|---|
-| `payment-methods` | `add` | Write | Add a payment method — Evo 3DS (`--mode manual`/`dropin`) or UnionPay enrollment (`--payment-brand unionpay`) — + poll verification |
-| `payment-methods` | `list` | Read | List payment methods |
+| `payment-methods` | `add` | Write | Add a payment method — Evo manual 3DS, Evo Drop-in (`--mode dropin`), or UnionPay enrollment (`--payment-brand unionpay`). Blocks and polls to a terminal status. |
+| `payment-methods` | `list` | Read | List payment methods (optionally `--member`) |
 | `payment-methods` | `get` | Read | View payment method details |
-| `payment-methods` | `disable` | Write | Disable a payment method |
+| `payment-methods` | `disable` | Write | Disable a payment method (revokes its tokens) |
+| `payment-methods` | `dropin-create` | Write | Mint a Drop-in session and return `session_id` — **no polling** |
+| `payment-methods` | `dropin-status` | Read | Single Drop-in verification status check |
+| `payment-methods` | `unionpay-enroll` | Write | Start UnionPay enrollment and return `enroll_url` — **no polling** |
+| `payment-methods` | `unionpay-status` | Read | Single UnionPay enrollment status check |
 | `payment-tokens` | `create` | Write | Create a token (VCN / Network Token / X402) |
-| `payment-tokens` | `list` | Read | List payment tokens |
-| `payment-tokens` | `get` | Read | View token details |
+| `payment-tokens` | `list` | Read | List payment tokens (optionally `--type` / `--member`) |
+| `payment-tokens` | `get` | Read | View token details (`--reveal` for full VCN) |
 | `payment-tokens` | `revoke` | Write | Revoke a token |
+| `payment-tokens` | `unionpay-create` | Write | Start a UnionPay network-token checkout and return `checkout_url` — **no polling** |
+
+**Blocking vs non-blocking.** `add` and `create` are the operator-facing verbs: they start the flow *and* poll for the result, so the process must stay alive. The `dropin-*` / `unionpay-*` pairs are the non-blocking split for programmatic callers (e.g. the agent orchestrator): the `-create` / `-enroll` half returns the URL or session id synchronously, and the caller polls the `-status` half (or `payment-tokens get`) on its own cadence.
+
+**Global flags:** `--verbose`, `--yes` (skip confirmations — required for automation), `--format json|table` (or `AGENZO_FORMAT`).
+
+**Verb schema discovery:** `add`, `list`, `get`, `disable`, `payment-tokens create|list|get|revoke` support `--help --format json`, which prints a machine-readable flag/response schema instead of text help. The non-blocking verbs (`dropin-create`, `dropin-status`, `unionpay-enroll`, `unionpay-status`, `unionpay-create`) do not.
+
+**Id arguments:** `payment-methods get`, `payment-tokens get`, `dropin-status`, and `unionpay-status` accept the id as a positional argument *or* as a flag (`--id` for `get`, `--payment-method-id` for the `*-status` verbs), because the orchestrator's CLI gateway can only pass `--flag value` pairs.
 
 ## Payment Methods
 
 ```bash
-agenzo-token-cli payment-methods add --api-key <key>
-agenzo-token-cli payment-methods add --api-key <key> --email user@example.com --card-number 2223001870064586 --expiry 1226 --cvv 935
-agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@example.com   # Drop-in (DropInSDK) — no card details at the terminal
-agenzo-token-cli payment-methods list --api-key <key>
+# Evo manual 3DS (blocks until ACTIVE / FAILED / 15-min timeout)
+agenzo-token-cli payment-methods add --api-key <key> --email user@example.com \
+  --card-number 2223001870064586 --expiry 1226 --cvv 935 --idempotency-key idem_001
+
+# Evo Drop-in (blocks up to 30 min; --no-poll to return immediately)
+agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@example.com
+
+# UnionPay enrollment (blocks up to 60s)
+agenzo-token-cli payment-methods add --payment-brand unionpay --member <member_id> \
+  --api-key <key> --email user@example.com
+
+agenzo-token-cli payment-methods list --api-key <key> [--member <member_id>]
 agenzo-token-cli payment-methods get <pm_id> --api-key <key>
-agenzo-token-cli payment-methods disable <pm_id> --api-key <key>
+agenzo-token-cli payment-methods disable <pm_id> --api-key <key> --idempotency-key idem_002
 ```
 
-### add — Add Payment Method + 3DS (onboarding Step 4)
+### add — flags
 
-- **Ask: `--email`** — This is for 3DS verification and may differ from the developer or login email. MUST ask the user which email to use. Do NOT default to any previously used email.
-- `--api-key`: Use the key from admin-cli Step 3 (do not ask again).
-- Supports `--card-number`, `--expiry`, and `--cvv` flags to skip interactive prompts.
-- When `--cvv` is not provided, CVV is prompted interactively (masked input).
-- ⚠️ Security note: `--cvv` flag is intended for AI Agent / automation use. The value may appear in shell history.
-- Initiates 3DS verification — the response carries a `verification_url`; the user must open it in a **browser** to complete 3DS (not via email).
-- The CLI keeps polling status until the card becomes ACTIVE, so **the process must stay alive** for the whole 3DS flow (for automation, run it in the background; do not kill it / do not close its stdin).
-- On success, the card becomes ACTIVE (a 32-char hex payment-method id).
-- Duplicate cards (same first6 + last4) are overwritten, not rejected.
+| Flag | Applies to | Notes |
+|---|---|---|
+| `--api-key <key>` | all | Reuse the key from admin-cli; do not ask again |
+| `--type <type>` | all | Default `card` |
+| `--payment-brand <brand>` | all | `evo` (default) or `unionpay` |
+| `--mode <mode>` | evo | `manual` (default) or `dropin` |
+| `--email <email>` | all | Manual: 3DS verification address. Dropin: session reference. UnionPay: binding email. |
+| `--card-number` / `--expiry <mmyy>` / `--cvv` | evo manual | Skip interactive prompts. ⚠️ Values may land in shell history — automation only. |
+| `--idempotency-key <key>` | evo manual | Required; prompted if omitted, hard-fails under `--yes`. Not used by dropin/unionpay. |
+| `--no-poll` | evo dropin | Mint the session, print it, exit — for front-end-driven flows |
+| `--member <id>` | unionpay | **Required** (prompted interactively; hard-fails under `--yes`) |
+| `--return-url <url>` | unionpay | Platform-side post-enrollment navigation hint; never sent to UnionPay |
 
-### add `--mode dropin` — Drop-in (DropInSDK) flow
+### add — Evo manual 3DS
 
-Alternative to the manual flow: the CLI mints a hosted **LinkPay** session and the cardholder enters their card in the **DropIn SDK** widget rendered in the agent's own front-end. PAN/CVV are **never** collected by the CLI or the backend.
+1. Collects email + card details, POSTs `/payment-methods/create` with the `Idempotency-Key` header.
+2. Prints the created PM (PENDING), then polls verification status every **3s for up to 15 minutes**.
+3. The user must complete 3DS in a **browser** — keep the process alive for the whole flow (background it for automation; do not close stdin).
+4. On ACTIVE the CLI re-fetches and prints brand / first6 / last4. On timeout it prints the `payment-methods get <pm_id>` follow-up hint.
+5. Duplicate cards (same first6 + last4) are overwritten, not rejected.
+
+### add `--mode dropin` — Evo Drop-in
+
+The CLI mints a hosted LinkPay session; the cardholder enters their card in the **DropIn SDK** rendered by your own front-end. PAN/CVV never reach the CLI or the backend. Card flags and `--idempotency-key` are unused in this mode.
+
+1. `POST /payment-methods/dropin/create` → prints `Session ID` (full `{ id, session_id, merchant_trans_id, status }` under `--format json`).
+2. Your front-end initialises the SDK with that session id.
+3. The CLI polls verification status every **5s for up to 30 minutes** unless `--no-poll` was passed.
+4. ACTIVE prints brand + last4. `FAILED` / `EXPIRED` / timeout print the `PM ID` and exit non-zero.
+
+Front-end integration (abridged):
 
 ```bash
-agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@example.com
+npm install cil-dropin-components
 ```
 
-- **Ask: `--email`** — used as the LinkPay reference for the session. MUST ask the user.
-- `--api-key`: reuse the key from admin-cli Step 3 (do not ask again).
-- Card flags (`--card-number` / `--expiry` / `--cvv`) and `--idempotency-key` are **not** used in this mode.
+```javascript
+import DropInSDK from 'cil-dropin-components'
 
-**How it works:**
+const sdk = new DropInSDK({
+  id: '#dropInApp',
+  type: 'payment',
+  sessionID: '<session_id from CLI output>',
+  mode: 'embedded',            // or 'bottomUp' for mobile
+  environment: 'HKG_prod',     // 'UAT' for sandbox
+  payment_completed: (d) => console.log('added', d.merchantTransID),
+  payment_failed: (d) => console.log('failed', d.message),
+  payment_cancelled: () => {}, // session stays PENDING; the CLI keeps polling
+})
+```
 
-1. The CLI creates a LinkPay session and prints a `Session ID` (the full `{ id, session_id, merchant_trans_id, status }` payload under `--format json`).
-2. The agent renders the DropIn SDK in their own front-end using that `Session ID` (see below).
-3. The CLI polls verification status every 5 seconds (up to 30 minutes) — **keep the process alive** for the whole flow (run it in the background for automation; do not kill it / do not close its stdin).
-4. Once the user completes the card form + 3DS in the widget, the PM becomes **ACTIVE** and the CLI prints brand + last4, then exits.
-5. The resulting payment-method id can be used with `payment-tokens create` exactly like a manual-mode card.
-
-**Drop-in front-end integration** (the agent renders this in their own web page):
-
-1. Install the SDK:
-   ```bash
-   npm install cil-dropin-components
-   ```
-   or load via CDN:
-   ```html
-   <script src="https://cdn.jsdelivr.net/npm/cil-dropin-components@latest/dist/index.min.js"></script>
-   ```
-2. Add a container element:
-   ```html
-   <div id="dropInApp"></div>
-   ```
-3. Initialise with the `Session ID` from the CLI output:
-   ```javascript
-   import DropInSDK from 'cil-dropin-components'
-
-   const sdk = new DropInSDK({
-     id: '#dropInApp',
-     type: 'payment',
-     sessionID: '<session_id from CLI output>',
-     locale: 'en-US',
-     mode: 'embedded',           // or 'bottomUp' for mobile
-     environment: 'HKG_prod',    // use 'UAT' for sandbox testing
-     appearance: { colorBackground: '#fff' },
-     payment_completed: (data) => {
-       // Added successfully — the CLI detects this via polling.
-       // data: { type, merchantTransID, sessionID }
-       console.log('Payment method added:', data.merchantTransID)
-     },
-     payment_failed: (data) => {
-       // Failed — the CLI also detects this.
-       // data: { type, merchantTransID, sessionID, code, message }
-       console.log('Add failed:', data.message)
-     },
-     payment_cancelled: (data) => {
-       // User cancelled — session stays PENDING, the CLI keeps polling.
-       console.log('User cancelled')
-     },
-   })
-   ```
-4. That's it — the CLI handles all backend status polling and prints the final result.
-
-**Key points:**
-- The `Session ID` is one-time use. If the session expires (30 min), re-run the same command with the same `--email` to mint a fresh session — the old PENDING record is overwritten.
-- `FAILED` / `EXPIRED` (or a 30-minute timeout) are reported with the `PM ID` and a non-zero exit code; the underlying card is never exposed to the CLI.
+The session id is single-use. If it expires (30 min), re-run with the same `--email` — the PENDING record is reused.
 
 ### add `--payment-brand unionpay` — UnionPay card enrollment
 
-Bind a UnionPay card via the UPI Agent Pay enrollment flow. Unlike the Evo 3DS flow, **no card details are entered at the terminal** — the user completes card binding on a UnionPay-hosted page via passkey authentication.
+No card details are entered at the terminal. The user completes enrollment by authenticating on a UnionPay-hosted page (no OTP, no email link).
+
+1. `POST /payment-methods/create` with `payment_brand=unionpay` + `member_id` (no idempotency key — this is an enrollment, not a charge).
+2. The CLI prints `ID`, `Status`, **`Enroll URL`**, `Correlation ID`.
+3. **The user must open the Enroll URL in a browser.**
+4. The CLI polls `GET /payment-methods/{id}` every **5s for up to 60s**. UnionPay's webhook flips PENDING → ACTIVE; the CLI then prints brand / first6 / last4.
+5. On timeout the PM stays PENDING — check later with `payment-methods get <pm_id>` or `unionpay-status <pm_id>`.
+
+`--member <id>` is caller-defined (your own end-user id) and must be **stable**: the same value is reused server-side for token creation, so a mismatch makes UnionPay reject the token request.
+
+### Non-blocking pairs (programmatic callers)
 
 ```bash
-agenzo-token-cli payment-methods add --payment-brand unionpay --member <member_id> --api-key <key> --email user@example.com
+# Drop-in: mint session, then poll separately
+agenzo-token-cli payment-methods dropin-create --api-key <key> --email user@example.com [--member <id>]
+agenzo-token-cli payment-methods dropin-status <pm_id> --api-key <key>
+# or: --payment-method-id <pm_id>
+
+# UnionPay: get enroll_url, then poll separately
+agenzo-token-cli payment-methods unionpay-enroll --api-key <key> --member <id> --email user@example.com [--return-url <url>]
+agenzo-token-cli payment-methods unionpay-status <pm_id> --api-key <key>
 ```
 
-- `--payment-brand unionpay`: selects the UnionPay payment brand (default is `evo`).
-- **`--member <id>`** (required): end-user identity this card belongs to. The caller defines this value (e.g. your system's user ID). Must be stable — the same member_id is reused for subsequent token creation.
-- `--api-key`: API Key from admin-cli (do not ask again if already provided).
-- `--email`: email address associated with this binding.
-- `--return-url <url>` (optional): front-end redirect URL returned alongside the terminal status. After enrollment completes, the caller can navigate the user to this URL. Not sent to UnionPay — purely a platform-side hint for post-enrollment navigation. If omitted, the caller determines its own post-enrollment behaviour.
-- Card details (`--card-number` / `--expiry` / `--cvv`), `--mode`, and `--idempotency-key` are **not used** in this mode.
+- `dropin-create` — returns `PM ID`, `Session ID`, `Merchant Trans ID`, `Status`. `--member` is optional here and scopes the bound card so it shows up under `list --member <id>`.
+- `unionpay-enroll` — returns `ID`, `Status`, `Enroll URL`, `Correlation ID`. `--member` is required.
+- Both `*-status` verbs do a **single** status check and exit. Status enum: `PENDING | ACTIVE | FAILED | DISABLED | EXPIRED`. `dropin-status` reads `/payment-methods/verification/status`; `unionpay-status` reads `/payment-methods/{id}`.
 
-**How it works:**
+### disable
 
-1. The CLI calls `POST /payment-methods/create` with `payment_brand=unionpay` and `member_id`.
-2. The platform dispatches to UnionPay's Enrollment API and returns an `Enroll URL`.
-3. The CLI prints the Enroll URL and starts polling (every 5s, up to 60s) for the card to become ACTIVE.
-4. **⚠️ The user MUST open the Enroll URL in a browser** to complete card binding. On the UnionPay page, the user authenticates via **passkey** (fingerprint/face/PIN). No OTP or email verification — it's passkey-based.
-5. Once the user completes binding, UnionPay sends a webhook callback to the platform, the card status transitions from PENDING → ACTIVE, and the CLI displays the activated card details (Brand, First 6, Last 4).
-6. If the card is not activated within 60s, the CLI times out. The user can check status later with `payment-methods get <pm_id>`.
-
-**Key points:**
-- UnionPay card binding is **asynchronous**: the CLI prints a URL and waits — the user must act in a browser.
-- The `member_id` is caller-defined and stable. Using the same `member_id` across enrollment and token creation is mandatory — mismatched values will cause UnionPay to reject the token request.
-- On success, the card appears in `payment-methods list` with `payment_brand=unionpay`, same field shape as Evo cards (ID, Brand, First 6, Last 4).
+`POST /payment-methods/{id}/disable`. Prints `Status` + `Revoked tokens` — disabling a card revokes the payment tokens issued against it. `--idempotency-key` is required (prompted interactively, hard-fails under `--yes`). Only run this when the user explicitly asks.
 
 ## Payment Tokens
 
 ```bash
-# Interactive mode
+# Interactive
 agenzo-token-cli payment-tokens create --api-key <key>
 
-# Full-flag mode (for AI Agents, always use --yes). --idempotency-key is REQUIRED — the CLI never auto-generates one.
-agenzo-token-cli --yes payment-tokens create --type vcn --api-key <key> --card 2223001870064586 --amount 30 --idempotency-key idem_001
-agenzo-token-cli --yes payment-tokens create --type network-token --api-key <key> --card 2223001870064586 --idempotency-key idem_002
-agenzo-token-cli --yes payment-tokens create --type x402 --api-key <key> --payment-method-id <pm_id> --pay-to 0xABC... --amount 1000000 --nonce abc123 --network base_sepolia --deadline 1777457396 --idempotency-key idem_003
+# Automation (--yes): --idempotency-key is REQUIRED, never auto-generated
+agenzo-token-cli --yes payment-tokens create --type vcn --api-key <key> \
+  --card 4586 --amount 30 --idempotency-key idem_001
+agenzo-token-cli --yes payment-tokens create --type network-token --api-key <key> \
+  --payment-method-id <pm_id> --idempotency-key idem_002
+agenzo-token-cli --yes payment-tokens create --type x402 --api-key <key> --payment-method-id <pm_id> \
+  --pay-to 0xABC... --amount 1000000 --nonce abc123 --network base_sepolia \
+  --deadline 1777457396 --idempotency-key idem_003
 
-# Query and revoke
-agenzo-token-cli payment-tokens list --api-key <key>
-agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
-agenzo-token-cli payment-tokens get <ptk_id> --api-key <key> --reveal  # reveal full VCN only when needed for payment
-agenzo-token-cli payment-tokens revoke <ptk_id> --api-key <key>
+agenzo-token-cli payment-tokens list --api-key <key> [--type vcn] [--member <id>]
+agenzo-token-cli payment-tokens get <ptk_id> --api-key <key> [--reveal]
+agenzo-token-cli payment-tokens revoke <ptk_id> --api-key <key> --idempotency-key idem_004
 ```
 
-> **One-time tokens**: payment tokens are single-use — create a new one for each transaction.
+> **One-time tokens**: payment tokens are single-use — create a new one per transaction.
 
-### create — parameters to ask for (if not provided)
-
-| Parameter | Ask rule |
-|-----------|----------|
-| `--member` | Optional. Ask if not provided, user can press Enter to skip. |
-| `--amount` | MUST ask for VCN. Range: 0.01–500.00 USD. |
-| `--card` | If multiple active cards exist, MUST ask which card to use. If only one active card, auto-select. |
-| `--pay-to` | MUST ask for X402. |
-| `--nonce` | MUST ask for X402. |
-| `--network` | MUST ask for X402. |
-| `--deadline` | MUST ask for X402. |
-| `--idempotency-key` | MUST be supplied by the caller. The CLI does NOT auto-generate one. Provide a unique value per logical request (e.g. `idem_<uuid>`). If omitted, the CLI prompts interactively. |
-
-Reuse from previous steps (do not ask again): `--api-key` (from admin-cli Step 3); `--type` (from the user's request; no default — interactive selector if omitted).
-
-Card resolution priority:
-1. `--payment-method-id <id>` → use directly (no API call)
-2. `--card <full-number>` → fetch card list, match by last 4 digits
-3. Only 1 active card → auto-select (no prompt)
-4. Multiple cards → ask the user which card to use
-
-### create — available flags
+### create — flags
 
 | Flag | Description | Required for |
-|------|-------------|-------------|
-| `--api-key <key>` | API Key (`sk_<env>_...`) | All types |
-| `--type <type>` | `vcn`, `network-token`, or `x402` (no default; interactive selector) | All types |
-| `--card <number>` | Card number (matches by last 4 digits) | Optional |
-| `--payment-method-id <id>` | Payment method ID (skips card lookup) | Optional |
-| `--member <id>` | Member ID | Optional |
-| `--amount <amount>` | Amount in USD (0.01-500.00) | VCN |
-| `--currency <code>` | Currency code (default: USD) | VCN |
-| `--pay-to <address>` | Recipient address | X402 |
-| `--nonce <nonce>` | Nonce value | X402 |
-| `--network <network>` | Chain network (e.g. `base`) | X402 |
-| `--deadline <timestamp>` | Unix timestamp deadline | X402 |
-| `--external-tx-id <id>` | External transaction ID. Sent only when supplied; the CLI does not auto-generate one. | Optional |
-| `--recipient-first-name <name>` | Recipient first name (UnionPay network token only) | UnionPay NT |
-| `--recipient-last-name <name>` | Recipient last name (UnionPay network token only) | UnionPay NT |
-| `--recipient-email <email>` | Recipient email (one of email/phone required for UnionPay NT) | UnionPay NT |
-| `--recipient-phone <phone>` | Recipient phone (one of email/phone required for UnionPay NT) | UnionPay NT |
-| `--unionpay-amount <amount>` | Intent amount as decimal string, e.g. "174.58" (required for UnionPay NT) | UnionPay NT |
-| `--return-url <url>` | Front-end redirect URL returned alongside terminal status. Only for UnionPay network tokens. Not sent to UnionPay — used by the caller for post-payment navigation. | Optional (UnionPay NT) |
-| `--idempotency-key <key>` | Idempotency-Key header value. Required — must be supplied by the caller. Prompts interactively if omitted; never auto-generated. Sent as the `Idempotency-Key` HTTP header, never in the body. | All types |
+|---|---|---|
+| `--api-key <key>` | API Key (`sk_<env>_...`) | all |
+| `--type <type>` | `vcn` \| `network-token` \| `x402`. No default — interactive selector if omitted. | all |
+| `--payment-method-id <id>` | Payment method id (skips card lookup) | UnionPay NT |
+| `--card <last4>` | Match an ACTIVE card by its **last 4 digits** | optional |
+| `--member <member_id>` | Member id | optional |
+| `--amount <amount>` | USD for VCN (0.01–500.00, converted to integer cents); USDC micro-units for X402 | VCN, X402 |
+| `--currency <code>` | Omitted → not sent; server default applies | optional |
+| `--pay-to` / `--nonce` / `--network` / `--deadline` | X402 recipient, nonce, chain, Unix-seconds deadline | X402 |
+| `--external-tx-id <id>` | Sent only when supplied; never auto-generated | optional |
+| `--recipient-first-name` / `--recipient-last-name` | Recipient name | UnionPay NT |
+| `--recipient-email` / `--recipient-phone` | **One of the two** is required | UnionPay NT |
+| `--unionpay-amount <amount>` | Intent amount as a **decimal string**, e.g. `"174.58"` | UnionPay NT |
+| `--return-url <url>` | Post-payment navigation hint; not sent to UnionPay | optional (UnionPay NT) |
+| `--idempotency-key <key>` | Sent as the `Idempotency-Key` header, never in the body. Prompted if omitted; hard-fails under `--yes`. | all |
 
-### Token Types
+**Card resolution priority:** `--payment-method-id` → `--card` (last-4 match against ACTIVE cards) → single ACTIVE card auto-selected → interactive picker. Under `--yes` with multiple ACTIVE cards the CLI refuses (`PARAM_INVALID`) instead of guessing.
 
-| Type | Description | Card Requirement |
-|------|-------------|-----------------|
-| `vcn` | Virtual card with spend limit | Any ACTIVE card |
-| `network-token` | Cryptogram for card-present payments | Card must support Network Token |
-| `x402` | On-chain payment signature | Any ACTIVE card |
+### Amount units — the trap
 
-### Pre-authorization Confirmation
+| Field | Unit | Conversion |
+|---|---|---|
+| `--amount` (VCN) | USD decimal, e.g. `30` / `25.50` | CLI converts to **integer cents** in the request body (`amount: 2550`) |
+| `--amount` (X402) | USDC smallest units (1 USD = 1,000,000) | passed through |
+| `--unionpay-amount` (UnionPay NT) | **decimal string**, e.g. `"174.58"` | forwarded **verbatim** — never converted to cents |
+| VCN `Limit` / `Balance` in responses | integer cents | rendered as USD for display |
 
-VCN, X402, and Network Token all involve pre-authorization (fund freeze) on a gateway token, followed by capture or cancel:
-- VCN: Frozen amount = amount + service fee (5%). Displayed as concrete dollar values.
-- X402: Amount converted from USDC smallest units to USD (1 USD = 1,000,000 units). Service fee 5%.
-- Network Token: Flat service fee charged via gateway token. The amount is fetched at runtime from `GET /config/network-token-fee` (default $0.50 if the endpoint is unreachable, matching the server's `NETWORK_TOKEN_FEE_CENTS` default).
-- Use the `--yes` global flag to skip confirmation (always use this when executing for the user).
+Never feed a cents integer into `--unionpay-amount`, and never feed a decimal into the VCN wire `amount` — the two amount fields on the same command use different units.
 
-### Network Token Compatibility
+### Token types & compatibility
 
-Not all cards support Network Token. Depends on issuer and card network, not brand. How to check: after the payment method is added, the `evo_data.network_token` field has a value if supported, empty if not. Cards without support return: `This card does not support Network Token.`
+| Type | Description | Card requirement |
+|---|---|---|
+| `vcn` | Virtual card with spend limit | any ACTIVE card, plus `gateway_token` in `evo_data` |
+| `network-token` | Cryptogram for card-present payments | issuer/network must support NT (`evo_data.network_token` non-empty) |
+| `x402` | On-chain payment signature | any ACTIVE card, plus `gateway_token` |
+
+- Missing `gateway_token` (3DS not properly completed) → `This card does not support VCN/X402. Gateway token is missing.`
+- No NT support → `This card does not support Network Token.`
+- **VCN feature gate**: `create --type vcn` first calls `GET /features/vcn`. If disabled it fast-fails with `TOKEN_FEATURE_DISABLED` (`code_num` 4001), message `VCN creation is not supported yet. Coming soon.`, exit 1. The block is global, not parameter-dependent — do **not** retry with different parameters; suggest `network-token` or `x402` instead (neither is gated).
+
+### Pre-authorization (Evo)
+
+- **VCN**: freeze = amount + 5% service fee (min 1 cent), shown as concrete dollar values before confirmation.
+- **X402**: amount converted from USDC micro-units to USD; 5% service fee.
+- **Evo Network Token**: flat fee fetched from `GET /config/network-token-fee` (falls back to $0.50).
+- **UnionPay Network Token**: no fee/freeze step — the fee bypass is server-side.
+- `--yes` skips the confirmation prompt.
 
 ### UnionPay Network Token (async, via Checkout URL)
 
-For UnionPay cards (`payment_brand=unionpay`), network token creation is **asynchronous** — the cryptogram is not returned immediately. Instead, the user must complete a passkey authentication on a UnionPay-hosted Checkout page.
+For `payment_brand=unionpay` cards the cryptogram is not returned immediately — the user must authenticate on a UnionPay-hosted checkout page first.
 
 ```bash
-agenzo-token-cli payment-tokens create --type network-token --payment-method-id <unionpay_pm_id> --api-key <key>
+# Blocking form: create detects the brand and enters the UnionPay branch
+agenzo-token-cli payment-tokens create --type network-token \
+  --payment-method-id <unionpay_pm_id> --api-key <key> \
+  --unionpay-amount 174.58 --recipient-first-name Ada --recipient-last-name Lovelace \
+  --recipient-email ada@example.com --idempotency-key idem_005
+
+# Non-blocking form: returns checkout_url immediately, you poll get
+agenzo-token-cli payment-tokens unionpay-create --api-key <key> \
+  --payment-method-id <unionpay_pm_id> --unionpay-amount 174.58 \
+  --recipient-first-name Ada --recipient-last-name Lovelace \
+  --recipient-email ada@example.com --idempotency-key idem_006
+agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 ```
 
-- **Card selection**: UnionPay cards **must** be selected via `--payment-method-id`. The `--card` (last4 matching) flag does not work for UnionPay cards.
-- The CLI automatically detects the card's `payment_brand` and enters the UnionPay branch (prompting for amount, recipient info, etc.).
-- `--return-url <url>` (optional): front-end redirect URL returned alongside the terminal status. After payment completes, the caller can navigate the user to this URL. Not sent to UnionPay — purely a platform-side hint for post-payment navigation. If omitted, the caller determines its own post-payment behaviour.
-- **No `--idempotency-key` needed** for the initial request (the platform uses correlation IDs for idempotency).
+- **UnionPay cards must be selected with `--payment-method-id`.** `--card` last-4 matching is rejected (`PARAM_INVALID`) for this brand.
+- **Do not pass `--member`**: the member id is already on file from enrollment and drives the UPI consumer identity. If supplied it is forwarded verbatim and the server rejects a mismatch. `create` does not prompt for it in this branch.
+- The initial response is flat and `PENDING`: `Payment Token ID`, `Type`, `Status`, **`Checkout URL`**, `Correlation ID` — no cryptogram yet.
+- **The user must open the Checkout URL in a browser** and complete the UnionPay authentication.
+- `create` then polls `GET /payment-tokens/{id}` every **5s for up to 60s**; `unionpay-create` exits immediately and you poll `payment-tokens get` yourself.
+- On ACTIVE the token renders `Token Number` (`value`), `Cryptogram`, `Expiry`, `Brand`, and `ECI` when present. On timeout the token stays PENDING — re-open the Checkout URL if it has not expired, or poll `get` later.
 
-**How it works:**
+**Payment fields:** `Token Number` (send as the card number to the acquirer), `Cryptogram` (one-time credential, required for verification), `Expiry` (MMYY). `ECI` is optional and may be absent in UPI mode.
 
-1. The CLI collects: Member ID (optional), amount (USD), recipient name, recipient email or phone.
-2. The platform calls UnionPay's Create_Intent + Checkout APIs and returns a `Checkout URL`.
-3. The CLI prints the Checkout URL and starts polling (every 5s, up to 60s) for the token to become ACTIVE.
-4. **⚠️ The user MUST open the Checkout URL in a browser** and complete **passkey authentication** (fingerprint/face/PIN) on the UnionPay page.
-5. Once authenticated, UnionPay sends a webhook callback with the cryptogram. The token transitions from PENDING → ACTIVE.
-6. The CLI displays the activated token: Token Number, Cryptogram, Expiry.
+### get / list / revoke
 
-**Output fields (ACTIVE token — used for payment):**
-
-| Field | Description | Used for payment |
-|-------|-------------|-----------------|
-| Token Number | UnionPay-issued virtual card number (replaces real PAN) | Yes — send as "card number" to acquirer |
-| Cryptogram | One-time payment credential (`dynamicDataValue`) | Yes — required by acquirer for verification |
-| Expiry | Token expiration (MMYY) | Yes |
-| ECI | E-commerce indicator (may not be present in UPI mode) | Optional |
-
-**If timeout (60s):** The token stays PENDING. Check later with `payment-tokens get <ptk_id>`. The user can re-open the Checkout URL if it hasn't expired.
-
-### VCN / X402 Compatibility
-
-VCN and X402 require a `gateway_token` in `evo_data`. If missing (3DS not completed properly): `This card does not support VCN/X402. Gateway token is missing.`
-
-### VCN Server-Side Feature Switch
-
-Before running any VCN-specific prompts, the CLI checks `GET /features/vcn`. If disabled, the CLI fast-fails (no card/amount inputs collected) with errorCode `TOKEN_FEATURE_DISABLED` (`code_num` 4001), message `VCN creation is not supported yet. Coming soon.`, exit code 1.
-
-When this happens, DO NOT retry `payment-tokens create --type vcn` with different parameters — the block is global, not parameter-dependent. Suggest the user switch to `--type network-token` or `--type x402` if their use case allows. Network Token and X402 are NOT gated by this switch.
-
-### Revoke Behavior
-
-| Card Brand | Revoke Action |
-|------------|---------------|
-| **Visa** | No action needed. Cryptogram auto-expires in 24 hours. |
-| **MasterCard** | No action needed. Cryptogram auto-expires in 5 days. |
+- `get` masks VCN PAN and CVC by default; `--reveal` prints them in full — only use it when a payment flow actually needs the credential.
+- `list` renders a per-type summary: VCN `first6****last4 $limit`, network token → brand, X402 → `amount network`.
+- `revoke` has two terminal shapes: immediate (`Status` + `Revoked At`) or **delayed** for X402, where the status stays `ACTIVE` with an `Expires At` — the cryptogram auto-expires instead of being torn down.
 
 ## Token-specific errors
 
 | Error | Cause | Fix |
-|-------|-------|-----|
-| `No active payment methods found` | API key belongs to a different developer | Use the correct API key |
-| `This card does not support Network Token` | Issuer does not support NT | Add a payment method that supports NT |
-| `Evo preauth failed` | PSP or issuer rejected preauth | Try a different card or retry later |
+|---|---|---|
+| `CLIENT_NO_PAYMENT_METHOD` | No ACTIVE card for this API key | Add one: `payment-methods add` (or `--mode dropin`) |
+| `CLIENT_CARD_NOT_MATCHED` | `--card` last-4 matched no ACTIVE card | Run `payment-methods list` and pick a real one |
+| `TOKEN_FEATURE_DISABLED` | VCN is switched off server-side | Use `network-token` or `x402`; do not retry VCN |
+| `PARAM_IDEMPOTENCY_KEY_REQUIRED` | `--yes` without `--idempotency-key` | Supply a unique key (1–128 chars, `[A-Za-z0-9_-]`) |
+| `PARAM_INVALID` | Bad `--payment-brand` / `--mode`, missing `--member`, UnionPay selected via `--card`, ambiguous card under `--yes` | Fix the flag named in the message |
+| `This card does not support Network Token` | Issuer does not support NT | Use a card that does |
+| `Evo preauth failed` | PSP or issuer rejected preauth | Try another card or retry later |

@@ -66,7 +66,7 @@ export function mockAuthService(apiClient: ReturnType<typeof mockApiClient>) {
 /** Create a mock ConfigManager. */
 export function mockConfigManager(overrides?: Partial<{ api_host: string; api_path: string; active_org: string | null }>) {
   const config = {
-    api_host: 'https://agent.everonet.com',
+    api_host: 'https://agent.agenzo.com',
     api_path: '/api/admin/v1',
     active_org: 'org_test_001',
     active_developer_id: null,

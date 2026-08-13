@@ -1,321 +1,296 @@
 # merchant-cli — Merchant Fulfillment (`agenzo-merchant-cli`)
 
-`@agenzo/merchant-cli` — the merchant-fulfillment CLI: Agents use it to fulfill real-world commerce services on the Agenzo platform. Each fulfillment capability is exposed as a **noun**, and the set of capabilities grows over time — run `services list` to discover what is currently available. The capabilities available today are ride-hailing (`ride-elife`) and hotel booking (`hotel-redaug`). **API Key** auth (`--api-key`; the key must have `merchant` scope — see [admin-cli](admin-cli.md) `keys create --scope`).
+`@agenzo/merchant-cli` — the merchant-fulfillment CLI: Agents use it to fulfill real-world commerce services on the Agenzo platform. Each capability is exposed as a **noun**, and the set grows over time — run `services list` to discover what is currently available.
+
+**Auth:** API Key per command (`--api-key`, sent as `X-Api-Key`); the key must carry `merchant` scope (see [admin-cli](admin-cli.md) `keys create --scope`). There is no login/session.
+**Output:** defaults to `--format json` (agent-first), unlike other binaries which default to `table`.
 
 See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exit codes, idempotency).
 
-## Command matrix
+## Registered nouns
 
-API-Key auth (`--api-key`). `services` discovers the available capabilities; the other nouns are the capabilities themselves (today: `ride-elife`).
+| Noun | Verbs | Purpose |
+|---|---|---|
+| `services` | 2 | Capability discovery (backed by the platform discovery catalog) |
+| `orders` | 2 | Unified cross-provider order index (`GET /orders`) |
+| `ride-elife` | 5 | Ride ordering (eLife) |
+| `hotel-redaug` | 14 | Hotel booking (Redaug) |
+| `flight-flink` | 21 | Flight booking (Flink), incl. change + refund |
 
-| Noun | Verb | Type | Description |
+Every verb listed in this document is registered in `apps/merchant-cli/src/index.ts` and executable today.
+
+## services — capability discovery
+
+```bash
+agenzo-merchant-cli services list                     # discover capabilities
+agenzo-merchant-cli services get hotel-redaug         # one capability + full schema
+```
+
+| Verb | Type | Description |
+|---|---|---|
+| `list` | Read | List available merchant capabilities (id, name, category, provider, `cli_noun`, verbs) |
+| `get <service-id>` | Read | One capability's full metadata, including `schema_content` (per-verb params) and `workflow` |
+
+How it resolves:
+
+- Primary source is the platform discovery API (`GET /api/discovery/v1/catalog`, host root — *not* the `/api/merchant/v1` prefix). `services get` calls `.../catalog/<service-id>`.
+- Results are **gated against this binary's own command tree**: a capability whose `cli_noun` is not registered locally is hidden, and its `verbs[]` (plus `schema_content.verbs`) are intersected with the locally-registered verbs. An Agent therefore never sees a service or verb this CLI cannot run.
+- If the platform is unreachable, it falls back to the CLI-bundled registry (basic metadata, no `schema_content`), gated the same way.
+- Accepted `<service-id>`: either the catalog `service_id` or the `cli_noun` (e.g. both `hotel-redaug` and the flight capability's `svc_...` id resolve). Unknown id → `SERVICE_NOT_FOUND`.
+- The catalog covers the three fulfillment capabilities (`ride-elife`, `hotel-redaug`, `flight-flink`). `services` and `orders` are utility nouns and are not catalog entries.
+
+## orders — unified cross-provider order index
+
+Spans ride + hotel (+ future providers) in one call. Use it for generic "my orders" / "order history" requests; switch to the domain noun's `list-orders` / `get` once the business is known (those return domain-specific fields).
+
+| Verb | Type | Key flags | Description |
 |---|---|---|---|
-| `services` | `list` | Read | List the available merchant-fulfillment capabilities |
-| `services` | `get <service-id>` | Read | Show a capability's metadata — which noun/verb to call, and the call flow |
-| `ride-elife` | `quote` | Read | Request fare quotes between two points; returns vehicle classes, each with its own `quote_id`. |
-| `ride-elife` | `book` | Write | Book a ride using a `quote_id` from `quote`; returns a `ride_id` (+ `order_id`). |
-| `ride-elife` | `get` | Read | Retrieve a ride order status by id (`--order-id` = the **ride_id**); `--watch` streams status as NDJSON. |
-| `ride-elife` | `cancel` | Write | Cancel a ride order (`--order-id` = the **ride_id**); may incur a cancellation fee. |
-| `ride-elife` | `list-orders` | Read | List previously placed ride orders. |
-| `hotel-redaug` | `create-order` | Write | Create a hotel order without charging (lock inventory). Returns `order_id`. |
-| `hotel-redaug` | `pay-order` | Write | Settle an existing hotel order (depends on `create-order`'s `order_id`). |
-| `hotel-redaug` | `quote` | Read | Real-time pricing for a hotel + room + dates. |
-| `hotel-redaug` | `get` | Read | Retrieve hotel order status; `--watch` streams as NDJSON. |
-| `hotel-redaug` | `cancel` | Write | Cancel a hotel order (policy-permitting). |
-| `hotel-redaug` | `search` | Read | Search hotels by destination / coordinates. |
-
-> New fulfillment capabilities are added as new nouns over time — run `services list` to see the current set.
-> For `ride-elife`, `get` / `cancel` take `--order-id` = the `ride_id` returned by `book`, NOT the `rio_...` order_id. This is a common mistake.
-
-## services
-
-Discover the available merchant-fulfillment capabilities before calling them:
+| `list` | Read | `--order-type ride\|hotel`, `--status PENDING\|CONFIRMED\|COMPLETED\|CANCELLED\|FAILED`, `--page`, `--page-size` | Cross-provider order list with normalized status |
+| `get` | Read | `--order-id` (**required**) | One order's detail by id, regardless of provider |
 
 ```bash
-agenzo-merchant-cli services list                # list available capabilities
-agenzo-merchant-cli services get ride-elife      # one capability's metadata (its nouns/verbs + flow)
+agenzo-merchant-cli orders list --api-key <key> --status CONFIRMED --page-size 20
+agenzo-merchant-cli orders get  --api-key <key> --order-id hho_abc123
 ```
 
-An unknown capability id returns `SERVICE_NOT_FOUND`. As more capabilities are added, they appear here — `services` is how an Agent learns what it can fulfill today.
+- `list` returns a small fixed column set (`order_id` / `order_type` / `status` / `amount` / `currency`) plus `total` / `page` / `page_size`.
+- `get` accepts any provider id (`rio_...` ride, `hho_...` hotel); the platform resolves `order_id → order_type` and delegates to the owning domain, so **the response shape varies by `order_type`** — treat it as an opaque object and surface the fields present.
 
-## ride-elife
+## ride-elife — ride ordering
 
-Ride-hailing — the fulfillment capability available today.
+| Verb | Type | Idempotency-Key | Description |
+|---|---|---|---|
+| `quote` | Read | — | Fare quotes between two points → `vehicle_classes[]`, each with its own `quote_id` |
+| `book` | Write | Required | Book one vehicle class by `quote_id` → `ride_id` (+ `order_id`) |
+| `get` | Read | — | Ride status by `--order-id` = the **`ride_id`**; `--watch` streams NDJSON |
+| `cancel` | Write | Required | Cancel a ride by `--order-id` = the **`ride_id`**; may incur a fee |
+| `list-orders` | Read | — | List the developer's ride orders (`--status`, `--order-type`, `--page`, `--page-size`) |
 
 ```bash
-# Get fare quotes (returns vehicle classes, each with a quote_id)
-agenzo-merchant-cli ride-elife quote --api-key <key> --pickup-lat 1.2816 --pickup-lng 103.8636 --pickup-name "Marina Bay" --dropoff-lat 1.3644 --dropoff-lng 103.9915 --dropoff-name "Changi Airport" --pickup-time now --passenger-name "Jane Doe" --passenger-phone "+6580000000" --passenger-count 1
+# 1. quote
+agenzo-merchant-cli ride-elife quote --api-key <key> \
+  --pickup-lat 1.2816 --pickup-lng 103.8636 --pickup-name "Marina Bay" \
+  --dropoff-lat 1.3644 --dropoff-lng 103.9915 --dropoff-name "Changi Airport" \
+  --pickup-time now --passenger-name "Jane Doe" --passenger-phone "+6580000000" --passenger-count 1
 
-# Book using a quote_id from `quote`
-agenzo-merchant-cli --yes ride-elife book --api-key <key> --quote-id <id> --vehicle-class "Comfort Sedan" --price-amount 14.92 --price-currency USD --passenger-name "Jane Doe" --passenger-phone "+6580000000" --pickup-lat 1.2816 --pickup-lng 103.8636 --pickup-name "Marina Bay" --dropoff-lat 1.3644 --dropoff-lng 103.9915 --dropoff-name "Changi Airport" --pickup-time now --idempotency-key idem_ride_001
+# 2. book — repeat the SAME coordinates/names/pickup-time; quote_id does not carry them
+agenzo-merchant-cli --yes ride-elife book --api-key <key> --quote-id <id> \
+  --vehicle-class Sedan --price-amount 14.92 --price-currency USD \
+  --passenger-name "Jane Doe" --passenger-phone "+6580000000" \
+  --pickup-lat 1.2816 --pickup-lng 103.8636 --pickup-name "Marina Bay" \
+  --dropoff-lat 1.3644 --dropoff-lng 103.9915 --dropoff-name "Changi Airport" \
+  --pickup-time now --idempotency-key idem_ride_001
 
-# Get / cancel by id — --order-id takes the ride_id returned by book (NOT the rio_... order_id)
-agenzo-merchant-cli ride-elife get --api-key <key> --order-id <ride_id>
-agenzo-merchant-cli ride-elife get --api-key <key> --order-id <ride_id> --watch --watch-interval 5 --watch-timeout 600   # NDJSON status stream
+# 3. poll / cancel — --order-id is the ride_id from book, NOT the rio_... order_id
+agenzo-merchant-cli ride-elife get --api-key <key> --order-id <ride_id> --watch
 agenzo-merchant-cli --yes ride-elife cancel --api-key <key> --order-id <ride_id> --idempotency-key idem_cancel_001
-
-# List previously placed orders
-agenzo-merchant-cli ride-elife list-orders --api-key <key>
 ```
 
-### Parameters to ask for (if not provided)
+Key rules:
 
-| Parameter | Ask rule |
-|-----------|----------|
-| `--api-key` | Reuse the `merchant`-scoped key from admin-cli (do not ask again if already known). |
-| pickup / dropoff (`--pickup-lat` / `--pickup-lng` / `--pickup-name`, `--dropoff-*`) | MUST ask for `quote` — the two endpoints of the trip. |
-| `--pickup-time` | MUST ask (`now` or a future time). |
-| `--passenger-name` / `--passenger-phone` | MUST ask for `quote` / `book`. |
-| `--quote-id` | For `book`: use a `quote_id` returned by `quote` (do not ask; use the vehicle class the user chose). |
-| `--vehicle-class` / `--price-amount` / `--price-currency` | For `book`: take from the chosen quote line. |
-| `--order-id` | For `get` / `cancel`: the **ride_id** from `book` (NOT the `rio_...` order_id). |
-| `--idempotency-key` | MUST be supplied by the caller for `book` / `cancel`; the CLI never auto-generates one. Prompts interactively if omitted (required under `--yes`). |
+- Coordinates are **not** geocoded server-side — always supply `--pickup-lat/lng` and `--dropoff-lat/lng`.
+- `vehicle_class` values are case-sensitive literals (`Sedan` / `SUV` / `MPV-5` / `MPV-7` / `Van` / `Luxury` / `Train`) — pass back verbatim.
+- `--pickup-time` is UTC epoch seconds or the literal `now`.
+- All amounts are **decimal** currency units (42.50 = $42.50), never minor units.
+- `book` accepts no card/payment-method flags. Billing is server-side: `pay_per_call` requires a PAID `--payment-order-id` (from payment-cli); `monthly_settlement` forbids it (fare deducted from the settlement balance, response `payment_status: ON_ACCOUNT` + `billing_entry_id`; `cancel` refunds to the balance).
+- Extra `book` flags: `--passenger-email`, `--luggage-count`, `--special-requests`, `--meet-and-greet` / `--meet-and-greet-price` / `--welcome-sign`, `--child-seat-count` / `--infant-seat-count` / `--toddler-seat-count`, `--arrival-flight-no` / `--arrival-airline` / `--departure-flight-no` / `--departure-airline`.
+- **Seat pricing:** `--price-amount` must include addons — `base + infant×infant + toddler×toddler + child×children unit prices + meet_and_greet_price`. Unit prices come from `quote`'s `add_service_unit_price` (null ⇒ seats are free). `quote`'s `--children-count` / `--infant-count` / `--toddler-count` drive that object.
 
-## Billing modes — ride-elife (how a ride booking is paid)
+## hotel-redaug — hotel booking (14 verbs)
 
-A ride booking is paid according to the developer's `billing_mode` (set at [admin-cli](admin-cli.md) `developers create --billing-mode`):
+| Verb | Type | Key flags | Description |
+|---|---|---|---|
+| `find-destination` | Read | `--keyword`, `--data-type` | Resolve a place name → coordinates / destination |
+| `list-cities` | Read | `--country` | City + `destination_id` dictionary for a country |
+| `hotel-filters` | Read | `--destination-id` \| `--lat`+`--lng`, `--distance` | Filter options (star / brand / facility codes) for a location |
+| `search` | Read | `--destination-id` \| `--lat`+`--lng`, `--check-in`, `--check-out`, `--adults`, `--room-num`, `--star`, `--price-min/max`, `--*-codes`, `--page` | Search hotels (exactly one location branch) |
+| `hotel-detail` | Read | `--hotel-id`, `--with-images` | Hotel + `rooms[]` (area/floor/beds/photos) |
+| `quote` | Read | `--hotel-id`, `--check-in`, `--check-out`, `--adults`, `--room-num`, `--nationality` | Real-time rates → `product_token` + `price_items` |
+| `create-order` | Write | see below | Lock inventory without charging → `order_id`, status `AWAITING_PAYMENT` |
+| `pay-order` | Write | `--order-id`, `--watch` | Settle the order (path chosen server-side by `billing_mode`) |
+| `get` | Read | `--order-id`, `--watch` | Order status (poll until `CONFIRMED`) |
+| `cancel` | Write | `--order-id`, `--fc-order-code`, `--reason` | Whole-order cancellation, within policy |
+| `checkout` | Write | `--order-id`, `--fc-order-code`, `--checkout-rooms`, `--refund-type`, `--reason` | Apply for partial check-out / out-of-policy cancellation (async, property must approve) |
+| `get-checkout` | Read | `--task-order-code`, `--watch` | Poll a check-out application's status + refund outcome |
+| `list-orders` | Read | `--status`, `--page`, `--page-size` | List the developer's hotel orders |
+| `skill` | Read | — | Print the hotel-redaug usage guide (offline, no API call) |
 
-- **`monthly_settlement`**: the fare is deducted from the developer's settlement account balance. `book` returns `payment_status: ON_ACCOUNT` and a `billing_entry_id`; do NOT pass `--payment-order-id`. The settlement account must be funded — check `agenzo-admin-cli accounts get --developer-id <dev>`. A `cancel` refunds the fare back to the balance.
-- **`pay_per_call`**: each booking references a separately-paid payment order via `--payment-order-id`.
-
-## Other notable flags (ride-elife book)
-
-Beyond the core ride fields, `book` also accepts: `--passenger-email`, `--luggage-count`, `--special-requests`, `--meet-and-greet` / `--meet-and-greet-price` / `--welcome-sign`, `--child-seat-count` / `--infant-seat-count` / `--toddler-seat-count`, and arrival/departure flight info (`--arrival-flight-no`, `--arrival-airline`, `--departure-flight-no`, `--departure-airline`). Run `agenzo-merchant-cli ride-elife book --help` for the full list.
-
-### Seat pricing
-
-When requesting child/infant/toddler seats, the `--price-amount` must include the seat addon costs:
-
-```
-total = base_vehicle_price
-      + infant_seat_count  × add_service_unit_price.infant.amount
-      + toddler_seat_count × add_service_unit_price.toddler.amount
-      + child_seat_count   × add_service_unit_price.children.amount
-      + meet_and_greet_price (if applicable)
-```
-
-The `add_service_unit_price` object is returned in the `quote` response. If it's absent (null), seats have no additional cost.
-
-### Passenger counts (quote)
-
-`quote` accepts `--children-count`, `--infant-count`, and `--toddler-count` to inform eLife about the passenger breakdown. These affect the `add_service_unit_price` returned and may influence vehicle recommendations.
-
-## hotel-redaug
-
-Hotel booking — full flow: `search` → `hotel-detail` → `quote` → `create-order` → `pay-order` → `get` (poll). The booking (create+pay) portion is split into two independent, ordered steps:
+Workflow:
 
 ```
-hotel-detail → quote → create-order → pay-order → get (poll until CONFIRMED)
+find-destination [→ hotel-filters] → search → hotel-detail → quote
+  → create-order → pay-order → get (poll until CONFIRMED)
+  [→ cancel | checkout → get-checkout]
 ```
 
-`hotel-detail` returns the hotel plus `rooms[]` (per-room-type area/floor/beds/photos) — call it for the chosen/shortlisted hotel BEFORE `quote`. `quote`'s `rates[].room_name` is only a bare one-line label with no room detail; pair it with `hotel-detail`'s `rooms[]` (match by `room_name`) so the user picks a rate with real room info in front of them, not just a name and a price.
-
-`create-order` locks inventory and returns an `order_id`. `pay-order` settles the order and requires that `order_id`. There is no combined "book" verb.
+- `hotel-detail` before `quote`: `quote`'s `rates[].room_name` is a bare label with no room detail. Pair each rate with `hotel-detail`'s `rooms[]` (match on `room_name`) so the user picks a rate with real room info in front of them.
+- `--nationality` is the guest's ISO 3166-1 alpha-2 code (`CN` / `JP` / `US` ...). **Ask the user** — never infer it from their language, name or destination. Omitting it defaults to `CN`, which changes rate eligibility and can make the property refuse check-in, and the supplier disclaims liability when a wrong or defaulted nationality was sent. Pass the same code to `create-order`.
+- `breakfast_num` inside `price_items[]` is an upstream enum, not a count to normalize: `-1` = bed breakfast, `0` = no breakfast, `1+` = that many breakfasts. These are distinct breakfast products — copy the value verbatim into `create-order` and never collapse `-1` to `0`.
+- `product_token` is opaque — pass it unchanged to `create-order`; `--price-items` must be copied **verbatim** from `quote` as a JSON array.
+- `create-order` locks inventory and charges nothing. There is no combined "book" verb.
+- All amounts are decimal units, never cents.
 
 ### create-order
 
-Creates a hotel order without charging any account. Calls upstream `checkBooking` + `createOrder` and returns the platform `order_id`. The order enters `AWAITING_PAYMENT` status.
-
 ```bash
-agenzo-merchant-cli --yes hotel-redaug create-order \
-  --api-key <key> \
+agenzo-merchant-cli --yes hotel-redaug create-order --api-key <key> \
   --product-token <token_from_quote> \
-  --total-amount 320.00 \
-  --currency CNY \
+  --total-amount 320.00 --currency CNY \
   --price-items '[{"saleDate":"2026-07-04","salePrice":320.00,"breakfastNum":0}]' \
-  --check-in 2026-07-04 \
-  --check-out 2026-07-05 \
+  --check-in 2026-07-04 --check-out 2026-07-05 \
   --adults 2 --children 0 --nationality CN \
   --guest-name "Zhang San" \
   --contact-name "Zhang San" --contact-phone "13800000000" --contact-country-code 86 \
   --idempotency-key idem_hotel_create_001
 ```
 
-On success (exit 0), stdout prints:
+Optional: `--bed-type` (from the chosen rate's `beds[].code`, forwarded upstream), `--tips` (platform-local, order-detail display only), `--arrive-time`, `--special-requests`, `--hotel-name`, `--contact-email`, plus the payment credential flags below.
 
-```
-Order ID       ord_abc123
-FC Order Code  FC1750000000
-Total amount   320.00 CNY
-Order status   AWAITING_PAYMENT
-```
+Payment credential flags (both optional, omit to let the platform decide by `billing_mode`):
 
-**Before calling `pay-order`, branch on your `billing_mode`:**
-
-- **`monthly_settlement`**: go straight to `pay-order --order-id <order_id>` — nothing else to do.
-- **`pay_per_call`**: do NOT call `pay-order` yet. First drive your own EVO payment integration
-  using this `order_id` as the EVO merchantTransID, and get the end-user to actually pay
-  `total_amount`+`currency` via EVO. Only once that payment is complete should you call
-  `pay-order --order-id <order_id>` — it verifies the EVO payment and settles the order; it
-  does not itself collect the payment.
+| Flag | Effect |
+|---|---|
+| `--payment-method-id` | Settle this order on that specific bound card (pay_per_call / EVO preauth + capture) |
+| `--payment-token-id` | **UnionPay pre-charged path.** A payment token id from an already-completed UPI network-token capture: the platform skips EVO preauth/capture and only locks the order + records the credential (funds already charged) |
 
 ### pay-order
 
-Settles an existing order created by `create-order`. Requires `--order-id` (the `order_id` returned by `create-order`).
+`pay-order` takes only `--order-id` — there is no merchant-transaction-id flag. The billing path is chosen server-side:
 
-pay-order takes only `--order-id`; there is no merchant-transaction-id flag. The billing path is
-determined server-side by the developer's `billing_mode`:
-
-| billing_mode | Behavior |
-|------|----------|
-| `monthly_settlement` | Debits settlement account balance → calls upstream `payOrder`. |
-| `pay_per_call` | Platform queries EVO for the **order_id** (the merchantTransID the user paid under) → verifies exact amount/currency → calls upstream `payOrder` (response `settlement_path` is `"pay_per_call"`). |
+| `billing_mode` | Behavior |
+|---|---|
+| `monthly_settlement` | Debit settlement balance → upstream `payOrder` |
+| `pay_per_call` | Platform queries EVO for the **`order_id`** (the merchantTransID the user paid under) → verifies exact amount + currency → upstream `payOrder` (`settlement_path: "pay_per_call"`) |
+| anything else | `BILLING_MODE_MISMATCH` |
 
 ```bash
-# monthly_settlement — debits the settlement account
-agenzo-merchant-cli --yes hotel-redaug pay-order \
-  --api-key <key> \
-  --order-id hho_abc123 \
-  --idempotency-key idem_hotel_pay_001
-
-# pay_per_call — user already paid via EVO USING the order_id as the EVO
-# merchantTransID. Same command; the platform verifies by querying EVO for the
-# order_id.
-agenzo-merchant-cli --yes hotel-redaug pay-order \
-  --api-key <key> \
-  --order-id hho_abc123 \
-  --idempotency-key idem_hotel_pay_001
-
-# pay_per_call with --watch (polls until PAID or timeout)
-agenzo-merchant-cli --yes hotel-redaug pay-order \
-  --api-key <key> \
-  --order-id hho_abc123 \
-  --idempotency-key idem_hotel_pay_001 \
+agenzo-merchant-cli --yes hotel-redaug pay-order --api-key <key> \
+  --order-id hho_abc123 --idempotency-key idem_hotel_pay_001 \
   --watch --watch-interval 5 --watch-timeout 300
 ```
 
-On success (exit 0), prints settlement result (order_status = PAID).
+For `pay_per_call`, drive the EVO payment **before** calling `pay-order`: the end-user pays the exact `total_amount` + `currency` using the platform `order_id` as the EVO `merchantTransID` (EVO merchant parameters come from offline onboarding, not from `create-order`). Then `pay-order` verifies and settles — it never collects the payment itself. Not yet paid → `PAYMENT_NOT_COMPLETED` (use `--watch` to keep polling); mismatch → `PAYMENT_AMOUNT_MISMATCH`; no transaction → `PAYMENT_NOT_FOUND`.
 
-### pay_per_call flow (the EVO merchantTransID IS the order_id)
-
-The end-user pays **out-of-band via EVO**, and the payment is bound to the order by using our `order_id` as the EVO `merchantTransID`:
-
-1. Developer creates a hotel order via `create-order` → receives `order_id`, `total_amount`, `currency`.
-2. End-user pays the exact `total_amount` + `currency` through EVO (shared merchant parameters obtained through offline EVO onboarding — NOT returned by `create-order`), **using the `order_id` as the EVO `merchantTransID`**.
-3. Developer (or Agent) calls `pay-order --order-id <order_id>` (no other identifier).
-4. Platform queries EVO **for that `order_id`** once per call:
-   - Payment confirmed + amount/currency match → upstream `payOrder` → order becomes `PAID`.
-   - Payment not yet confirmed → `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to retry automatically.
-   - Amount/currency mismatch → `PAYMENT_AMOUNT_MISMATCH` (exit 1).
-   - Transaction not found → `PAYMENT_NOT_FOUND` (exit 1).
-
-**Why the order_id (anti-fraud):** querying by the platform-owned `order_id` binds the EVO payment to this exact order. A caller cannot present some *other* already-paid EVO transaction of the same amount to settle a booking for free. Because there is no caller-supplied merchant-transaction-id, no foreign transaction can be substituted.
+**Why bind on `order_id` (anti-fraud):** querying by the platform-owned `order_id` ties the EVO payment to this exact order, so no caller-supplied identifier can substitute some other already-paid transaction of the same amount.
 
 ### Parameters to ask for (hotel-redaug)
 
 | Parameter | Ask rule |
-|-----------|----------|
-| `--api-key` | Reuse the `merchant`-scoped key (do not ask again if already known). |
-| `--product-token` | From `quote` response — the chosen rate's `product_token`. |
-| `--total-amount` / `--currency` | From `quote` response — the chosen rate's price. |
-| `--price-items` | From `quote` — per-night price breakdown JSON array. |
-| `--check-in` / `--check-out` | MUST ask if not inferred from context. |
-| `--guest-name` | MUST ask (primary guest). |
-| `--contact-name` / `--contact-phone` | MUST ask (booking contact). |
-| `--order-id` | For `pay-order` / `get` / `cancel`: use `order_id` from `create-order`. For `pay_per_call`, this is ALSO the EVO merchantTransID — tell the user to pay under this exact id. |
-| `--idempotency-key` | MUST be supplied for `create-order` / `pay-order` / `cancel`. |
+|---|---|
+| `--api-key` | Reuse the `merchant`-scoped key; do not re-ask once known |
+| `--check-in` / `--check-out` | MUST ask unless inferable from context |
+| `--guest-name`, `--contact-name`, `--contact-phone` | MUST ask |
+| `--product-token`, `--total-amount`, `--currency`, `--price-items` | Take from the chosen `quote` rate — never invent |
+| `--order-id` | From `create-order`; for `pay_per_call` this is also the EVO merchantTransID |
+| `--fc-order-code` / `--checkout-rooms` | From the order response (`fc_order_code`, `rooms[]`) — copy verbatim |
+| `--idempotency-key` | Caller-supplied for every write (`create-order` / `pay-order` / `cancel` / `checkout`); never auto-generated |
 
-### hotel-redaug billing modes
+## flight-flink — flight booking (21 verbs)
 
-`pay-order` takes only `--order-id`; there is no merchant-transaction-id flag. The billing path
-is chosen server-side by the developer's `billing_mode`:
+International flight booking via the Flink provider: two-step create-then-pay ticketing, `journeyId` relay for round-trip / multi-city, plus change (rebooking) and refund flows.
 
-| Mode | Behavior |
-|------|----------|
-| `monthly_settlement` | Balance deducted → upstream `payOrder`. |
-| `pay_per_call` | Platform queries EVO for the `order_id` → verifies exact amount/currency → upstream `payOrder`. If not yet paid → `PAYMENT_NOT_COMPLETED`. |
-| anything else | `BILLING_MODE_MISMATCH` (only the two modes above are valid). |
+| Verb | Type | Idempotency-Key | Key flags | Description |
+|---|---|---|---|---|
+| `find-airport` | Read | — | `--keyword` | Resolve a place name → IATA city/airport candidates |
+| `list-airports` | Read | — | `--page`, `--page-size`, `--keyword` | Airport dictionary |
+| `list-airlines` | Read | — | `--page`, `--page-size`, `--keyword` | Airline dictionary |
+| `list-nationalities` | Read | — | — | Nationality list |
+| `search` | Read | — | `--trip-type`, `--journeys`, `--cabin-class`, `--adult-num`/`--child-num`/`--infant-num`, `--airline`, `--transfer-number`, `--journey-id` | Flight search (one-way / round-trip / multi-city) |
+| `more-offers` | Read | — | `--product-token` | Additional fare offers for a priceKey |
+| `verify` | Read | — | `--product-token` | Verify the fare → authoritative `product_token`, `price_changed` |
+| `create-order` | Write | Required | `--product-token`, `--total-amount`, `--currency`, `--trip-type`, `--contact-*`, `--passengers`, `--payment-method-id`, `--payment-token-id` | Lock the fare (no charge) → `order_no`, `AWAITING_PAYMENT` |
+| `pay-order` | Write | Required | `--order-no` | Settle + trigger ticketing → `PAID` |
+| `get-order` | Read | — | `--order-no`, `--watch`, `--watch-interval`, `--watch-timeout` | Order status (poll until `TICKETED`) |
+| `cancel-order` | Write | Required | `--order-no`, `--reason` | Cancel an un-ticketed order (+ refund) |
+| `list-orders` | Read | — | `--status`, `--page`, `--page-size` | List flight orders (platform-local, no upstream call) |
+| `change-search` | Read | — | `--order-no`, `--date`, `--passenger`, `--segment-id`, `--cabin-class` | Search rebook-eligible flights |
+| `change-apply` | Write | Required | `--order-no`, `--passenger`, `--segment-id`, `--product-token`, `--contact-*` | Apply a rebooking → `change_order_no` |
+| `change-detail` | Read | — | `--change-order-no` | Change request status + `price_total` (the change fee) |
+| `change-pay` | Write | Required | `--change-order-no`, `--order-no`, `--amount`, `--currency`, `--payment-method-id`, `--payment-token-id` | Pay the change fee, then trigger change ticketing |
+| `change-cancel` | Write | Required | `--change-order-no` | Cancel a pending change request |
+| `refund-apply` | Write | Required | `--order-no`, `--passenger`, `--segment-id`, `--reason-type`, `--reason`, `--contact-*` | Apply a refund → `refund_order_no` |
+| `refund-detail` | Read | — | `--refund-order-no` | Refund request status |
+| `refund-confirm` | Write | Required | `--refund-order-no`, `--confirm` (`1` confirm / `2` cancel) | Confirm or cancel a refund application |
+| `skill` | Read | — | — | Print the flight-flink usage guide (offline, no API call) |
 
-## flight-flink
-
-International flight booking (via Flink/事信 provider). Two-step create-then-pay ticketing with multi-segment journeyId relay for round-trip/multi-city, plus change (rebooking) and refund flows.
-
-### Command matrix
-
-| Verb | Write | Idempotency-Key | Description |
-|------|-------|-----------------|-------------|
-| `find-airport` | No | — | Resolve keyword → IATA city/airport candidates |
-| `list-airports` | No | — | Paginated airport dictionary |
-| `list-airlines` | No | — | Paginated airline dictionary |
-| `list-nationalities` | No | — | Nationality list |
-| `search` | No | — | Flight search (one-way/round-trip/multi-city with journeyId relay) |
-| `more-offers` | No | — | Additional fare offers for a priceKey |
-| `verify` | No | — | Verify price; returns authoritative product_token |
-| `create-order` | Yes | Required | Lock fare (no charge); status → AWAITING_PAYMENT |
-| `pay-order` | Yes | Required | Settle + trigger ticketing; status → PAID |
-| `get-order` | No | — | Query order status (poll until TICKETED) |
-| `cancel-order` | Yes | Required | Cancel un-ticketed order; refund issued |
-| `list-orders` | No | — | List flight orders (local, no upstream) |
-| `change-search` | No | — | Search rebook-eligible flights |
-| `change-apply` | Yes | Required | Apply a rebooking (returns change_order_no) |
-| `change-detail` | No | — | Query change request status |
-| `change-cancel` | Yes | Required | Cancel a pending change request |
-| `refund-apply` | Yes | Required | Apply a refund (returns refund_order_no) |
-| `refund-detail` | No | — | Query refund request status |
-| `refund-confirm` | Yes | Required | Confirm (1) or cancel (2) a refund application |
-
-### Workflow
+Booking workflow:
 
 ```
-find-airport → search (relay journey-id for multi-leg until price_key_ready)
+find-airport → search (relay --journey-id per leg until price_key_ready)
   → verify → create-order → pay-order → get-order (poll until TICKETED)
 ```
 
-- **search**: `--journeys` always carries ALL legs. For round-trip/multi-city, pass `--journey-id` from the previous search result to accumulate progress. Only the final leg's offer has `price_key_ready=true`.
-- **verify**: Returns the authoritative `product_token` (may differ from search's). If `price_changed`, re-confirm price with user. Always pass verify's token to create-order.
-- **create-order**: Locks fare without charging. `--passengers` is a JSON array; `gender`/`id_type` are strings; child/infant require `adult_passenger_name`.
-- **pay-order**: Same billing-mode routing as hotel (server-side, no EVO params through CLI).
-- **get-order**: Ticketing is async. Single-pax ~100s, multi-pax 150s+. Use `--watch`.
-- **cancel-order**: Only for un-ticketed orders (AWAITING_PAYMENT / PAID). Ticketed → use `refund-apply`.
+Change workflow (`change-pay` is the step most often missed):
+
+```
+change-search → change-apply → change-detail → change-pay → get-order
+                                            └→ change-cancel (abandon)
+```
+
+Refund workflow: `refund-apply → refund-detail → refund-confirm --confirm 1|2`.
+
+Key rules:
+
+- **search**: `--journeys` always carries ALL legs. For round-trip / multi-city, feed `--journey-id` from the previous result to accumulate selections; only the final leg's offer has `price_key_ready: true`.
+- **verify**: returns the authoritative `product_token` (may differ from search's) — always pass verify's token to `create-order`. If `price_changed`, re-confirm the new price with the user.
+- **create-order**: `--passengers` is a JSON array; `gender` / `id_type` are **strings** (`"1"` / `"2"`); child/infant entries need `adult_passenger_name`. Locks the fare without charging.
+- **`pay_time_limit` is a hard deadline, and it is short.** `create-order` returns it as a bare `YYYY-MM-DD HH:MM:SS` string in **Beijing time (Asia/Shanghai)** with no timezone marker — do not read it as UTC or as local time. The supplier decides the window and it is typically only minutes wide (observed ~10 minutes), so call `pay-order` immediately rather than pausing to ask the user another question. Past the deadline `pay-order` fails with `PAYMENT_REQUEST_EXPIRED` and the order is moved to `FAILED`, which is terminal: the fare is gone and you must start over from `search` / `verify` / `create-order` with a new `--idempotency-key`.
+- **Ticketing is asynchronous** — never claim "booked" until `get-order` returns `TICKETED`. Single-passenger ~100s, multi-passenger 150s+; use `--watch`.
+- **cancel-order** only applies to un-ticketed orders (`AWAITING_PAYMENT` / `PAID`). Once `TICKETED`, use `refund-apply`.
+- **change-pay** charges the change fee exactly like a normal order — take `--amount` from `change-detail`'s `price_total`, and pass `--order-no` (the original order) for the ownership check. It then calls upstream change ticketing; poll `get-order`.
+- Every write verb requires `--idempotency-key`; reuse the SAME key when retrying the same intent.
+
+### Payment credentials (`create-order`, `change-pay`)
+
+| Flag | Effect |
+|---|---|
+| *(neither)* | Platform picks the path from the developer's `billing_mode` |
+| `--payment-method-id` | Charge that bound card via the platform's EVO integration (pay_per_call) |
+| `--payment-token-id` | **UnionPay pre-charged path** — a UPI network-token id whose capture already completed; the platform skips EVO preauth/capture and records the credential against the order/change |
+
+Billing modes otherwise match hotel: `monthly_settlement` deducts from the settlement account on `pay-order`; `pay_per_call` is captured server-side (no EVO parameters pass through the CLI).
 
 ### Parameters to ask for (flight-flink)
 
-| Verb | Must ask user | Can auto-generate / default |
-|------|--------------|----------------------------|
+| Verb | Must ask the user | Derived / defaulted |
+|---|---|---|
 | `find-airport` | keyword | — |
-| `search` | trip-type, journeys (origin/destination/date per leg) | journey-id (from prior search) |
-| `verify` | — (product_token from search) | — |
-| `create-order` | contact-name, contact-phone, passengers (name/gender/id/birthday) | idempotency-key, total-amount+currency from verify |
-| `pay-order` | — (order-no from create-order) | idempotency-key |
-| `cancel-order` | — (order-no) | idempotency-key |
+| `search` | trip-type, journeys (origin/destination/date per leg) | `--journey-id` from the prior search |
+| `verify` | — | `product_token` from `search` |
+| `create-order` | contact-name, contact-phone, passengers (name/gender/id/birthday) | `total-amount` + `currency` from `verify`; idempotency-key |
+| `pay-order` / `cancel-order` | — | `order-no` from `create-order`; idempotency-key |
+| `change-apply` | passenger, segment-id, target date | `product-token` from `change-search`; idempotency-key |
+| `change-pay` | — (confirm the fee with the user first) | `change-order-no` + `amount` from `change-detail` |
 | `refund-apply` | passenger, segment-id, reason-type, contact-* | idempotency-key |
-| `refund-confirm` | confirm (1 or 2) | idempotency-key |
-
-### flight-flink billing
-
-Same as hotel: `create-order` locks fare, `pay-order` settles + tickets. The billing path is
-determined server-side by the developer's `billing_mode`:
-
-- **monthly_settlement**: deducted from settlement account on pay-order.
-- **pay_per_call**: captured on bound card via platform's EVO integration (server-side).
+| `refund-confirm` | confirm (`1` or `2`) | idempotency-key |
 
 ### flight-flink specific errors
 
 | Error | Cause | Fix |
-|-------|-------|-----|
-| `INVALID_ORDER_STATE` | Order not in AWAITING_PAYMENT | Check status via get-order; only AWAITING_PAYMENT can be paid |
-| `PAYORDER_FAILED` | Upstream payOrder rejected (e.g. fare expired) | Re-search and re-book |
-| `BOOKING_FAILED` | Upstream createOrder rejected | Re-verify and retry |
-| `PRICE_CHANGED` | Authoritative price differs from request | Re-verify, confirm new price with user |
+|---|---|---|
+| `INVALID_ORDER_STATE` | Order not in `AWAITING_PAYMENT` | Check `get-order`; only `AWAITING_PAYMENT` can be paid |
+| `PAYORDER_FAILED` | Upstream `payOrder` rejected (e.g. fare expired) | Re-search and re-book |
+| `BOOKING_FAILED` | Upstream `createOrder` rejected | Re-verify and retry |
+| `PRICE_CHANGED` | Authoritative price differs from the request | Re-verify, confirm the new price with the user |
 | `NO_AVAILABILITY` | No flights match | Adjust search criteria |
-| `ORDER_CREATE_FAILED` | Upstream order creation error (timeout/rejection) | Retry with same idempotency-key |
-| `PAYMENT_FAILED` | Ticketing/settlement failed | Poll get-order; re-book if order is FAILED |
+| `ORDER_CREATE_FAILED` | Upstream order creation error (timeout / rejection) | Retry with the SAME idempotency-key |
+| `PAYMENT_FAILED` | Ticketing / settlement failed | Poll `get-order`; re-book if the order is `FAILED` |
 
 ## Merchant-specific errors
 
 | Error | Cause | Fix |
-|-------|-------|-----|
-| `KEY_SCOPE_DENIED` | API key does not include `merchant` scope | Create a key with `--scope merchant` (admin-cli `keys create`) |
-| `SERVICE_NOT_FOUND` | Unknown capability id passed to `services get` | Run `services list` to see valid ids |
-| `QUOTE_EXPIRED` | The `quote_id` is too old | Re-run `quote` and book with a fresh `quote_id` |
-| `VEHICLE_UNAVAILABLE` | The chosen vehicle class is no longer available | Re-quote and pick an available class |
-| `BOOKING_FAILED` | The provider rejected the booking | Re-quote and retry; verify passenger details |
-| `CANCELLATION_NOT_ALLOWED` | The ride is past the cancellable state | The ride can no longer be cancelled |
-| `PARAM_IDEMPOTENCY_KEY_REQUIRED` | `--idempotency-key` missing for a write under `--yes` | Supply a unique `--idempotency-key` |
-| `INVALID_ORDER_STATE` | Hotel order is not in `AWAITING_PAYMENT` state | Check order status with `get`; only `AWAITING_PAYMENT` orders can be paid |
-| `BILLING_MODE_MISMATCH` | Order's `billing_mode` is not `monthly_settlement` or `pay_per_call` | Check the developer's billing_mode; do not retry blindly |
-| `PAYMENT_NOT_COMPLETED` | EVO payment not yet confirmed for this `order_id` | Retry later or use `--watch` to poll automatically |
-| `PAYMENT_NOT_FOUND` | No EVO transaction found for this `order_id` | Confirm the user paid via EVO using the `order_id` as the merchantTransID |
-| `PAYMENT_AMOUNT_MISMATCH` | EVO payment amount/currency does not match the order | User must pay the exact `total_amount` in the exact `currency` under the `order_id` |
-| `NO_AVAILABILITY` | Hotel room is no longer available | Re-run `quote` and try a different rate |
-| `PRICE_CHANGED` | Price has changed since quote | Re-run `quote` for updated pricing |
+|---|---|---|
+| `KEY_SCOPE_DENIED` | API key lacks `merchant` scope | Create a key with `--scope merchant` (admin-cli `keys create`) |
+| `SERVICE_NOT_FOUND` | Unknown id passed to `services get`, or the CLI does not register that `cli_noun` | Run `services list` for valid ids |
+| `QUOTE_EXPIRED` | `quote_id` is too old | Re-run `quote` and book with a fresh `quote_id` |
+| `VEHICLE_UNAVAILABLE` | Chosen vehicle class no longer available | Re-quote and pick an available class |
+| `BOOKING_FAILED` | Provider rejected the booking | Re-quote and retry; verify passenger details |
+| `CANCELLATION_NOT_ALLOWED` | Order is past the cancellable state | Cannot be cancelled |
+| `PARAM_IDEMPOTENCY_KEY_REQUIRED` | `--idempotency-key` missing on a write under `--yes` | Supply a unique key |
+| `INVALID_ORDER_STATE` | Order is not in `AWAITING_PAYMENT` | Check status with `get` / `get-order` |
+| `BILLING_MODE_MISMATCH` | `billing_mode` is neither `monthly_settlement` nor `pay_per_call` | Check the developer's billing_mode; do not retry blindly |
+| `PAYMENT_NOT_COMPLETED` | EVO payment not yet confirmed for this `order_id` | Retry later or use `--watch` |
+| `PAYMENT_NOT_FOUND` | No EVO transaction for this `order_id` | Confirm the user paid using the `order_id` as merchantTransID |
+| `PAYMENT_AMOUNT_MISMATCH` | EVO amount/currency ≠ order | User must pay the exact `total_amount` in the exact `currency` |
+| `NO_AVAILABILITY` | Room / flight no longer available | Re-run `quote` / `search` and pick another option |
+| `PRICE_CHANGED` | Price changed since quote/verify | Re-quote / re-verify and re-confirm with the user |

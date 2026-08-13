@@ -11,7 +11,7 @@ import {
   type OutputFormat,
 } from '@agenzo/cli-core';
 
-const DEFAULT_HOST = 'https://agent.everonet.com';
+const DEFAULT_HOST = 'https://agent.agenzo.com';
 
 /** Payload for `config set-host` / `config reset-host` (client-constructed; no API call). */
 interface HostResult {
@@ -132,7 +132,7 @@ export function registerConfigCommand(
 
   configCmd
     .command('reset-host')
-    .description('Reset API host to default (https://agent.everonet.com)')
+    .description('Reset API host to default (https://agent.agenzo.com)')
     .action(async (_options, command: Command) => {
       const format = resolveFormat(command.optsWithGlobals().format);
 

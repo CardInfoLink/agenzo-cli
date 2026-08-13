@@ -1,6 +1,6 @@
 /**
  * Lightweight E2E validation test for hotel-redaug commands against the
- * testing profile (host: agent-test.everonet.com).
+ * testing profile (host: agent-dev.agenzo.com).
  *
  * SKIP-BY-DEFAULT: runs only when HOTEL_E2E_API_KEY env var is set.
  * This prevents CI failures when no test credentials are available.

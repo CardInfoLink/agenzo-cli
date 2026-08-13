@@ -5,7 +5,7 @@
  * client-assembled context fields:
  *   - `profile`:  the active environment name (production / testing / custom),
  *                 derived by reverse-looking-up the api_host in BUILTIN_PROFILES.
- *   - `endpoint`: the api **host only** (e.g. https://agent.everonet.com) —
+ *   - `endpoint`: the api **host only** (e.g. https://agent.agenzo.com) —
  *                 NEVER the internal API path (/api/admin/v1), so internal
  *                 routing is not leaked to agent consumers.
  *
