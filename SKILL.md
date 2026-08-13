@@ -24,9 +24,9 @@ Agenzo provides four command-line tools, split by product area:
 
 ### Payment Methods & Tokens (token-cli)
 
-Two card-binding paths:
+Two paths for adding a payment method:
 
-| Brand | Command | Result |
+| Payment brand | Command | Result |
 |---|---|---|
 | Evo (Visa/MC) | `payment-methods add --payment-brand evo` | 3DS inline → ACTIVE |
 | Evo Drop-in | `payment-methods add --mode dropin` | Session URL → poll |
@@ -61,7 +61,7 @@ UnionPay network tokens require a separate checkout step (`payment-tokens unionp
 [payment-cli] payments capture (for pay_per_call with pre-charged token)
 ```
 
-### UnionPay Card Binding + Payment
+### UnionPay Payment Method Enrollment + Payment
 
 ```
 [token-cli]    payment-methods add --payment-brand unionpay --member <id> --email <e>
@@ -135,6 +135,6 @@ refund-apply → refund-detail → refund-confirm
 | Auth failure (exit 3) | Session expired or wrong/unscoped key | Re-login or check key scope |
 | Version below minimum (exit 2) | Platform requires newer CLI | `npm install -g @agenzo/<cli>@latest` |
 | Connection error (exit 4) | Wrong host or network issue | Check `config show`; verify connectivity |
-| 1913 No active payment method | `pay_per_call` account without bound card | Bind a card first via `payment-methods add` |
+| 1913 No active payment method | `pay_per_call` account with no ACTIVE payment method | Add one first via `payment-methods add`, then poll until ACTIVE |
 
 Per-CLI errors: [admin-cli](doc/admin-cli.md) · [token-cli](doc/token-cli.md) · [merchant-cli](doc/merchant-cli.md) · [payment-cli](doc/payment-cli.md).

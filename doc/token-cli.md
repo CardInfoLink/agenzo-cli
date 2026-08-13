@@ -15,9 +15,9 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 | `payment-methods` | `get` | Read | View payment method details |
 | `payment-methods` | `disable` | Write | Disable a payment method (revokes its tokens) |
 | `payment-methods` | `dropin-create` | Write | Mint a Drop-in session and return `session_id` — **no polling** |
-| `payment-methods` | `dropin-status` | Read | Single Drop-in binding status check |
+| `payment-methods` | `dropin-status` | Read | Single Drop-in verification status check |
 | `payment-methods` | `unionpay-enroll` | Write | Start UnionPay enrollment and return `enroll_url` — **no polling** |
-| `payment-methods` | `unionpay-status` | Read | Single UnionPay card-binding status check |
+| `payment-methods` | `unionpay-status` | Read | Single UnionPay enrollment status check |
 | `payment-tokens` | `create` | Write | Create a token (VCN / Network Token / X402) |
 | `payment-tokens` | `list` | Read | List payment tokens (optionally `--type` / `--member`) |
 | `payment-tokens` | `get` | Read | View token details (`--reveal` for full VCN) |
@@ -108,7 +108,7 @@ The session id is single-use. If it expires (30 min), re-run with the same `--em
 
 ### add `--payment-brand unionpay` — UnionPay card enrollment
 
-No card details are entered at the terminal. The user completes binding by authenticating on a UnionPay-hosted page (no OTP, no email link).
+No card details are entered at the terminal. The user completes enrollment by authenticating on a UnionPay-hosted page (no OTP, no email link).
 
 1. `POST /payment-methods/create` with `payment_brand=unionpay` + `member_id` (no idempotency key — this is an enrollment, not a charge).
 2. The CLI prints `ID`, `Status`, **`Enroll URL`**, `Correlation ID`.
