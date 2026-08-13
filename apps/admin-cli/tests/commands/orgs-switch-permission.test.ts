@@ -18,8 +18,8 @@ import { buildProgram, captureStdout, captureStderr } from '../helpers.js';
  */
 
 const FAR_FUTURE = Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
-const HOST = 'https://agent.everonet.com';
-const OTHER_HOST = 'https://agent-test.everonet.com';
+const HOST = 'https://agent.agenzo.com';
+const OTHER_HOST = 'https://agent-dev.agenzo.com';
 
 function cred(orgId: string, token: string, apiHost: string): OrgCredential {
   return {

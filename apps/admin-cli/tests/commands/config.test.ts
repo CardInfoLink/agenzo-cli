@@ -62,7 +62,7 @@ describe('config show', () => {
       await program.parseAsync(['node', 'cli', 'config', 'show']);
     } finally { delete process.env.AGENZO_FORMAT; }
     const json = parseJsonOutput(out.text()) as any;
-    expect(json.api_host).toBe('https://agent.everonet.com');
+    expect(json.api_host).toBe('https://agent.agenzo.com');
     expect(json.api_path).toBe('/api/admin/v1');
     expect(json.active_org).toBe('org_test_001');
   });
@@ -77,8 +77,8 @@ describe('config reset-host', () => {
     try {
       await program.parseAsync(['node', 'cli', 'config', 'reset-host']);
     } finally { delete process.env.AGENZO_FORMAT; }
-    expect(configManager.setApiHost).toHaveBeenCalledWith('https://agent.everonet.com');
+    expect(configManager.setApiHost).toHaveBeenCalledWith('https://agent.agenzo.com');
     const json = parseJsonOutput(out.text()) as any;
-    expect(json.api_host).toBe('https://agent.everonet.com');
+    expect(json.api_host).toBe('https://agent.agenzo.com');
   });
 });

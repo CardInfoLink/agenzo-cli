@@ -71,7 +71,7 @@ agenzo-merchant-cli --version
 
 ### 3.2 Backend Environment (for L4 manual testing)
 
-- Testing host: `https://agent-test.everonet.com` (host is set uniformly by admin-cli `config set-host`; merchant-cli shares `~/.agenzo-admin-cli/` default config).
+- Testing host: `https://agent-dev.agenzo.com` (host is set uniformly by admin-cli `config set-host`; merchant-cli shares `~/.agenzo-admin-cli/` default config).
 - API path: `/api/v3/agent-pay` (v3 envelope `{ code, message, data }`, cli-core `ApiClient` auto-unwraps).
 - Requires a valid **merchant scope** API Key (issued by `agenzo-admin-cli keys create --scope merchant`).
 
@@ -731,4 +731,4 @@ Code review item-by-item verification (comparing against cli-design §4.4 + exis
 - `tests/hotel-redaug.test.ts` — per-verb integration (mocked `ApiClient`): body/query assembly, confirm/`--yes`/api-key prompt branches, rendering, error mapping.
 - `tests/hotel-verb-schema.test.ts` — `--help --format json` emission, `polling` blocks (`get`/`get-checkout`), flag/response alignment, `error_recovery` keys.
 - Registration test — `hotel-redaug` exposes exactly **12 verbs** including `find-destination`, no host/profile subcommand.
-- E2E (testing profile) — `search → quote → book → get` against `agent-test.everonet.com` with a merchant-scoped key.
+- E2E (testing profile) — `search → quote → book → get` against `agent-dev.agenzo.com` with a merchant-scoped key.

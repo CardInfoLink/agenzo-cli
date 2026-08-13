@@ -69,7 +69,7 @@ npm test                             # vitest run (full suite)
 
 ### 3.2 Backend Environment (for L4 manual tests)
 
-- Testing host: `https://agent-test.everonet.com`
+- Testing host: `https://agent-dev.agenzo.com`
 - API path: `/api/v3/agent-pay`
 - Requires a valid API Key (issued by `agenzo-admin-cli keys create`)
 

@@ -286,8 +286,8 @@ describe('provider pass-through and STABLE_MESSAGE isolation (§8.2 / Req 2.3, 4
 
 describe('NetworkError does not leak internal URL/path', () => {
   it('message does not contain the passed-in internal URL', () => {
-    const env = toErrorEnvelope(new NetworkError('https://agent-test.everonet.com/api/admin/v1/auth/login'));
+    const env = toErrorEnvelope(new NetworkError('https://agent-dev.agenzo.com/api/admin/v1/auth/login'));
     expect(env.error.message).not.toContain('/api/admin/v1');
-    expect(env.error.message).not.toContain('agent-test.everonet.com');
+    expect(env.error.message).not.toContain('agent-dev.agenzo.com');
   });
 });

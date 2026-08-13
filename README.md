@@ -85,9 +85,9 @@
 | Plane | CLI | Auth |
 |---|---|---|
 | Control plane | `agenzo-admin-cli` | Bearer token (via `auth login`) |
-| Runtime plane | `agenzo-token-cli`, `agenzo-merchant-cli`, `agenzo-payment-cli` | API key (`--api-key`) |
+| Runtime plane | `agenzo-token-cli`, `agenzo-payment-cli`, `agenzo-merchant-cli` | API key (`--api-key`) |
 
-The default API host is `https://agent.everonet.com` (production). To use the test environment, run `agenzo-admin-cli config set-host https://agent-dev.agenzo.com`.
+The default API host is `https://agent.agenzo.com` (production). To use the test environment, run `agenzo-admin-cli config set-host https://agent-dev.agenzo.com`.
 
 ## Getting started
 

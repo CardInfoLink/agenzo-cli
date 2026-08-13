@@ -6,8 +6,8 @@ import { ConfigManager, resolveApiHost } from '../config/config-manager.js';
 
 describe('resolveApiHost', () => {
   it('resolves built-in profiles and HTTPS hosts', () => {
-    expect(resolveApiHost('production')).toBe('https://agent.everonet.com');
-    expect(resolveApiHost('testing')).toBe('https://agent-test.everonet.com');
+    expect(resolveApiHost('production')).toBe('https://agent.agenzo.com');
+    expect(resolveApiHost('testing')).toBe('https://agent-dev.agenzo.com');
     expect(resolveApiHost('https://example.com')).toBe('https://example.com');
   });
 
@@ -18,8 +18,8 @@ describe('resolveApiHost', () => {
 
   it('rejects insecure non-local HTTP hosts and malformed URLs', () => {
     expect(() => resolveApiHost('http://example.com')).toThrow('Insecure API host');
-    expect(() => resolveApiHost('http://agent.everonet.com')).toThrow('Insecure API host');
-    expect(() => resolveApiHost('agent.everonet.com')).toThrow('Unknown profile or invalid URL');
+    expect(() => resolveApiHost('http://agent.agenzo.com')).toThrow('Insecure API host');
+    expect(() => resolveApiHost('agent.agenzo.com')).toThrow('Unknown profile or invalid URL');
   });
 });
 

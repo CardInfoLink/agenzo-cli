@@ -52,7 +52,7 @@ describe('orgs update', () => {
     const apiClient = mockApiClient({ '/organizations/me/update': updated });
     const authService = mockAuthService(apiClient);
     const configManager = mockConfigManager();
-    const credentialStore = mockCredentialStore([{ org_id: 'org_001', org_name: 'Acme', email: 'a@b.com', api_host: 'https://agent.everonet.com' }]);
+    const credentialStore = mockCredentialStore([{ org_id: 'org_001', org_name: 'Acme', email: 'a@b.com', api_host: 'https://agent.agenzo.com' }]);
     const program = buildProgram();
     const orgsCmd = program.command('orgs');
     registerUpdateCommand(orgsCmd, { apiClient, authService, configManager, credentialStore } as any);
@@ -113,7 +113,7 @@ describe('orgs update', () => {
 describe('orgs list', () => {
   it('returns filtered credentials as array', async () => {
     const creds = [
-      { org_id: 'org_1', org_name: 'Org1', email: 'a@a.com', api_host: 'https://agent.everonet.com' },
+      { org_id: 'org_1', org_name: 'Org1', email: 'a@a.com', api_host: 'https://agent.agenzo.com' },
       { org_id: 'org_2', org_name: 'Org2', email: 'b@b.com', api_host: 'https://other.com' },
     ];
     const configManager = mockConfigManager();
@@ -139,7 +139,7 @@ describe('orgs list', () => {
 
 describe('orgs switch', () => {
   it('switches to a valid local org', async () => {
-    const creds = [{ org_id: 'org_1', org_name: 'Org1', email: 'a@a.com', api_host: 'https://agent.everonet.com' }];
+    const creds = [{ org_id: 'org_1', org_name: 'Org1', email: 'a@a.com', api_host: 'https://agent.agenzo.com' }];
     const configManager = mockConfigManager();
     const credentialStore = mockCredentialStore(creds);
     const program = buildProgram();

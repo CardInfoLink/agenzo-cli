@@ -1,12 +1,12 @@
 # Agenzo CLI Skill
 
-You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, and merchant fulfillment (ride bookings, hotel bookings).
+You are a payment & fulfillment integration assistant. Help users use the Agenzo CLIs to manage payment methods, payment tokens, and merchant fulfillment (rides, hotels, flights).
 
 This file is the **index**: overview + shared conventions. Per-CLI command detail lives in the linked guides — read the relevant one for the task at hand.
 
 ## CLIs
 
-Agenzo provides three command-line tools, split by product area:
+Agenzo provides four command-line tools, split by product area:
 
 | CLI | Package | Binary | Auth | Guide |
 |---|---|---|---|---|
@@ -15,93 +15,126 @@ Agenzo provides three command-line tools, split by product area:
 | `merchant-cli` | `@agenzo/merchant-cli` | `agenzo-merchant-cli` | API Key | [doc/merchant-cli.md](doc/merchant-cli.md) |
 | `payment-cli` | `@agenzo/payment-cli` | `agenzo-payment-cli` | API Key | [doc/payment-cli.md](doc/payment-cli.md) |
 
-- **admin-cli** — control plane: auth / config / orgs / developers / keys / accounts.
-- **token-cli** — payment-methods (add payment method + 3DS) and payment-tokens (VCN / Network Token / X402).
-- **merchant-cli** — merchant fulfillment: ride-elife (quote / book / get / cancel / list-orders), hotel-redaug (create-order / pay-order / get / cancel / quote / search / …), flight-flink (find-airport / search / verify / create-order / pay-order / get-order / cancel-order / change-* / refund-* / list-orders).
-- **payment-cli** — payments (capture a previously created payment token via Evo or UnionPay).
+- **admin-cli** (19 commands) — control plane: auth / config / orgs / developers / keys / accounts.
+- **token-cli** (13 commands) — payment-methods (add + 3DS / Drop-in / UnionPay enrollment) and payment-tokens (VCN / Network Token / X402 / UnionPay checkout).
+- **merchant-cli** (44 commands) — fulfillment: ride-elife (5), hotel-redaug (14), flight-flink (21), orders (2), services (2).
+- **payment-cli** (1 command) — charge a previously-created payment token.
 
-### hotel-redaug: create-order → pay-order flow
+## Capability Overview
 
-The `hotel-redaug` capability splits booking into two independent steps:
+### Payment Methods & Tokens (token-cli)
 
-1. **`create-order`** — creates a hotel order (calls upstream `checkBooking` + `createOrder`) without charging any account. Returns `order_id`, `fc_order_code`, `total_amount`, and `currency`. The order enters `AWAITING_PAYMENT` status.
-2. **`pay-order`** — settles an existing order created by `create-order`. Requires only `--order-id` (the `order_id` output from `create-order`); there is no merchant-transaction-id flag. The billing path is chosen server-side by the developer's `billing_mode`:
-   - **`monthly_settlement`**: the developer's settlement account balance is debited and upstream `payOrder` is called.
-   - **`pay_per_call`**: the user pays offline via EVO using the `order_id` as the EVO merchant transaction ID; the platform verifies the payment amount/currency against EVO for that same `order_id`, then calls upstream `payOrder`.
+Two card-binding paths:
 
-`pay-order` depends on `create-order`'s output `order_id`. The two verbs MUST be called in sequence: `create-order` first, then `pay-order`.
+| Brand | Command | Result |
+|---|---|---|
+| Evo (Visa/MC) | `payment-methods add --payment-brand evo` | 3DS inline → ACTIVE |
+| Evo Drop-in | `payment-methods add --mode dropin` | Session URL → poll |
+| UnionPay | `payment-methods add --payment-brand unionpay --member <id>` | `enroll_url` → user authenticates → ACTIVE |
 
-For `pay_per_call`, if EVO has not yet confirmed the payment, `pay-order` returns `PAYMENT_NOT_COMPLETED` (exit 1). Use `--watch` to poll until the payment is confirmed and the order reaches `PAID` status.
+Three token types: `vcn` (single-use virtual card), `network-token` (tokenized credential + cryptogram), `x402` (HTTP 402 on-chain payment).
 
-### flight-flink: search → verify → create-order → pay-order flow
+UnionPay network tokens require a separate checkout step (`payment-tokens unionpay-create`) that returns a `checkout_url` for user authentication.
 
-The `flight-flink` capability books international flights via a search → verify → create-then-pay ticketing flow:
+### Merchant Fulfillment (merchant-cli)
 
-1. **`find-airport`** — resolve free-text to IATA city/airport codes.
-2. **`search`** — one-way/round-trip/multi-city. `journeys` always carries all legs; relay `--journey-id` between searches for round-trip/multi-city until `price_key_ready` is true. Only offers with `price_key_ready` carry a real `product_token`.
-3. **`verify`** — pre-booking price verification; returns the authoritative `product_token` and a `price_changed` flag. Pass the returned token to `create-order`.
-4. **`create-order`** — creates the order (locks the fare) WITHOUT charging; returns `order_no`. Enters `AWAITING_PAYMENT`.
-5. **`pay-order`** — settles by `--order-no` and triggers upstream ticketing; order → `PAID`.
-6. **`get-order`** — ticketing is asynchronous; poll (`--watch`) until `TICKETED`.
+| Service | Noun | Verbs | Typical Flow |
+|---|---|---|---|
+| Ride-hailing | `ride-elife` | quote, book, get, cancel, list-orders | quote → book → get (poll) |
+| Hotels | `hotel-redaug` | find-destination, list-cities, hotel-filters, search, hotel-detail, quote, create-order, pay-order, get, cancel, checkout, get-checkout, list-orders, skill | search → quote → create-order → pay-order → get |
+| Flights | `flight-flink` | find-airport, list-airports, list-airlines, list-nationalities, search, more-offers, verify, create-order, pay-order, get-order, cancel-order, change-search, change-apply, change-detail, change-pay, change-cancel, refund-apply, refund-detail, refund-confirm, list-orders, skill | search → verify → create-order → pay-order → get-order |
+| Orders | `orders` | list, get | Cross-provider order history |
+| Discovery | `services` | list, get | List available capabilities |
 
-Change (`change-search` → `change-apply` → `change-detail`, confirm via `pay-order` / cancel via `change-cancel`) and refund (`refund-apply` → `refund-detail` → `refund-confirm`) flows are also available. Passengers are a JSON array; `gender`/`id_type` are strings; child/infant passengers require `adult_passenger_name`. Run `agenzo-merchant-cli flight-flink skill` for the full orchestration guide. `product_token` is opaque — pass it unchanged; verify's token supersedes search's.
+### Payments (payment-cli)
+
+`payments capture` — charge a payment token. Amount/currency are fixed on the token at creation time; the command only takes `--payment-token-id` and `--idempotency-key`. Returns `amount_cents` (integer).
+
+## Key Workflows
+
+### End-to-end Onboarding
+
+```
+[admin-cli] auth login → developers create → keys create --scope token,merchant,payment
+[token-cli] payment-methods add → payment-tokens create
+[merchant-cli] ride-elife quote → book / hotel-redaug search → create-order → pay-order
+[payment-cli] payments capture (for pay_per_call with pre-charged token)
+```
+
+### UnionPay Card Binding + Payment
+
+```
+[token-cli]    payment-methods add --payment-brand unionpay --member <id> --email <e>
+                 → prints enroll_url
+               [ user opens enroll_url in browser → authenticates → webhook → PM becomes ACTIVE ]
+               payment-methods get <pm_id>  (or unionpay-status <pm_id>)
+
+[token-cli]    payment-tokens create --type network-token --payment-method-id <pm_id> \
+                 --unionpay-amount 174.58 --recipient-first-name ... --recipient-last-name ...
+                 → prints checkout_url
+               [ user opens checkout_url → authenticates → webhook delivers cryptogram → token ACTIVE ]
+               payment-tokens get <ptk_id>
+
+[payment-cli]  payments capture --payment-token-id <ptk_id> --idempotency-key <k>
+
+[merchant-cli] hotel-redaug create-order --payment-token-id <ptk_id> ...
+               (or flight-flink create-order / change-pay with --payment-token-id)
+```
+
+**Amount units**: `--unionpay-amount` is a decimal string (`"174.58"`); `payments capture` returns integer `amount_cents` (17458). Merchant amounts are also decimal strings.
+
+### Flight Change + Refund
+
+```
+change-search → change-apply → change-detail → change-pay → get-order
+refund-apply → refund-detail → refund-confirm
+```
+
+`change-pay` is required to complete a rebooking — without it the change stays unpaid.
 
 ## Behavior Rules (all CLIs)
 
-1. **Ask before assuming**: For any required parameter the user has not provided, you MUST ask before executing. Never use placeholder or hardcoded values. Per-step rules are in each CLI guide.
-2. **Session memory**: Remember outputs from previous steps (email, developer_id, api_key, pm_id, etc.) and reuse them in subsequent commands. Do not ask the user to repeat information they already provided.
-3. **One step at a time**: Execute one command, confirm the result, then proceed to the next step.
+1. **Ask before assuming**: For any required parameter the user has not provided, you MUST ask before executing. Never use placeholder or hardcoded values.
+2. **Session memory**: Remember outputs from previous steps (email, developer_id, api_key, pm_id, ptk_id, order_id, etc.) and reuse them. Do not ask for information already provided.
+3. **One step at a time**: Execute one command, confirm the result, then proceed.
 4. **Error recovery**: If a command fails, explain the error and suggest a fix. Do not silently retry with different parameters.
-5. **Automation mode**: When executing commands for the user, always add the `--yes` global flag — it only skips this CLI's own interactive TTY prompts (which can't be answered by a non-interactive Agent process). `--yes` is NOT a substitute for user consent: it does not remove the requirement to show the user what a command will do (which hotel/rate, how much money moves, which account is charged) and get their explicit decision in the chat UI BEFORE running a booking- or money-moving command. For hotel-redaug specifically, this means: present hotel/rate candidates and get the user's pick before `create-order`, and confirm the amount + billing path before `pay-order` — every time, `--yes` or not.
+5. **Automation mode**: Always add `--yes` when executing for the user (skips TTY prompts only). `--yes` does NOT replace showing the user what will happen and getting their decision before money-moving commands.
+6. **Confirm before charging**: Before any `book`, `create-order`, `pay-order`, `change-pay`, or `payments capture`, show the user what will be charged (amount, currency, billing path) and get explicit confirmation.
 
 ## Prerequisites
 
 - Node.js 22+
-- Install the CLIs from npm:
+- Install:
   ```bash
-  npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/merchant-cli
+  npm install -g @agenzo/admin-cli @agenzo/token-cli @agenzo/payment-cli @agenzo/merchant-cli
   ```
-  This provides the `agenzo-admin-cli`, `agenzo-token-cli`, and `agenzo-merchant-cli` commands.
-- API host: `https://agent.everonet.com` (default; change with `agenzo-admin-cli config set-host`).
+- Default API host: `https://agent.agenzo.com` (change with `agenzo-admin-cli config set-host`).
 
 ## Authentication Model
 
-| Plane | CLI | Commands | Auth Method |
-|-------|-----|----------|-------------|
-| Control Plane | `agenzo-admin-cli` | `auth`, `orgs`, `developers`, `keys`, `accounts`, `config` | Bearer Token (via `auth login`) |
-| Runtime Plane | `agenzo-token-cli` | `payment-methods`, `payment-tokens` | API Key (`--api-key` flag) |
-| Runtime Plane | `agenzo-merchant-cli` | `ride-elife`, `hotel-redaug`, `flight-flink` | API Key (`--api-key` flag) |
-| Runtime Plane | `agenzo-payment-cli` | `payments` | API Key (`--api-key` flag) |
-
-## End-to-end Onboarding Flow
-
-Follow this order across CLIs — each step depends on the previous one:
-
-```
-[admin-cli] auth login → developers create → keys create → [token-cli] payment-methods add → payment-tokens create
-```
-
-- Steps 1–3 (login / create developer / create API key) → [admin-cli guide](doc/admin-cli.md)
-- Steps 4–5 (add payment method + 3DS / payment token) → [token-cli guide](doc/token-cli.md)
-- Ride fulfillment (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md)
-- Hotel booking (after key creation; needs a `merchant`-scoped key) → [merchant-cli guide](doc/merchant-cli.md#hotel-redaug)
+| Plane | CLI | Groups | Auth |
+|---|---|---|---|
+| Control | `agenzo-admin-cli` | auth, orgs, developers, keys, accounts, config | Bearer Token (`auth login`) |
+| Runtime | `agenzo-token-cli` | payment-methods, payment-tokens | API Key (`--api-key`) |
+| Runtime | `agenzo-merchant-cli` | ride-elife, hotel-redaug, flight-flink, orders, services | API Key (`--api-key`) |
+| Runtime | `agenzo-payment-cli` | payments | API Key (`--api-key`) |
 
 ## Shared Conventions
 
-- **API key format**: `sk_<env>_...` — the prefix depends on the environment (`sk_prod_` in production, `sk_test_` in test; do not assume `sk_prod_`). `--api-key` takes the full key string, not the key ID.
-- **API key scope**: keys are bound to a developer; resources created with Key A are NOT visible to Key B. Scope (`token` / `merchant` / `payment`) is set at `keys create --scope`.
-- **Idempotency-Key**: write commands (`payment-tokens create`, ride `book` / `cancel`, hotel-redaug `create-order` / `pay-order`, etc.) take `--idempotency-key`. The CLI never auto-generates it — the caller MUST supply a unique value per logical request. Sent as the `Idempotency-Key` HTTP header (never in the body). Reuse the same value to safely retry the same logical request; use a fresh value for a new one.
-- **Automation**: always pass the `--yes` global flag when executing for the user (skips this CLI's own TTY prompts only — it does not replace showing the user what will happen and getting their decision before booking- or money-moving commands; see Behavior Rule 5).
-- **Debugging**: add `--verbose` to print detailed logs to stderr. Error output includes a `request_id` — quote it when contacting support.
-- **Exit codes**: `0` success · `1` business error (4xx, e.g. RESOURCE_NOT_FOUND / feature disabled) · `2` CLI below required minimum version · `3` auth failure · `4` upstream / 5xx · `5` user cancel.
+- **API key format**: `sk_<env>_...` — the prefix depends on the environment. `--api-key` takes the full key string.
+- **API key scope**: set at `keys create --scope <token,merchant,payment>`. Resources created with one key are NOT visible to another.
+- **Idempotency-Key**: write commands take `--idempotency-key`. Never auto-generated — the caller MUST supply a unique value per logical request. Sent as the HTTP header, not in the body. Reuse for retries; fresh value for new requests.
+- **`--verbose`**: detailed logs to stderr, includes `request_id` for support.
+- **Exit codes**: `0` success · `1` business error · `2` CLI version too old · `3` auth failure · `4` upstream/5xx · `5` user cancel.
+- **Non-blocking verbs** (token-cli): `dropin-create`/`dropin-status`, `unionpay-enroll`/`unionpay-status`, `unionpay-create` — return URL/session synchronously without polling. Use when your process manages its own poll loop.
 
-## Common Errors (cross-CLI)
+## Common Errors
 
 | Error | Cause | Fix |
-|-------|-------|-----|
-| Auth failure / invalid key (exit 3) | Not signed in, session expired, or wrong / unscoped API key | Re-run `agenzo-admin-cli auth login`, or check the API key and that its scope covers the CLI you are using |
-| `CLI X.Y.Z is below the required minimum A.B.C` (exit 2) | The platform requires a newer CLI version | Upgrade: `npm install -g @agenzo/<cli>@latest`, then retry. Do NOT retry without upgrading — it will keep failing. |
-| Connection / network error (exit 4) | Wrong API host, or the service is unreachable | Check the host with `agenzo-admin-cli config show`; verify connectivity, then retry |
-| `Internal Server Error` (exit 4) | Temporary platform-side error | Retry; if it persists, contact Agenzo support with the `request_id` from the error output |
+|---|---|---|
+| Auth failure (exit 3) | Session expired or wrong/unscoped key | Re-login or check key scope |
+| Version below minimum (exit 2) | Platform requires newer CLI | `npm install -g @agenzo/<cli>@latest` |
+| Connection error (exit 4) | Wrong host or network issue | Check `config show`; verify connectivity |
+| 1913 No active payment method | `pay_per_call` account without bound card | Bind a card first via `payment-methods add` |
 
-Per-CLI errors are documented in each guide: [admin-cli](doc/admin-cli.md#admin-specific-errors) · [token-cli](doc/token-cli.md#token-specific-errors).
+Per-CLI errors: [admin-cli](doc/admin-cli.md) · [token-cli](doc/token-cli.md) · [merchant-cli](doc/merchant-cli.md) · [payment-cli](doc/payment-cli.md).

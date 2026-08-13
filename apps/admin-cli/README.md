@@ -31,7 +31,7 @@ agenzo-admin-cli auth login --email you@example.com --idempotency-key <unique_ke
 
 ## Environment configuration
 
-admin-cli **owns** the environment for the whole toolchain. The host and path it writes to `~/.agenzo-admin-cli/config.json` are shared by the runtime-plane CLIs. The default target is production `https://agent.everonet.com`.
+admin-cli **owns** the environment for the whole toolchain. The host and path it writes to `~/.agenzo-admin-cli/config.json` are shared by the runtime-plane CLIs. The default target is production `https://agent.agenzo.com`.
 
 ```bash
 agenzo-admin-cli config set-host https://agent-dev.agenzo.com   # switch to the test environment
@@ -128,7 +128,7 @@ Outputs `{ api_host, api_path, active_org }`. `active_org` is `null` (json) / `(
 agenzo-admin-cli config reset-host
 ```
 
-Equivalent to `set-host https://agent.everonet.com`; same auto-switch behavior.
+Equivalent to `set-host https://agent.agenzo.com`; same auto-switch behavior.
 
 ## orgs
 

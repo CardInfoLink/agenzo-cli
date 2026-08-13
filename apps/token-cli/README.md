@@ -31,7 +31,7 @@ agenzo-admin-cli keys create --developer-id <dev_id> --key-name "Prod Key" --sco
 
 ## Environment configuration
 
-token-cli reuses the environment configuration (API host / path) written by admin-cli; it has no environment-management commands of its own. The default target is production `https://agent.everonet.com`. Switch environments via admin-cli:
+token-cli reuses the environment configuration (API host / path) written by admin-cli; it has no environment-management commands of its own. The default target is production `https://agent.agenzo.com`. Switch environments via admin-cli:
 
 ```bash
 agenzo-admin-cli config set-host https://agent-dev.agenzo.com   # switch to the test environment
