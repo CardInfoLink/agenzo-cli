@@ -68,7 +68,7 @@ describe('emitSchema', () => {
 });
 
 describe('verb schema field alignment', () => {
-  it('UT-SCHEMA-06: required flags / defaults align; book has NO payment-method-id (Property 5); get terminal_statuses = 5', () => {
+  it('UT-SCHEMA-06: required flags / defaults align; book takes an opaque card id but no raw card data; get terminal_statuses = 5', () => {
     // quote: pickup-lat required.
     expect(quoteSchema.flags['pickup-lat'].required).toBe(true);
 
@@ -76,11 +76,12 @@ describe('verb schema field alignment', () => {
     expect(bookSchema.flags['idempotency-key'].required).toBe(true);
     expect(bookSchema.flags['price-currency'].default).toBe('USD');
 
-    // Property 5: book flags carry NO payment-method-id (nor any card field).
-    expect(bookSchema.flags).not.toHaveProperty('payment-method-id');
+    // 允许指定已绑卡（不透明 id），但绝不接受原始卡数据。
+    expect(bookSchema.flags['payment-method-id'].required).toBe(false);
     expect(bookSchema.flags).not.toHaveProperty('card-number');
     expect(bookSchema.flags).not.toHaveProperty('cvv');
-    // pay_per_call's optional handle is the only payment field, and it's conditional.
+    expect(bookSchema.flags).not.toHaveProperty('card');
+    // pay_per_call 的支付单句柄仍是 conditional。
     expect(bookSchema.flags['payment-order-id'].required).toBe('conditional');
 
     // get: exactly the 5 case-sensitive terminal statuses.

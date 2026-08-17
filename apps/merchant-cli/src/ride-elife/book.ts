@@ -110,10 +110,11 @@ function formatBook(data: BookResponse): string {
  * Funding is decided server-side by the developer's `billing_mode`:
  *   - monthly_settlement: no payment handle; fare is deducted from the
  *     settlement account (payment_status=ON_ACCOUNT).
- *   - pay_per_call: pass `--payment-order-id` (a PAID order from payment-cli).
- * The CLI MUST NOT accept `--payment-method-id` or card info — the merchant
- * domain never holds a payment credential, so the request body carries at most
- * an optional `payment_order_id` (design Property 5).
+ *   - pay_per_call: pass `--payment-order-id` (a PAID order from payment-cli),
+ *     and/or `--payment-method-id` to charge a specific already-bound card.
+ * `--payment-method-id` is an opaque bound-card id (the same handle
+ * `hotel-redaug create-order` / `flight-flink create-order` accept) — the CLI
+ * still never accepts raw card data (PAN/CVV) in any form.
  *
  * `POST /ride/book` with `X-Api-Key` auth + the `Idempotency-Key` header (key
  * forwarded verbatim, never in the body). `--yes` skips the confirm; a missing
@@ -132,6 +133,10 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     .option('--price-amount <amount>', 'Fare in decimal currency units (not cents)')
     .option('--price-currency <currency>', 'Currency code (default USD)')
     .option('--payment-order-id <id>', 'Paid payment order id (pay_per_call mode only)')
+    .option(
+      '--payment-method-id <id>',
+      'Bound payment method id to charge (pay_per_call mode only)',
+    )
     .option('--passenger-name <name>', 'Passenger full name')
     .option('--passenger-phone <phone>', 'Passenger phone')
     .option('--passenger-email <email>', 'Passenger email')
@@ -172,9 +177,9 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     });
 
     // Build request body. Required fields throw PARAM_INVALID before any
-    // request is sent (mirrors the sibling `quote` command). The body carries
-    // NO payment_method_id / card info — at most an optional payment_order_id
-    // (design Property 5); funding is decided server-side by billing_mode.
+    // request is sent (mirrors the sibling `quote` command). The body carries NO
+    // raw card data; payment handles are limited to the opaque
+    // payment_order_id / payment_method_id ids below.
     const quoteId = need(opts.quoteId as string | undefined, 'quote-id');
     const body: Record<string, unknown> = {
       quote_id: quoteId,
@@ -185,9 +190,11 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       passenger_phone: phone(opts.passengerPhone as string | undefined, 'passenger-phone'),
     };
 
-    // pay_per_call: optional paid payment order id (the only payment handle the
-    // merchant CLI ever forwards). monthly_settlement omits it entirely.
+    // Optional payment handles for pay_per_call. `payment_method_id` is an opaque
+    // bound-card id; raw card data is never accepted nor forwarded.
+    // monthly_settlement omits both entirely.
     if (opts.paymentOrderId) body.payment_order_id = opts.paymentOrderId as string;
+    if (opts.paymentMethodId) body.payment_method_id = opts.paymentMethodId as string;
     if (opts.passengerEmail) body.passenger_email = opts.passengerEmail as string;
     if (opts.luggageCount !== undefined) {
       body.luggage_count = num(opts.luggageCount as string, 'luggage-count');

@@ -206,6 +206,11 @@ export const bookSchema: VerbSchema = {
       required: 'conditional',
       description: 'Required when billing_mode=pay_per_call (a PAID payment order). Forbidden when billing_mode=monthly_settlement',
     },
+    'payment-method-id': {
+      type: 'string',
+      required: false,
+      description: 'Bound payment method id to charge (pay_per_call only). Opaque id from `token payment-methods list`; ignored for monthly_settlement',
+    },
     'passenger-name': { type: 'string', required: true, description: 'Passenger full name' },
     'passenger-phone': { type: 'string', required: true, description: 'Passenger phone in E.164 format (e.g. +14155551234)' },
     'passenger-email': { type: 'string', required: true, description: 'Passenger email (required by eLife for booking)' },
