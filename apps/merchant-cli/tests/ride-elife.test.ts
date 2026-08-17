@@ -335,7 +335,7 @@ describe('ride-elife book', () => {
     expect(payload).toHaveProperty('profile');
   });
 
-  it('TC-BOOK-02: body NEVER contains payment_method_id or card fields (Property 5)', async () => {
+  it('TC-BOOK-02: body NEVER contains raw card data, and omits payment_method_id unless asked', async () => {
     const api = mockApiClient({ '/ride/book': BOOK_RESP });
     const program = rideProgram(api);
     captureStdout();
@@ -344,7 +344,25 @@ describe('ride-elife book', () => {
     await program.parseAsync(bookArgs(['--yes', '--idempotency-key', 'book-123']));
 
     const body = api.post.mock.calls[0][2] as Record<string, any>;
+    // 未显式指定 → 不带该字段，服务端沿用自动选卡（向后兼容）。
     expect(body).not.toHaveProperty('payment_method_id');
+    expect(body).not.toHaveProperty('card_number');
+    expect(body).not.toHaveProperty('cvv');
+    expect(body).not.toHaveProperty('card');
+  });
+
+  it('TC-BOOK-02b: --payment-method-id is forwarded verbatim, still with no raw card data', async () => {
+    const api = mockApiClient({ '/ride/book': BOOK_RESP });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(
+      bookArgs(['--yes', '--idempotency-key', 'book-pm', '--payment-method-id', 'pm_chosen']),
+    );
+
+    const body = api.post.mock.calls[0][2] as Record<string, any>;
+    expect(body.payment_method_id).toBe('pm_chosen');
     expect(body).not.toHaveProperty('card_number');
     expect(body).not.toHaveProperty('cvv');
     expect(body).not.toHaveProperty('card');
