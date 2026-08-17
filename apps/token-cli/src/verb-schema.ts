@@ -138,6 +138,12 @@ export const pmAddSchema: VerbSchema = {
       description:
         'Dropin mode: mint the session, print it, and exit immediately without polling verification status (for server/SDK-driven flows where the front-end completes the binding). Agents integrating with a UI card flow should set this.',
     },
+    member: {
+      type: 'string',
+      required: 'conditional',
+      description:
+        'End-user member id this card belongs to. Required when --payment-brand unionpay. In dropin mode pass the authenticated end-user id so the card is scoped to them — omitting it stores a null member_id and the card will NOT appear in list --member <id>.',
+    },
   },
   response: {
     id: { type: 'string', description: 'Payment method id' },
