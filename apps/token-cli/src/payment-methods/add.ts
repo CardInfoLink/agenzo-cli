@@ -80,7 +80,7 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     )
     .option(
       '--member <id>',
-      'End-user member id (required when --payment-brand unionpay; identifies which end-user this card belongs to)',
+      'End-user member id this card belongs to. Required when --payment-brand unionpay; optional (but recommended) in dropin mode so the card is scoped to the member and surfaces in list --member <id>',
     )
     .option(
       '--mode <mode>',
@@ -461,10 +461,14 @@ async function handleDropinMode(
 
   // 1) Create the Drop-in session (API Key auth). The backend creates a
   // PENDING PM keyed by pm_id and mints the session for the front-end SDK.
+  // --member (optional) scopes the bound card to the end-user, so a later
+  // `list --member <id>` finds it back; omitting it stores a null member_id and
+  // the card is invisible to that member-scoped lookup (parity with
+  // dropin-create / unionpay-enroll).
   const sessionResult = await deps.apiClient.post<DropinCreateResponse>(
     '/payment-methods/dropin/create',
     { type: 'api-key', key: apiKey },
-    { email },
+    { email, ...(opts.member ? { member_id: String(opts.member) } : {}) },
   );
 
   if (!sessionResult.success) {
