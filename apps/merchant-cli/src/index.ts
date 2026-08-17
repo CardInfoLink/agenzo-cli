@@ -6,6 +6,7 @@ import {
   CliError,
   UserCancelError,
   toErrorEnvelope,
+  errorDetailLines,
   resolveFormat,
   type OutputFormat,
   exitCodeFor,
@@ -290,9 +291,11 @@ function resolveActiveFormat(): OutputFormat {
  * partial machine payload is never emitted on failure.
  *
  * - `json`: a single `{ error: { code, code_num, message, request_id?, upstream? } }` envelope (§8.2).
- * - `table`: `✗ [<code_num>] <message>`, plus a `  ↳ [<upstream.code>] <upstream.message>`
- *   line when this failure originated from a third-party upstream (e.g. Redaug/eLife)
- *   the platform calls out to.
+ * - `table`: `✗ [<code_num>] <message>`, plus a `  Order: <order_id>` line when the
+ *   error carries a recoverable order id (e.g. `PAYORDER_FAILED`, where the order
+ *   exists and only payment must be retried), plus a `  ↳ [<upstream.code>]
+ *   <upstream.message>` line when this failure originated from a third-party
+ *   upstream (e.g. Redaug/eLife) the platform calls out to.
  */
 function reportError(error: unknown): never {
   const envelope = toErrorEnvelope(error);
@@ -304,6 +307,9 @@ function reportError(error: unknown): never {
     console.error(
       Formatter.status('error', `[${envelope.error.code_num}] ${envelope.error.message}`),
     );
+    for (const line of errorDetailLines(envelope)) {
+      console.error(line);
+    }
     if (envelope.error.upstream) {
       console.error(`  ↳ [${envelope.error.upstream.code}] ${envelope.error.upstream.message}`);
     }

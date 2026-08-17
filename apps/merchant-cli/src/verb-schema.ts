@@ -570,6 +570,17 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
     tips: { type: 'string', required: false, description: "FCG 客户自测点5 提示信息: the chosen quote rate's tips (tips[].tipsDetails[]) as a JSON array [{title,text}], captured at booking. Stored on the order for the order-detail page only; platform-local, not sent upstream", constraints: 'JSON array of {title (string, optional), text (string, optional)}; else PARAM_INVALID' },
+    cancellation: {
+      type: 'string',
+      required: false,
+      description: 'Cancellation policy snapshot copied from the selected quote rate and stored on the order.',
+      constraints: 'JSON object; else PARAM_INVALID',
+    },
+    'hotel-timezone': {
+      type: 'string',
+      required: false,
+      description: "Hotel timezone from quote (for example 'UTC+8'), used to evaluate cancellation deadlines.",
+    },
     'bed-type': {
       type: 'string',
       required: false,

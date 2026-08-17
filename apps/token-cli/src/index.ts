@@ -6,6 +6,7 @@ import {
   CliError,
   UserCancelError,
   toErrorEnvelope,
+  errorDetailLines,
   resolveFormat,
   type OutputFormat,
   exitCodeFor,
@@ -128,6 +129,9 @@ function reportError(error: unknown): never {
     console.error(
       Formatter.status('error', `[${envelope.error.code_num}] ${envelope.error.message}`),
     );
+    for (const line of errorDetailLines(envelope)) {
+      console.error(line);
+    }
     if (envelope.error.upstream) {
       console.error(`  ↳ [${envelope.error.upstream.code}] ${envelope.error.upstream.message}`);
     }

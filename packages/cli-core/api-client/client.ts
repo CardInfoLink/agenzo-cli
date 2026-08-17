@@ -103,6 +103,8 @@ export interface ApiError {
   code?: string;
   /** Server-provided request correlation id, surfaced in the error envelope. */
   requestId?: string;
+  /** Safe structured error data, including recoverable order identifiers. */
+  data?: Record<string, unknown>;
   /** Upstream error details for diagnostic transparency. */
   upstream?: UpstreamError;
 }
@@ -305,8 +307,12 @@ export class ApiClient {
       // Prefer string error_code (CLI D3 routing) over numeric code string
       const errorCodeStr = responseBody.error_code as string | undefined;
 
-      // Extract upstream error details from data.upstream
-      const rawData = responseBody.data as Record<string, unknown> | undefined;
+      // Preserve object-shaped error data for recoverable operations and extract
+      // provider diagnostics from the same safe structure.
+      const dataValue = responseBody.data;
+      const rawData = dataValue && typeof dataValue === 'object' && !Array.isArray(dataValue)
+        ? dataValue as Record<string, unknown>
+        : undefined;
       const upstream = (rawData?.upstream && typeof rawData.upstream === 'object')
         ? rawData.upstream as UpstreamError
         : undefined;
@@ -318,6 +324,7 @@ export class ApiClient {
         statusCode: response.status,
         ...(errorCodeStr ? { code: errorCodeStr } : (typeof code === 'string' && code ? { code } : {})),
         requestId: (responseBody.request_id ?? responseBody.requestId) as string | undefined,
+        ...(rawData ? { data: rawData } : {}),
         ...(upstream ? { upstream } : {}),
       };
     } catch (error) {
