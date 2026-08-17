@@ -19,6 +19,8 @@ export class CliError extends Error {
      * when present and different from the stable message.
      */
     public readonly backendMessage?: string,
+    /** Safe structured error data that callers may use for recovery. */
+    public readonly data?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'CliError';
@@ -59,6 +61,7 @@ export class CliError extends Error {
         error.requestId,
         error.upstream,
         error.errorMessage,
+        error.data,
       );
     }
 
@@ -80,6 +83,7 @@ export class CliError extends Error {
       error.requestId,
       error.upstream,
       error.errorMessage,
+      error.data,
     );
   }
 }
@@ -208,6 +212,8 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
   HOTEL_NOT_FOUND: 'This hotel is no longer available from the supplier.',
   BOOKING_RESTRICTED:
     "This room has a booking condition that your request doesn't meet. Please check the room's booking rules and adjust your request.",
+  PAYORDER_FAILED: 'The hotel order was created, but payment failed. Retry payment for the existing order.',
+  PAYORDER_FAILED_AFTER_PAYMENT: 'Payment was received, but hotel confirmation failed. Contact support for reconciliation.',
   NOT_IMPLEMENTED: 'This operation is not implemented yet.',
 };
 
@@ -228,7 +234,23 @@ export interface ErrorEnvelope {
     request_id?: string;
     upstream?: UpstreamError;
     backend_message?: string;
+    data?: Record<string, unknown>;
   };
+}
+
+/**
+ * Recovery detail lines for the human-readable (`table`) error output.
+ *
+ * `json` callers read `error.data` straight off the envelope, but the table
+ * format used to print only `message` — so a `PAYORDER_FAILED` telling the
+ * user to "retry payment for the existing order" left them without the order
+ * id to retry against. Returns one `  Order: <order_id>` line when the error
+ * carries a usable order id, and nothing otherwise.
+ */
+export function errorDetailLines(envelope: ErrorEnvelope): string[] {
+  const orderId = envelope.error.data?.order_id;
+  if (typeof orderId !== 'string' || orderId.length === 0) return [];
+  return [`  Order: ${orderId}`];
 }
 
 export function toErrorEnvelope(error: unknown): ErrorEnvelope {
@@ -248,6 +270,7 @@ export function toErrorEnvelope(error: unknown): ErrorEnvelope {
         ...(error.requestId ? { request_id: error.requestId } : {}),
         ...(error.upstream ? { upstream: error.upstream } : {}),
         ...(backendMessage ? { backend_message: backendMessage } : {}),
+        ...(error.data ? { data: error.data } : {}),
       },
     };
   }

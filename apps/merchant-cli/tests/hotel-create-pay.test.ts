@@ -100,7 +100,17 @@ describe('hotel-redaug create-order', () => {
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync(createOrderArgs(['--yes', '--idempotency-key', 'co-1', '--format', 'json']));
+    await program.parseAsync(createOrderArgs([
+      '--cancellation',
+      '{"restriction_type":2,"restriction_day":0,"restriction_time":"1800"}',
+      '--hotel-timezone',
+      'UTC+8',
+      '--yes',
+      '--idempotency-key',
+      'co-1',
+      '--format',
+      'json',
+    ]));
 
     expect(api.post).toHaveBeenCalledTimes(1);
     const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, any>, Record<string, string>];
@@ -113,6 +123,12 @@ describe('hotel-redaug create-order', () => {
     expect(body.children).toBe(0);
     expect(body.nationality).toBe('CN');
     expect(body.contact_country_code).toBe('86');
+    expect(body.cancellation).toEqual({
+      restriction_type: 2,
+      restriction_day: 0,
+      restriction_time: '1800',
+    });
+    expect(body.hotel_timezone).toBe('UTC+8');
     expect(headers).toEqual({ 'Idempotency-Key': 'co-1' });
     // Idempotency key is never in the body
     expect(body).not.toHaveProperty('idempotency_key');
@@ -122,6 +138,24 @@ describe('hotel-redaug create-order', () => {
     expect(payload.order_status).toBe('AWAITING_PAYMENT');
     expect(payload.total_amount).toBe(640);
     expect(payload.currency).toBe('CNY');
+  });
+
+  it('invalid cancellation JSON → PARAM_INVALID before any request', async () => {
+    const api = mockApiClient();
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync(createOrderArgs([
+        '--cancellation',
+        '[]',
+        '--yes',
+        '--idempotency-key',
+        'co-invalid-cancellation',
+      ])),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   it('missing required flags → PARAM_INVALID before any request', async () => {

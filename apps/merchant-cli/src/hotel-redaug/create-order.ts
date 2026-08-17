@@ -103,6 +103,21 @@ export function parseTips(raw: string): Array<{ title?: string; text?: string }>
   return parsed as Array<{ title?: string; text?: string }>;
 }
 
+/** 解析并校验订单取消条款快照；该对象只在平台落库，不发送给供应商。 */
+export function parseCancellation(raw: string): Record<string, unknown> {
+  const invalid = '--cancellation must be a JSON object.';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError('PARAM_INVALID', invalid);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new CliError('PARAM_INVALID', invalid);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 // ============================================================
 // Response type
 // ============================================================
@@ -225,6 +240,14 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     )
     .option('--hotel-name <name>', 'Hotel name (display-only, stored for order summary)')
     .option(
+      '--cancellation <json>',
+      'Cancellation policy JSON from the chosen rate; stored on the order for cancellation gating and deadline display.',
+    )
+    .option(
+      '--hotel-timezone <tz>',
+      "Hotel timezone from quote (for example 'UTC+8'); stored to evaluate cancellation deadlines in hotel-local time.",
+    )
+    .option(
       '--bed-type <code>',
       "Product bed-type code from the chosen quote rate's beds[].code (e.g. 'L000000' King / '1000000' Queen); forwarded verbatim to upstream createOrder bedType.",
     )
@@ -292,6 +315,8 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;
     // 提示信息快照（客户自测点5）：解析并校验 tips JSON,传给平台落库、订单详情页展示。
     if (opts.tips !== undefined) body.tips = parseTips(opts.tips as string);
+    if (opts.cancellation !== undefined) body.cancellation = parseCancellation(opts.cancellation as string);
+    if (opts.hotelTimezone !== undefined) body.hotel_timezone = opts.hotelTimezone as string;
     if (opts.hotelName !== undefined) body.hotel_name = opts.hotelName as string;
     if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;

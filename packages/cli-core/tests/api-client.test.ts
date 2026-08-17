@@ -79,6 +79,29 @@ describe('ApiClient error_code + data.upstream parsing', () => {
     expect(err.errorCode).toBe(1903);
   });
 
+  it('UT-AC-01a: recoverable hotel payment data is preserved', async () => {
+    mockFetchJsonError({
+      code: '1937',
+      error_code: 'PAYORDER_FAILED',
+      message: 'Payment failed after the hotel was locked.',
+      data: {
+        order_id: 'hho_123',
+        fc_order_code: 'FC123',
+        payment_status: 'FAILED',
+      },
+    }, 502);
+
+    const result = await client.get('/test', { type: 'none' });
+    const err = result as ApiError;
+
+    expect(err.code).toBe('PAYORDER_FAILED');
+    expect(err.data).toEqual({
+      order_id: 'hho_123',
+      fc_order_code: 'FC123',
+      payment_status: 'FAILED',
+    });
+  });
+
   it('UT-AC-02: error_code present, NO data.upstream → code = error_code, upstream = undefined', async () => {
     mockFetchJsonError({
       code: '1903',

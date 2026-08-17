@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   toErrorEnvelope,
+  errorDetailLines,
   CliError,
   AuthError,
   ConfigError,
@@ -118,6 +119,67 @@ describe('error-catalog toErrorEnvelope mapping (§8.4)', () => {
   it('UT-ERR-12g: PAYMENT_METHOD_NOT_FOUND (1401) and PAYMENT_METHOD_DISABLED (1402) route verbatim', () => {
     expect(CliError.fromApi({ success: false, errorCode: 1401, errorMessage: 'm', statusCode: 404, code: 'PAYMENT_METHOD_NOT_FOUND' }).code).toBe('PAYMENT_METHOD_NOT_FOUND');
     expect(CliError.fromApi({ success: false, errorCode: 1402, errorMessage: 'm', statusCode: 409, code: 'PAYMENT_METHOD_DISABLED' }).code).toBe('PAYMENT_METHOD_DISABLED');
+  });
+
+  it('UT-ERR-12h: PAYORDER_FAILED preserves recoverable order data in the envelope', () => {
+    const err = CliError.fromApi({
+      success: false,
+      errorCode: 1937,
+      errorMessage: 'Payment failed after the hotel was locked.',
+      statusCode: 502,
+      code: 'PAYORDER_FAILED',
+      data: {
+        order_id: 'hho_123',
+        fc_order_code: 'FC123',
+        payment_status: 'FAILED',
+      },
+    });
+
+    const envelope = toErrorEnvelope(err);
+    expect(envelope.error.code).toBe('PAYORDER_FAILED');
+    expect(envelope.error.code_num).toBe(4311);
+    expect(envelope.error.data).toEqual({
+      order_id: 'hho_123',
+      fc_order_code: 'FC123',
+      payment_status: 'FAILED',
+    });
+  });
+
+  it('UT-ERR-12i: PAYORDER_FAILED table output surfaces the recoverable order id', () => {
+    const envelope = toErrorEnvelope(
+      CliError.fromApi({
+        success: false,
+        errorCode: 1937,
+        errorMessage: 'Payment failed after the hotel was locked.',
+        statusCode: 502,
+        code: 'PAYORDER_FAILED',
+        data: { order_id: 'hho_123', fc_order_code: 'FC123', payment_status: 'FAILED' },
+      }),
+    );
+
+    // The table renderer prints these lines under `✗ [code_num] message`, so the
+    // user told to "retry payment for the existing order" actually gets the id.
+    expect(errorDetailLines(envelope)).toEqual(['  Order: hho_123']);
+  });
+
+  it('UT-ERR-12j: errors without a usable order id add no table detail line', () => {
+    expect(errorDetailLines(toErrorEnvelope(new ValidationError('bad input')))).toEqual([]);
+    expect(
+      errorDetailLines(
+        toErrorEnvelope(new CliError('PAYORDER_FAILED', 'm', 502, undefined, undefined, undefined, { payment_status: 'FAILED' })),
+      ),
+    ).toEqual([]);
+    // Non-string / empty order ids are not rendered either.
+    expect(
+      errorDetailLines(
+        toErrorEnvelope(new CliError('PAYORDER_FAILED', 'm', 502, undefined, undefined, undefined, { order_id: '' })),
+      ),
+    ).toEqual([]);
+    expect(
+      errorDetailLines(
+        toErrorEnvelope(new CliError('PAYORDER_FAILED', 'm', 502, undefined, undefined, undefined, { order_id: 123 })),
+      ),
+    ).toEqual([]);
   });
 
   it('UT-ERR-12d: D3 unknown string code falls back to HTTP-status mapping', () => {
