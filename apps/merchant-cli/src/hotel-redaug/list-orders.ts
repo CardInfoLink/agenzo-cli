@@ -12,6 +12,7 @@ import {
 import type { CommandResult } from '@agenzo/cli-core';
 import type { ListHotelOrdersResponse, HotelOrderListItem } from '../types/hotel.js';
 import { attachSchemaHelp, hotelListOrdersSchema } from '../verb-schema.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 
 // ============================================================
 // Input helpers (hotel-domain — query assembly stays in app per req 15.3)
@@ -99,7 +100,8 @@ export function registerHotelListOrdersCommand(parent: Command, deps: { apiClien
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--status <status>', 'Filter by order status (omitted entirely when absent → all statuses)')
     .option('--page <page>', 'Page number', DEFAULT_PAGE)
-    .option('--page-size <size>', 'Page size', DEFAULT_PAGE_SIZE);
+    .option('--page-size <size>', 'Page size', DEFAULT_PAGE_SIZE)
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION);
 
   attachSchemaHelp(cmd, hotelListOrdersSchema);
 
@@ -121,6 +123,8 @@ export function registerHotelListOrdersCommand(parent: Command, deps: { apiClien
       page_size: positiveInt((opts.pageSize as string | undefined) ?? DEFAULT_PAGE_SIZE, 'page-size'),
     };
     if (opts.status !== undefined) params.status = opts.status as string;
+    const member = memberIdOf(opts);
+    if (member !== undefined) params.member_id = member;
 
     // Animated spinner: visible in table mode, silent in json mode.
     const spinner = format === 'json' ? null : createSpinner('Fetching orders...');

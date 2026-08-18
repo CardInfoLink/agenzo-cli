@@ -43,6 +43,13 @@ export interface FlagSchema {
   default?: unknown;
   description: string;
   constraints?: string;
+  /**
+   * `'session'` — value is supplied by the execution layer from the
+   * authenticated session (the orchestrator injects `--member` from the
+   * caller's JWT), so LLM tool-schema builders MUST hide it: letting a model
+   * pick the member id would let it read or write another end-user's cards.
+   */
+  source?: 'session';
 }
 
 /** A complete, copy-pasteable example invocation plus what to read from the output. */
@@ -140,9 +147,10 @@ export const pmAddSchema: VerbSchema = {
     },
     member: {
       type: 'string',
-      required: 'conditional',
+      required: true,
+      source: 'session',
       description:
-        'End-user member id this card belongs to. Required when --payment-brand unionpay. In dropin mode pass the authenticated end-user id so the card is scoped to them — omitting it stores a null member_id and the card will NOT appear in list --member <id>.',
+        'End-user member id this card belongs to. REQUIRED in every mode (manual / dropin / unionpay): the platform rejects a missing member_id, and an unattributed card can neither be listed via list --member <id> nor charged for that end-user (card selection is member-scoped with no fallback).',
     },
   },
   response: {
@@ -169,7 +177,7 @@ export const pmListSchema: VerbSchema = {
   verb: 'list',
   description: 'List payment methods',
   flags: {
-    member: { type: 'string', required: false, description: 'Filter by member ID' },
+    member: { type: 'string', required: false, source: 'session', description: 'Filter by member ID' },
   },
   response: {
     payment_methods: {

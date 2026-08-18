@@ -461,14 +461,29 @@ async function handleDropinMode(
 
   // 1) Create the Drop-in session (API Key auth). The backend creates a
   // PENDING PM keyed by pm_id and mints the session for the front-end SDK.
-  // --member (optional) scopes the bound card to the end-user, so a later
-  // `list --member <id>` finds it back; omitting it stores a null member_id and
-  // the card is invisible to that member-scoped lookup (parity with
-  // dropin-create / unionpay-enroll).
+  // --member is REQUIRED (backend rejects a missing member_id): card selection
+  // is member-scoped with no fallback, so an unattributed card is unusable.
+  let member = opts.member as string | undefined;
+  if (!member) {
+    if (opts.yes) {
+      throw new CliError(
+        'PARAM_INVALID',
+        'Missing required --member <id> for --mode dropin (required in --yes mode).',
+      );
+    }
+    member = await PromptEngine.resolveInput(undefined, {
+      message: 'End-user member id:',
+    });
+  }
+  member = String(member).trim();
+  if (!member) {
+    throw new CliError('PARAM_INVALID', '--member <id> must not be empty.');
+  }
+
   const sessionResult = await deps.apiClient.post<DropinCreateResponse>(
     '/payment-methods/dropin/create',
     { type: 'api-key', key: apiKey },
-    { email, ...(opts.member ? { member_id: String(opts.member) } : {}) },
+    { email, member_id: member },
   );
 
   if (!sessionResult.success) {

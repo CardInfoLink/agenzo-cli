@@ -4,6 +4,7 @@ import { CliError, Formatter, createSpinner, resolveFormat } from '@agenzo/cli-c
 import type { CreateFlightOrderResponse } from '../types/flight.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 import { attachSchemaHelp, flightCreateOrderSchema } from '../verb-schema.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { type Deps, jsonArray, need, num, render, resolveApiKey } from './_helpers.js';
 
 /**
@@ -28,6 +29,7 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     .option('--passengers <json>', 'JSON array of passengers (gender/id_type are strings)')
     .option('--payment-method-id <id>', 'Optional bound-card id (pay_per_call only)')
     .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header');
   attachSchemaHelp(cmd, flightCreateOrderSchema);
 
@@ -55,6 +57,9 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     // UPI(unionpay) 扣款路径：透传已 ACTIVE 的 network token id；platform create-order
     // 据 payment_token_id 非空走 ChargeService 实扣（跳过 EVO 预授权/捕获）。
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
+    // 归因标签（可选）：非空才写入，缺省保持无归属。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
 
     if (!isYes) {
       const ok = await confirm({

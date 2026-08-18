@@ -13,6 +13,7 @@ import {
 import type { CommandResult } from '@agenzo/cli-core';
 import type { BookResponse } from '../types/api.js';
 import { attachSchemaHelp, bookSchema } from '../verb-schema.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
 // ============================================================
@@ -159,6 +160,7 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     .option('--arrival-airline <airline>', 'Arrival airline')
     .option('--departure-flight-no <no>', 'Departure flight number')
     .option('--departure-airline <airline>', 'Departure airline')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -195,6 +197,9 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     // monthly_settlement omits both entirely.
     if (opts.paymentOrderId) body.payment_order_id = opts.paymentOrderId as string;
     if (opts.paymentMethodId) body.payment_method_id = opts.paymentMethodId as string;
+    // 归因标签（可选）：非空才写入，缺省保持无归属。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
     if (opts.passengerEmail) body.passenger_email = opts.passengerEmail as string;
     if (opts.luggageCount !== undefined) {
       body.luggage_count = num(opts.luggageCount as string, 'luggage-count');
