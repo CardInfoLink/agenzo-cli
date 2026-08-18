@@ -12,6 +12,7 @@ import {
 import type { CommandResult } from '@agenzo/cli-core';
 import type { UnifiedListOrdersResponse, UnifiedOrderListItem } from '../types/api.js';
 import { attachSchemaHelp, unifiedOrdersListSchema } from '../verb-schema.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 
 // ============================================================
 // Input helpers
@@ -83,7 +84,8 @@ export function registerOrdersListCommand(parent: Command, deps: { apiClient: Ap
     .option('--order-type <type>', 'Filter by order type: ride | hotel')
     .option('--status <status>', 'Filter by normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED')
     .option('--page <page>', 'Page number', DEFAULT_PAGE)
-    .option('--page-size <size>', 'Page size', DEFAULT_PAGE_SIZE);
+    .option('--page-size <size>', 'Page size', DEFAULT_PAGE_SIZE)
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION);
 
   attachSchemaHelp(cmd, unifiedOrdersListSchema);
 
@@ -102,6 +104,8 @@ export function registerOrdersListCommand(parent: Command, deps: { apiClient: Ap
     };
     if (opts.orderType !== undefined) params.order_type = opts.orderType as string;
     if (opts.status !== undefined) params.status = opts.status as string;
+    const member = memberIdOf(opts);
+    if (member !== undefined) params.member_id = member;
 
     const spinner = format === 'json' ? null : createSpinner('Fetching orders...');
 

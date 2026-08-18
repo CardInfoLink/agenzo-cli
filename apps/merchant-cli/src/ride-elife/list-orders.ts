@@ -12,6 +12,7 @@ import {
 import type { CommandResult } from '@agenzo/cli-core';
 import type { ListOrdersResponse, RideOrderListItem } from '../types/api.js';
 import { attachSchemaHelp, listOrdersSchema } from '../verb-schema.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 
 // ============================================================
 // Input helpers (ride-domain — stays in app per req 4.4)
@@ -92,7 +93,8 @@ export function registerListOrdersCommand(parent: Command, deps: { apiClient: Ap
     .option('--page <page>', 'Page number', DEFAULT_PAGE)
     .option('--page-size <size>', 'Page size', DEFAULT_PAGE_SIZE)
     .option('--status <status>', 'Filter by order status')
-    .option('--order-type <type>', 'Filter by order type');
+    .option('--order-type <type>', 'Filter by order type')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION);
 
   attachSchemaHelp(cmd, listOrdersSchema);
 
@@ -114,6 +116,8 @@ export function registerListOrdersCommand(parent: Command, deps: { apiClient: Ap
     };
     if (opts.status !== undefined) params.status = opts.status as string;
     if (opts.orderType !== undefined) params.order_type = opts.orderType as string;
+    const member = memberIdOf(opts);
+    if (member !== undefined) params.member_id = member;
 
     // Animated spinner: visible in table mode, silent in json mode.
     const spinner = format === 'json' ? null : createSpinner('Fetching orders...');

@@ -18,6 +18,7 @@
  * `--help --format table` keep commander's default text help.
  */
 import type { Command } from 'commander';
+import { MEMBER_FLAG_SCHEMA } from './member.js';
 import { TERMINAL_STATUSES, DEFAULT_WATCH_INTERVAL_SECONDS } from './ride-elife/watch.js';
 
 const CLI_NAME = 'agenzo-merchant-cli';
@@ -39,6 +40,17 @@ export interface FlagSchema {
   default?: unknown;
   description: string;
   constraints?: string;
+  /**
+   * Where the value comes from when a non-human agent drives the CLI.
+   *
+   * `'session'` — supplied by the execution layer from the authenticated
+   * session (e.g. the orchestrator injects `--member` from the caller's JWT).
+   * Consumers that build LLM tool schemas MUST hide such flags: letting a model
+   * choose the value would let it act on another end-user's data.
+   *
+   * Omitted means the flag is ordinary agent/human input.
+   */
+  source?: 'session';
 }
 
 /** A complete, copy-pasteable example invocation plus what to read from the output. */
@@ -211,6 +223,7 @@ export const bookSchema: VerbSchema = {
       required: false,
       description: 'Bound payment method id to charge (pay_per_call only). Opaque id from `token payment-methods list`; ignored for monthly_settlement',
     },
+    member: MEMBER_FLAG_SCHEMA,
     'passenger-name': { type: 'string', required: true, description: 'Passenger full name' },
     'passenger-phone': { type: 'string', required: true, description: 'Passenger phone in E.164 format (e.g. +14155551234)' },
     'passenger-email': { type: 'string', required: true, description: 'Passenger email (required by eLife for booking)' },
@@ -361,6 +374,7 @@ export const listOrdersSchema: VerbSchema = {
   flags: {
     status: { type: 'string', required: false, description: 'Filter by ride status (case-sensitive server casing)' },
     'order-type': { type: 'string', required: false, description: 'Filter by order type (e.g. realtime / airport)' },
+    member: MEMBER_FLAG_SCHEMA,
     page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
     'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1' },
   },
@@ -370,6 +384,7 @@ export const listOrdersSchema: VerbSchema = {
       description: 'List of ride orders (slim list-item shape)',
       items: {
         order_id: { type: 'string', description: 'Internal order id' },
+        member_id: { type: 'string|null', description: 'End-user this order is attributed to; null when unattributed' },
         ride_id: { type: 'string', description: 'Ride id (same as ride_id from book)' },
         status: { type: 'string', description: 'Current ride status' },
         vehicle_class: { type: 'string', description: 'Vehicle class' },
@@ -572,6 +587,7 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'contact-phone': { type: 'string', required: true, description: 'Booking contact phone number', constraints: 'Digits; collect country code separately in --contact-country-code' },
     'contact-country-code': { type: 'string', required: false, default: '86', description: "Phone country calling code without '+'" },
     'contact-email': { type: 'string', required: false, description: 'Booking contact email' },
+    member: MEMBER_FLAG_SCHEMA,
     'arrive-time': { type: 'string', required: false, description: 'Expected arrival time', constraints: 'HH:mm, hotel local time' },
     'special-requests': { type: 'string', required: false, description: 'Free-text special requests (non-binding)' },
     tips: { type: 'string', required: false, description: "FCG 客户自测点5 提示信息: the chosen quote rate's tips (tips[].tipsDetails[]) as a JSON array [{title,text}], captured at booking. Stored on the order for the order-detail page only; platform-local, not sent upstream", constraints: 'JSON array of {title (string, optional), text (string, optional)}; else PARAM_INVALID' },
@@ -870,6 +886,7 @@ export const hotelListOrdersSchema: VerbSchema = {
   description: 'List the developer\'s hotel orders with optional status filtering and pagination',
   flags: {
     status: { type: 'string', required: false, description: 'Filter by order status (e.g. PROCESSING / CONFIRMED / CANCELLED / COMPLETED). Omitted entirely when absent (all statuses)' },
+    member: MEMBER_FLAG_SCHEMA,
     page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
     'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1 (platform caps at 100 server-side)' },
   },
@@ -879,6 +896,7 @@ export const hotelListOrdersSchema: VerbSchema = {
       description: 'List of hotel orders (slim list-item shape).',
       items: {
         order_id: { type: 'string', description: 'Our order reference.' },
+        member_id: { type: 'string|null', description: 'End-user this order is attributed to; null when unattributed' },
         fc_order_code: { type: 'string', description: 'Supplier order reference.' },
         status: { type: 'string', description: 'Current order status (string).' },
         provider: { type: 'string', description: "Service provider ('redaug')." },
@@ -1189,6 +1207,7 @@ export const unifiedOrdersListSchema: VerbSchema = {
     'List orders across ALL providers (ride + hotel) in one call. Use this for generic "my orders" / "order history" requests. Prefer ride-elife/hotel-redaug list-orders when the user names a specific business.',
   flags: {
     'order-type': { type: 'string', required: false, description: 'Filter by provider: ride | hotel' },
+    member: MEMBER_FLAG_SCHEMA,
     status: { type: 'string', required: false, description: 'Filter by NORMALIZED status (NOT the domain-specific status): PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
     page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
     'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1' },
@@ -1199,6 +1218,7 @@ export const unifiedOrdersListSchema: VerbSchema = {
       description: 'Slim cross-provider order-index items. For business-specific fields (vehicle_class, hotel_name, etc.), call `orders get --order-id <id>` or the domain-specific `get`.',
       items: {
         order_id: { type: 'string', description: 'Order id (rio_... for ride, hho_... for hotel). Pass to `orders get`.' },
+        member_id: { type: 'string|null', description: 'End-user this order is attributed to; null when unattributed' },
         order_type: { type: 'string', description: "'ride' or 'hotel'" },
         status: { type: 'string', description: 'Normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
         amount: { type: 'float|null', description: 'Order amount in DECIMAL currency units (NOT cents)' },
@@ -1363,6 +1383,7 @@ export const flightCreateOrderSchema = flightSchema(
     'contact-phone': { type: 'string', required: true, description: 'Contact phone.' },
     'contact-email': { type: 'string', required: true, description: 'Contact email.' },
     passengers: { type: 'json', required: true, description: 'JSON array of passengers. gender/id_type are STRINGS ("1"/"2"). child/infant require adult_passenger_name.' },
+    member: MEMBER_FLAG_SCHEMA,
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
   },
   {
@@ -1434,10 +1455,11 @@ export const flightListOrdersSchema = flightSchema(
   "List the developer's flight orders (local read, no upstream call).",
   {
     status: { type: 'string', required: false, description: 'Optional status filter.' },
+    member: MEMBER_FLAG_SCHEMA,
     page: { type: 'int', required: false, default: 1, description: '1-based page.' },
     'page-size': { type: 'int', required: false, default: 20, description: 'Items per page (1-100).' },
   },
-  { orders: { type: 'array', description: 'Flight order summaries.' }, total: { type: 'int', description: 'Total count.' } },
+  { orders: { type: 'array', description: 'Flight order summaries; each item carries member_id (null when unattributed).' }, total: { type: 'int', description: 'Total count.' } },
   { command: 'agenzo-merchant-cli flight-flink list-orders', output_summary: 'Paged flight orders.' },
 );
 

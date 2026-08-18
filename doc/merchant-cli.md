@@ -19,6 +19,22 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 
 Every verb listed in this document is registered in `apps/merchant-cli/src/index.ts` and executable today.
 
+## `--member` — end-user attribution
+
+The API Key isolates data to a **developer** (plus organization), never to one end-user. When a developer serves many end-users through one key, `--member <id>` tags an order with the end-user it belongs to:
+
+| Where | Effect |
+|---|---|
+| `hotel-redaug create-order`, `flight-flink create-order`, `ride-elife book` | Stores the id on the order |
+| `orders list`, `hotel-redaug list-orders`, `flight-flink list-orders`, `ride-elife list-orders` | Filters to that member only |
+
+Rules:
+
+- **Optional everywhere.** Omit it and the order is simply unattributed — no behavior changes for existing integrations.
+- **Opaque label, not a credential.** The platform never registers or validates the id, and it is *not* an ownership check: ownership stays `developer_id` + `organization_id`, both derived from the API Key. A caller can only ever group its own data.
+- **1–128 characters, any character set** (UUID, email, third-party primary key). Blank / whitespace-only is rejected by the platform with `422` rather than silently treated as absent.
+- **Filtering excludes unattributed orders.** `list-orders --member X` returns only orders stored with `member_id == X`; orders written before attribution (or without `--member`) are not mixed in.
+
 ## services — capability discovery
 
 ```bash
@@ -45,7 +61,7 @@ Spans ride + hotel (+ future providers) in one call. Use it for generic "my orde
 
 | Verb | Type | Key flags | Description |
 |---|---|---|---|
-| `list` | Read | `--order-type ride\|hotel`, `--status PENDING\|CONFIRMED\|COMPLETED\|CANCELLED\|FAILED`, `--page`, `--page-size` | Cross-provider order list with normalized status |
+| `list` | Read | `--order-type ride\|hotel`, `--status PENDING\|CONFIRMED\|COMPLETED\|CANCELLED\|FAILED`, `--member`, `--page`, `--page-size` | Cross-provider order list with normalized status |
 | `get` | Read | `--order-id` (**required**) | One order's detail by id, regardless of provider |
 
 ```bash
@@ -61,10 +77,10 @@ agenzo-merchant-cli orders get  --api-key <key> --order-id hho_abc123
 | Verb | Type | Idempotency-Key | Description |
 |---|---|---|---|
 | `quote` | Read | — | Fare quotes between two points → `vehicle_classes[]`, each with its own `quote_id` |
-| `book` | Write | Required | Book one vehicle class by `quote_id` → `ride_id` (+ `order_id`) |
+| `book` | Write | Required | Book one vehicle class by `quote_id` → `ride_id` (+ `order_id`); `--member` attributes the order |
 | `get` | Read | — | Ride status by `--order-id` = the **`ride_id`**; `--watch` streams NDJSON |
 | `cancel` | Write | Required | Cancel a ride by `--order-id` = the **`ride_id`**; may incur a fee |
-| `list-orders` | Read | — | List the developer's ride orders (`--status`, `--order-type`, `--page`, `--page-size`) |
+| `list-orders` | Read | — | List the developer's ride orders (`--status`, `--order-type`, `--member`, `--page`, `--page-size`) |
 
 ```bash
 # 1. quote
@@ -112,7 +128,7 @@ Key rules:
 | `cancel` | Write | `--order-id`, `--fc-order-code`, `--reason` | Whole-order cancellation, within policy |
 | `checkout` | Write | `--order-id`, `--fc-order-code`, `--checkout-rooms`, `--refund-type`, `--reason` | Apply for partial check-out / out-of-policy cancellation (async, property must approve) |
 | `get-checkout` | Read | `--task-order-code`, `--watch` | Poll a check-out application's status + refund outcome |
-| `list-orders` | Read | `--status`, `--page`, `--page-size` | List the developer's hotel orders |
+| `list-orders` | Read | `--status`, `--member`, `--page`, `--page-size` | List the developer's hotel orders |
 | `skill` | Read | — | Print the hotel-redaug usage guide (offline, no API call) |
 
 Workflow:
@@ -198,11 +214,11 @@ International flight booking via the Flink provider: two-step create-then-pay ti
 | `search` | Read | — | `--trip-type`, `--journeys`, `--cabin-class`, `--adult-num`/`--child-num`/`--infant-num`, `--airline`, `--transfer-number`, `--journey-id` | Flight search (one-way / round-trip / multi-city) |
 | `more-offers` | Read | — | `--product-token` | Additional fare offers for a priceKey |
 | `verify` | Read | — | `--product-token` | Verify the fare → authoritative `product_token`, `price_changed` |
-| `create-order` | Write | Required | `--product-token`, `--total-amount`, `--currency`, `--trip-type`, `--contact-*`, `--passengers`, `--payment-method-id`, `--payment-token-id` | Lock the fare (no charge) → `order_no`, `AWAITING_PAYMENT` |
+| `create-order` | Write | Required | `--product-token`, `--total-amount`, `--currency`, `--trip-type`, `--contact-*`, `--passengers`, `--payment-method-id`, `--payment-token-id`, `--member` | Lock the fare (no charge) → `order_no`, `AWAITING_PAYMENT` |
 | `pay-order` | Write | Required | `--order-no` | Settle + trigger ticketing → `PAID` |
 | `get-order` | Read | — | `--order-no`, `--watch`, `--watch-interval`, `--watch-timeout` | Order status (poll until `TICKETED`) |
 | `cancel-order` | Write | Required | `--order-no`, `--reason` | Cancel an un-ticketed order (+ refund) |
-| `list-orders` | Read | — | `--status`, `--page`, `--page-size` | List flight orders (platform-local, no upstream call) |
+| `list-orders` | Read | — | `--status`, `--member`, `--page`, `--page-size` | List flight orders (platform-local, no upstream call) |
 | `change-search` | Read | — | `--order-no`, `--date`, `--passenger`, `--segment-id`, `--cabin-class` | Search rebook-eligible flights |
 | `change-apply` | Write | Required | `--order-no`, `--passenger`, `--segment-id`, `--product-token`, `--contact-*` | Apply a rebooking → `change_order_no` |
 | `change-detail` | Read | — | `--change-order-no` | Change request status + `price_total` (the change fee) |

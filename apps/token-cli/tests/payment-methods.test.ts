@@ -655,6 +655,7 @@ describe('payment-methods add --mode dropin', () => {
       'node', 'cli', 'payment-methods', 'add',
       '--mode', 'dropin',
       '--api-key', 'sk_key',
+      '--member', 'usr_1',
       '--email', 'user@example.com',
     ]);
 
@@ -662,7 +663,7 @@ describe('payment-methods add --mode dropin', () => {
     expect(apiClient.post).toHaveBeenCalledWith(
       '/payment-methods/dropin/create',
       { type: 'api-key', key: 'sk_key' },
-      { email: 'user@example.com' },
+      { email: 'user@example.com', member_id: 'usr_1' },
     );
 
     // polls verification/status by the returned pm id
@@ -697,6 +698,7 @@ describe('payment-methods add --mode dropin', () => {
       'node', 'cli', '--yes', 'payment-methods', 'add',
       '--mode', 'dropin',
       '--api-key', 'sk_key',
+      '--member', 'usr_1',
       '--email', 'user@example.com',
     ]);
 
@@ -704,7 +706,7 @@ describe('payment-methods add --mode dropin', () => {
     expect(apiClient.post).toHaveBeenCalledWith(
       '/payment-methods/dropin/create',
       { type: 'api-key', key: 'sk_key' },
-      { email: 'user@example.com' },
+      { email: 'user@example.com', member_id: 'usr_1' },
     );
   });
 
@@ -722,6 +724,7 @@ describe('payment-methods add --mode dropin', () => {
       'node', 'cli', 'payment-methods', 'add',
       '--mode', 'dropin',
       '--api-key', 'sk_key',
+      '--member', 'usr_1',
       '--email', 'user@example.com',
     ]);
 
@@ -744,6 +747,7 @@ describe('payment-methods add --mode dropin', () => {
       'node', 'cli', 'payment-methods', 'add',
       '--mode', 'dropin',
       '--api-key', 'sk_key',
+      '--member', 'usr_1',
       '--email', 'user@example.com',
     ]);
 
@@ -767,6 +771,7 @@ describe('payment-methods add --mode dropin', () => {
       '--mode', 'dropin',
       '--no-poll',
       '--api-key', 'sk_key',
+      '--member', 'usr_1',
       '--email', 'user@example.com',
     ]);
 
@@ -774,7 +779,7 @@ describe('payment-methods add --mode dropin', () => {
     expect(apiClient.post).toHaveBeenCalledWith(
       '/payment-methods/dropin/create',
       { type: 'api-key', key: 'sk_key' },
-      { email: 'user@example.com' },
+      { email: 'user@example.com', member_id: 'usr_1' },
     );
     expect(out.text()).toContain('sess_abc123');
     expect(err.text()).toContain('Drop-in session created');
@@ -801,6 +806,7 @@ describe('payment-methods add --mode dropin', () => {
       '--mode', 'dropin',
       '--no-poll',
       '--api-key', 'sk_key',
+      '--member', 'usr_1',
       '--email', 'user@example.com',
     ]);
 

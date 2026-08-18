@@ -14,6 +14,7 @@ import type { CommandResult } from '@agenzo/cli-core';
 import type { PriceItem } from '../types/hotel.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 import { attachSchemaHelp, hotelCreateOrderSchema } from '../verb-schema.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 
 // ============================================================
 // Structured-flag parser (pure builder — directly property-testable)
@@ -259,6 +260,7 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
       '--payment-token-id <id>',
       'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips EVO preauth/capture and only locks the order + records this credential (funds already charged).',
     )
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -321,6 +323,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
+    // 归因标签：只在调用方显式传了非空 --member 时写入，缺省订单保持无归属（见
+    // doc/member-id-attribution-design.md 不变量 3）。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
 
     // Confirm before the write unless --yes. This locks inventory at the quoted
     // rate — the user must have already picked this hotel/rate (from search +
