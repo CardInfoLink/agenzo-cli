@@ -147,10 +147,10 @@ export const pmAddSchema: VerbSchema = {
     },
     member: {
       type: 'string',
-      required: true,
+      required: false,
       source: 'session',
       description:
-        'End-user member id this card belongs to. REQUIRED in every mode (manual / dropin / unionpay): the platform rejects a missing member_id, and an unattributed card can neither be listed via list --member <id> nor charged for that end-user (card selection is member-scoped with no fallback).',
+        'End-user member id this card belongs to. Optional at the CLI boundary — the server decides whether it is mandatory for a given payment brand (UnionPay derives its consumer identity from it and rejects a missing value). Omitting it stores a developer-scoped card: it will not appear in list --member <id> and is not selectable for a member at booking time.',
     },
   },
   response: {
