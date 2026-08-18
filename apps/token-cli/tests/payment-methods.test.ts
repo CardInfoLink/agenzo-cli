@@ -403,8 +403,17 @@ describe('payment-methods add --payment-brand unionpay', () => {
     expect(apiClient.post).not.toHaveBeenCalled();
   });
 
-  it('rejects --payment-brand unionpay without --member, before calling the API', async () => {
-    const apiClient = mockApiClient();
+  it('--payment-brand unionpay without --member: omits member_id, lets the server rule', async () => {
+    // CLI 侧不复制服务端规则：member_id 是否必需由平台判定（UnionPay 的
+    // consumer_identity_value 由它派生，缺失会被 INVALID_REQUEST 拒绝）。CLI 只是不发
+    // 这个字段——尤其不能发 ""，那会把"没传"变成一个参数错误。
+    const activatedPm = {
+      id: 'pm_upi_nomember', type: 'card', status: 'ACTIVE', payment_brand: 'unionpay',
+    };
+    const apiClient = mockApiClient({
+      '/payment-methods/create': { id: 'pm_upi_nomember', status: 'PENDING', payment_brand: 'unionpay' },
+    });
+    apiClient.get = vi.fn().mockResolvedValue({ success: true, data: activatedPm });
     const program = buildProgram();
     const cmd = program.command('payment-methods');
     registerAddCommand(cmd, { apiClient } as any);
@@ -412,16 +421,16 @@ describe('payment-methods add --payment-brand unionpay', () => {
     captureStdout();
     captureStderr();
 
-    // With --payment-brand unionpay but no --member in --yes mode, the CLI
-    // cannot prompt and should error. We pass --yes to skip interactive prompt.
-    await expect(
-      program.parseAsync([
-        'node', 'cli', '--yes', 'payment-methods', 'add',
-        '--api-key', 'sk_key', '--payment-brand', 'unionpay', '--email', 'user@example.com',
-      ]),
-    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-methods', 'add',
+      '--api-key', 'sk_key', '--payment-brand', 'unionpay', '--email', 'user@example.com',
+    ]);
 
-    expect(apiClient.post).not.toHaveBeenCalled();
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/create',
+      { type: 'api-key', key: 'sk_key' },
+      { type: 'card', payment_brand: 'unionpay', email: 'user@example.com' },
+    );
   });
 
   it('happy path: POST create(payment_brand=unionpay, member_id), prints enroll_url, polls until ACTIVE', async () => {

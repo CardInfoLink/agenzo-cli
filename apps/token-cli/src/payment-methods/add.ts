@@ -319,20 +319,18 @@ async function handleUnionpayPaymentBrand(
 ): Promise<void> {
   const isYes = Boolean(opts.yes);
 
-  // In --yes (non-interactive) mode, --member is required as a flag.
-  let member: string;
-  if (opts.member) {
-    member = String(opts.member);
-  } else if (isYes) {
-    throw new CliError(
-      'PARAM_INVALID',
-      'Missing required --member <id> for --payment-brand unionpay (required in --yes mode)',
-    );
-  } else {
-    member = await PromptEngine.resolveInput(undefined, {
-      message: 'Member ID (end-user identity this card belongs to):',
-      validate: (v) => v.trim().length > 0 || 'Member ID is required for --payment-brand unionpay',
-    });
+  // --member 一律不在 CLI 侧强制。归属是否必需由服务端判定（UnionPay 侧
+  // consumer_identity_value 由 member_id 派生，缺失会被平台以 INVALID_REQUEST 拒绝），
+  // CLI 只负责透传：把服务端规则复制到客户端会造成两处规则漂移，也让"某些接入方
+  // 就是不需要归属"这种情况无从表达。非交互模式下缺失就直接发请求，让平台报错。
+  const memberInput = ((opts.member as string | undefined) ?? '').trim();
+  let member = memberInput;
+  if (!member && !isYes) {
+    member = (
+      await PromptEngine.resolveInput(undefined, {
+        message: 'Member ID (end-user identity this card belongs to, optional):',
+      })
+    ).trim();
   }
 
   const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
@@ -350,7 +348,7 @@ async function handleUnionpayPaymentBrand(
     {
       type: 'card',
       payment_brand: 'unionpay',
-      member_id: member,
+      ...(member ? { member_id: member } : {}),
       email,
       ...(opts.returnUrl ? { return_url: String(opts.returnUrl) } : {}),
     },
@@ -461,29 +459,16 @@ async function handleDropinMode(
 
   // 1) Create the Drop-in session (API Key auth). The backend creates a
   // PENDING PM keyed by pm_id and mints the session for the front-end SDK.
-  // --member is REQUIRED (backend rejects a missing member_id): card selection
-  // is member-scoped with no fallback, so an unattributed card is unusable.
-  let member = opts.member as string | undefined;
-  if (!member) {
-    if (opts.yes) {
-      throw new CliError(
-        'PARAM_INVALID',
-        'Missing required --member <id> for --mode dropin (required in --yes mode).',
-      );
-    }
-    member = await PromptEngine.resolveInput(undefined, {
-      message: 'End-user member id:',
-    });
-  }
-  member = String(member).trim();
-  if (!member) {
-    throw new CliError('PARAM_INVALID', '--member <id> must not be empty.');
-  }
+  // --member (optional) scopes the bound card to the end-user so a later
+  // `list --member <id>` finds it back and it can be charged for them; omitting
+  // it stores a developer-scoped card (member_id=null), usable only for bookings
+  // that pass no member. Never enforced CLI-side — the server owns that rule.
+  const member = ((opts.member as string | undefined) ?? '').trim();
 
   const sessionResult = await deps.apiClient.post<DropinCreateResponse>(
     '/payment-methods/dropin/create',
     { type: 'api-key', key: apiKey },
-    { email, member_id: member },
+    { email, ...(member ? { member_id: member } : {}) },
   );
 
   if (!sessionResult.success) {
