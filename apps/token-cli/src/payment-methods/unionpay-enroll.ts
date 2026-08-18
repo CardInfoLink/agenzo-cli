@@ -39,7 +39,7 @@ export function registerUnionpayEnrollCommand(
     .option('--api-key <key>', 'API Key for authentication')
     .option(
       '--member <id>',
-      'End-user member id this card belongs to (required)',
+      'End-user member id this card belongs to (optional; the server decides whether it is mandatory)',
     )
     .option('--email <email>', 'Email (required by the UnionPay enrollment API)')
     .option(
@@ -57,18 +57,16 @@ export function registerUnionpayEnrollCommand(
       type: 'password',
     });
 
-    let member = opts.member as string | undefined;
-    if (!member) {
-      if (isYes) {
-        throw new CliError(
-          'PARAM_INVALID',
-          'Missing required --member <id> for unionpay-enroll (required in --yes mode)',
-        );
-      }
-      member = await PromptEngine.resolveInput(undefined, {
-        message: 'Member ID (end-user identity this card belongs to):',
-        validate: (v) => v.trim().length > 0 || 'Member ID is required',
-      });
+    // --member 不在 CLI 侧强制：归属是否必需由服务端判定（UnionPay 的
+    // consumer_identity_value 由 member_id 派生，缺失会被平台 INVALID_REQUEST 拒绝）。
+    // 交互模式下仍然提示一次，但留空即放行，由平台给出权威错误。
+    let member = ((opts.member as string | undefined) ?? '').trim();
+    if (!member && !isYes) {
+      member = (
+        await PromptEngine.resolveInput(undefined, {
+          message: 'Member ID (end-user identity this card belongs to, optional):',
+        })
+      ).trim();
     }
 
     const email = await PromptEngine.resolveInput(opts.email as string | undefined, {
@@ -81,7 +79,7 @@ export function registerUnionpayEnrollCommand(
       {
         type: 'card',
         payment_brand: 'unionpay',
-        member_id: member,
+        ...(member ? { member_id: member } : {}),
         email,
         ...(opts.returnUrl ? { return_url: String(opts.returnUrl) } : {}),
       },
