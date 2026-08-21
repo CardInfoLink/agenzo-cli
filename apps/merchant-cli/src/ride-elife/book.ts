@@ -138,6 +138,12 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       '--payment-method-id <id>',
       'Bound payment method id to charge (pay_per_call mode only)',
     )
+    .option(
+      '--authorized-merchant-trans-id <id>',
+      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
+        'When set, the server reuses that authorization instead of creating a new one, ' +
+        'avoiding a second hold on the card (pay_per_call mode only).',
+    )
     .option('--passenger-name <name>', 'Passenger full name')
     .option('--passenger-phone <phone>', 'Passenger phone')
     .option('--passenger-email <email>', 'Passenger email')
@@ -197,6 +203,11 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     // monthly_settlement omits both entirely.
     if (opts.paymentOrderId) body.payment_order_id = opts.paymentOrderId as string;
     if (opts.paymentMethodId) body.payment_method_id = opts.paymentMethodId as string;
+    // 3DS 挑战续单凭证：持卡人完成认证后带回该交易号，服务端复用那笔已授权的预授权，
+    // 不再新发起一次（否则又拿到新挑战页且重复冻结资金）。
+    if (opts.authorizedMerchantTransId) {
+      body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
+    }
     // 归因标签（可选）：非空才写入，缺省保持无归属。
     const member = memberIdOf(opts);
     if (member !== undefined) body.member_id = member;
