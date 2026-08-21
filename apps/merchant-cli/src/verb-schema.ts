@@ -370,13 +370,20 @@ export const cancelSchema: VerbSchema = {
  *
  * Flag names MUST stay identical to `verbs.update.flags` in ride-elife.json —
  * `scripts/check_ride_elife_schema.py` Property 11 diffs the two sets.
+ *
+ * No fare flags here, deliberately. The platform holds a pre-authorization and a
+ * ledger entry made at the booked amount, and nothing on the update path re-checks
+ * the fare the way book does (VEHICLE_CLASS_MISMATCH against the monthly quote, the
+ * surcharge check against Quote_Cache). Exposing quote-id / vehicle-class / price-*
+ * would let an agent produce an order where upstream charges the new fare and the
+ * platform still has the old one. Cancel and book again to change the fare.
  */
 export const rideUpdateSchema: VerbSchema = {
   cli: CLI_NAME,
   noun: NOUN,
   verb: 'update',
   description:
-    'Modify an existing ride booking: trip details (time / route / vehicle class / price / flight info) and/or passenger details',
+    'Modify an existing ride booking: trip details (time / route / flight info) and/or passenger details. Fare changes are rejected — cancel and book again instead',
   flags: {
     'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) to modify — use the `ride_id` field from book/list-orders responses, NOT the rio_... order_id' },
     'idempotency-key': {
@@ -384,10 +391,6 @@ export const rideUpdateSchema: VerbSchema = {
       required: true,
       description: 'Unique key (1-128 chars [A-Za-z0-9_-]) forwarded verbatim as the Idempotency-Key header; never auto-generated',
     },
-    'quote-id': { type: 'string', required: false, description: 'New quote id when the fare changes as a result of the modification' },
-    'vehicle-class': { type: 'string', required: false, description: 'New vehicle class: Sedan / SUV / MPV-5 / MPV-7 / Van / Luxury / Train' },
-    'price-amount': { type: 'float', required: 'conditional', description: 'New fare in decimal currency units (NOT cents); required when the modification changes the fare' },
-    'price-currency': { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code for the new fare' },
     'pickup-lat': { type: 'float', required: false, description: 'New pickup latitude', constraints: '-90 to 90' },
     'pickup-lng': { type: 'float', required: false, description: 'New pickup longitude', constraints: '-180 to 180' },
     'pickup-name': { type: 'string', required: false, description: 'New pickup location name' },
@@ -395,7 +398,6 @@ export const rideUpdateSchema: VerbSchema = {
     'dropoff-lng': { type: 'float', required: false, description: 'New dropoff longitude', constraints: '-180 to 180' },
     'dropoff-name': { type: 'string', required: false, description: 'New dropoff location name' },
     'pickup-time': { type: 'int|string', required: false, description: "New pickup time: epoch seconds or 'now'" },
-    'meet-and-greet': { type: 'bool', required: false, description: 'Enable or disable meet & greet service' },
     'welcome-sign': { type: 'string', required: false, description: 'New welcome sign text (meet & greet)' },
     'arrival-flight-no': { type: 'string', required: false, description: 'New arrival flight number' },
     'arrival-airline': { type: 'string', required: false, description: 'New arrival airline name' },
