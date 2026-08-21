@@ -365,6 +365,111 @@ export const cancelSchema: VerbSchema = {
   },
 };
 
+/**
+ * `ride-elife update` schema (elife-capability-parity). Write op (W/Y).
+ *
+ * Flag names MUST stay identical to `verbs.update.flags` in ride-elife.json —
+ * `scripts/check_ride_elife_schema.py` Property 11 diffs the two sets.
+ */
+export const rideUpdateSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'update',
+  description:
+    'Modify an existing ride booking: trip details (time / route / vehicle class / price / flight info) and/or passenger details',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) to modify — use the `ride_id` field from book/list-orders responses, NOT the rio_... order_id' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key (1-128 chars [A-Za-z0-9_-]) forwarded verbatim as the Idempotency-Key header; never auto-generated',
+    },
+    'quote-id': { type: 'string', required: false, description: 'New quote id when the fare changes as a result of the modification' },
+    'vehicle-class': { type: 'string', required: false, description: 'New vehicle class: Sedan / SUV / MPV-5 / MPV-7 / Van / Luxury / Train' },
+    'price-amount': { type: 'float', required: 'conditional', description: 'New fare in decimal currency units (NOT cents); required when the modification changes the fare' },
+    'price-currency': { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code for the new fare' },
+    'pickup-lat': { type: 'float', required: false, description: 'New pickup latitude', constraints: '-90 to 90' },
+    'pickup-lng': { type: 'float', required: false, description: 'New pickup longitude', constraints: '-180 to 180' },
+    'pickup-name': { type: 'string', required: false, description: 'New pickup location name' },
+    'dropoff-lat': { type: 'float', required: false, description: 'New dropoff latitude', constraints: '-90 to 90' },
+    'dropoff-lng': { type: 'float', required: false, description: 'New dropoff longitude', constraints: '-180 to 180' },
+    'dropoff-name': { type: 'string', required: false, description: 'New dropoff location name' },
+    'pickup-time': { type: 'int|string', required: false, description: "New pickup time: epoch seconds or 'now'" },
+    'meet-and-greet': { type: 'bool', required: false, description: 'Enable or disable meet & greet service' },
+    'welcome-sign': { type: 'string', required: false, description: 'New welcome sign text (meet & greet)' },
+    'arrival-flight-no': { type: 'string', required: false, description: 'New arrival flight number' },
+    'arrival-airline': { type: 'string', required: false, description: 'New arrival airline name' },
+    'departure-flight-no': { type: 'string', required: false, description: 'New departure flight number' },
+    'departure-airline': { type: 'string', required: false, description: 'New departure airline name' },
+    'service-area-id': { type: 'string', required: false, description: 'Service area id, when the upstream requires re-scoping the ride' },
+    'passenger-name': { type: 'string', required: false, description: 'New passenger full name (passing any passenger-* flag triggers a passenger update)' },
+    'passenger-phone': { type: 'string', required: false, description: 'New passenger phone in E.164 format (e.g. +14155551234)' },
+    'passenger-email': { type: 'string', required: false, description: 'New passenger email' },
+    'luggage-count': { type: 'int', required: false, description: 'New luggage count' },
+  },
+  response: {
+    ride_id: { type: 'string|int', description: 'Modified ride id' },
+    status: { type: 'string', description: "Result status, 'updated' when the modification was applied" },
+    ride_updated: { type: 'bool', description: 'true when trip-side fields were sent upstream' },
+    passenger_updated: { type: 'bool', description: 'true when passenger fields were sent upstream' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli ride-elife update --order-id 4112961 --pickup-time 1780000000 --idempotency-key update-789',
+    output_summary: 'Returns which sides were applied (ride_updated / passenger_updated).',
+  },
+  error_recovery: {
+    PARAM_INVALID: 'No modifiable field was supplied. Pass at least one trip field or one passenger-* flag.',
+    RIDE_NOT_FOUND: 'The ride does not exist or belongs to another developer. Verify --order-id is the ride_id from book.',
+    CANCELLATION_NOT_ALLOWED: 'The ride is past the modifiable window. Query with `ride-elife get`; cancel and re-book if the user needs a different trip.',
+    UPSTREAM_ERROR: 'Partial update: one side applied upstream, the other failed (see data.partial_update). The upstream has NO rollback — re-issue update for the failed side ONLY, then confirm with `ride-elife get`.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+  },
+};
+
+/**
+ * `ride-elife trip-status` schema (elife-capability-parity). Read-only.
+ *
+ * Flag names MUST stay identical to `verbs.trip-status.flags` in ride-elife.json.
+ */
+export const rideTripStatusSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'trip-status',
+  description: 'Query the status and driver location points of a single leg of a multi-leg ride',
+  flags: {
+    'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) — use the `ride_id` field from book/list-orders responses' },
+    'trip-no': { type: 'int', required: false, default: 1, description: '1-based leg index; defaults to the first leg' },
+  },
+  response: {
+    ride_id: { type: 'string|int', description: 'Ride identifier' },
+    trip_no: { type: 'int', description: 'Leg number this status refers to' },
+    status: { type: 'string', description: 'Leg status, same vocabulary as `ride-elife get`' },
+    points: {
+      type: 'array|null',
+      description: 'Driver location points for this leg',
+      items: { lat: { type: 'float' }, lng: { type: 'float' }, utc_timestamp: { type: 'int' } },
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli ride-elife trip-status --order-id 4112961 --trip-no 2',
+    output_summary: 'Returns the leg status plus its driver location points.',
+  },
+  polling: {
+    recommended_interval_seconds: DEFAULT_WATCH_INTERVAL_SECONDS,
+    terminal_statuses: [...TERMINAL_STATUSES],
+    in_progress_statuses: ['Pending', 'Accepted', 'On my way', 'Waiting', 'On board'],
+    field_availability: {
+      points: 'Populated only after the driver starts moving on this leg; empty or null before that.',
+    },
+  },
+  error_recovery: {
+    RIDE_NOT_FOUND: 'The ride or the requested leg does not exist. Confirm the ride has multiple legs via `ride-elife get` first.',
+    UPSTREAM_ERROR: 'Upstream Trip Status errored. Legs only exist after a driver is dispatched — use get.response.next_trip_no and only query once the ride has started. As of 2026-08 the sandbox returns 502 here for rides with no dispatched legs regardless of --trip-no; fall back to `ride-elife get`.',
+    BOOKING_FAILED: 'Transient upstream error. Retry once after 5s, or fall back to `ride-elife get` for whole-ride status.',
+  },
+};
+
 /** `ride-elife list-orders` schema (§4.4.1.3 list-orders schema). Read-only. */
 export const listOrdersSchema: VerbSchema = {
   cli: CLI_NAME,

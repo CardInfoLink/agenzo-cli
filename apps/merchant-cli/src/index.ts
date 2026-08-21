@@ -18,6 +18,8 @@ import { registerQuoteCommand } from './ride-elife/quote.js';
 import { registerBookCommand } from './ride-elife/book.js';
 import { registerRideGetCommand } from './ride-elife/get.js';
 import { registerCancelCommand } from './ride-elife/cancel.js';
+import { registerRideUpdateCommand } from './ride-elife/update.js';
+import { registerRideTripStatusCommand } from './ride-elife/trip-status.js';
 import { registerListOrdersCommand } from './ride-elife/list-orders.js';
 
 // services commands (CLI-bundled registry, D4)
@@ -126,13 +128,16 @@ async function main() {
 
   // ride-elife command group (eLife ride ordering)
   const rideCmd = program.command('ride-elife').description(
-    `Ride ordering (eLife) — quote a fare, book it, poll status, and cancel.
+    `Ride ordering (eLife) — quote a fare, book it, poll status, modify it, and cancel.
 
 Workflow (typical order):
   1. quote        Get fare quotes between two points → vehicle_classes[] each with a quote_id
   2. book         Book one vehicle_class using its quote_id → ride_id (write; needs --idempotency-key)
   3. get          Poll ride status by --order-id=<ride_id> until terminal (or use --watch for NDJSON)
   4. cancel       (optional) Cancel a ride by --order-id (write; may incur a fee)
+     update       (optional) Modify trip details and/or passenger of a booked ride
+                  (write; needs --idempotency-key; the fare may change)
+     trip-status  (optional) Status + driver location points of ONE leg of a multi-leg ride
      list-orders  (standalone) List the developer's previous ride orders
 
 Key notes:
@@ -147,13 +152,19 @@ Key notes:
   • All amounts are DECIMAL currency units (e.g. 42.50 = $42.50), never minor units (cents).
   • Billing mode is decided server-side: pay_per_call needs a PAID --payment-order-id (from
     payment-cli); monthly_settlement forbids it (settled against the developer's account).
-  • Write verbs (book / cancel) require --idempotency-key; reuse the SAME key when retrying the
-    same intent.`,
+  • Write verbs (book / cancel / update) require --idempotency-key; reuse the SAME key when
+    retrying the same intent.
+  • update changes ONLY the fields you pass. Trip-side and passenger-side changes are two separate
+    upstream calls with no transaction: the response reports ride_updated / passenger_updated, and a
+    partial application returns UPSTREAM_ERROR with data.partial_update — re-issue update for the
+    failed side only.`,
   );
   registerQuoteCommand(rideCmd, deps);
   registerBookCommand(rideCmd, deps);
   registerRideGetCommand(rideCmd, deps);
   registerCancelCommand(rideCmd, deps);
+  registerRideUpdateCommand(rideCmd, deps);
+  registerRideTripStatusCommand(rideCmd, deps);
   registerListOrdersCommand(rideCmd, deps);
 
   // services command group (capability discovery via platform backend + local fallback).
