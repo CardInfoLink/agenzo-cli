@@ -6,6 +6,8 @@ import {
   bookSchema,
   rideGetSchema,
   cancelSchema,
+  rideUpdateSchema,
+  rideTripStatusSchema,
   listOrdersSchema,
 } from '../src/verb-schema.js';
 
@@ -107,7 +109,7 @@ describe('verb schema field alignment', () => {
     expect(cancelSchema.error_recovery).toHaveProperty('PARAM_IDEMPOTENCY_KEY_REQUIRED');
 
     // Sanity: each schema names the merchant CLI + ride-elife noun verbatim.
-    for (const s of [quoteSchema, bookSchema, rideGetSchema, cancelSchema, listOrdersSchema]) {
+    for (const s of [quoteSchema, bookSchema, rideGetSchema, cancelSchema, rideUpdateSchema, rideTripStatusSchema, listOrdersSchema]) {
       expect(s.cli).toBe('agenzo-merchant-cli');
       expect(s.noun).toBe('ride-elife');
     }

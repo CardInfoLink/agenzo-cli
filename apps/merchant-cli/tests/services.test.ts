@@ -130,7 +130,7 @@ describe('services registry (registry.ts)', () => {
     expect(svc!.category).toBe('ride');
     expect(svc!.provider).toBe('elife');
     expect(svc!.cli_noun).toBe('ride-elife');
-    expect(svc!.verbs).toHaveLength(5);
+    expect(svc!.verbs).toHaveLength(7);
     expect(svc!.workflow.length).toBeGreaterThan(0);
     expect(svc!.since).toBeTruthy();
     expect(svc!.discovery.help_command).toContain('ride-elife');
@@ -140,8 +140,16 @@ describe('services registry (registry.ts)', () => {
     expect(findService('nope')).toBeUndefined();
   });
 
-  it('UT-REG-03: first registry entry exposes the 5 ride verbs in order', () => {
-    expect(SERVICE_REGISTRY[0].verbs).toEqual(['quote', 'book', 'get', 'cancel', 'list-orders']);
+  it('UT-REG-03: first registry entry exposes the ride verbs in order', () => {
+    expect(SERVICE_REGISTRY[0].verbs).toEqual([
+      'quote',
+      'book',
+      'get',
+      'cancel',
+      'update',
+      'trip-status',
+      'list-orders',
+    ]);
   });
 });
 

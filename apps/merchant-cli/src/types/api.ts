@@ -149,6 +149,37 @@ export interface CancelResponse {
   refund_amount?: number;
 }
 
+// ---- Modification ----
+
+/**
+ * `ride update` response. `ride_updated` / `passenger_updated` say which side
+ * was actually sent upstream — the two sides are separate upstream calls with
+ * no transaction, so a caller must not assume both applied.
+ */
+export interface UpdateResponse {
+  ride_id: string | number;
+  status: string;
+  ride_updated: boolean;
+  passenger_updated: boolean;
+}
+
+// ---- Trip (leg) status ----
+
+/** One driver location sample reported for a leg. */
+export interface TripLocationPoint {
+  lat: number;
+  lng: number;
+  utc_timestamp: number;
+}
+
+/** `ride trip-status` response — status of a single leg of a multi-leg ride. */
+export interface TripStatusResponse {
+  ride_id: string | number;
+  trip_no: number;
+  status: OrderStatus | string;
+  points?: TripLocationPoint[] | null;
+}
+
 // ---- Listing ----
 
 /** `RideService._format_list_item` shape (MongoDB ap_ride_orders, slim). */
