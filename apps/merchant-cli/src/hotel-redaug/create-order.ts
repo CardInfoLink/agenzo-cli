@@ -260,6 +260,12 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
       '--payment-token-id <id>',
       'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips EVO preauth/capture and only locks the order + records this credential (funds already charged).',
     )
+    .option(
+      '--authorized-merchant-trans-id <id>',
+      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
+      'When set, the server reuses that authorization instead of creating a new one, ' +
+      'avoiding a second hold on the card (pay_per_call mode only).',
+    )
     .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option(
       '--idempotency-key <key>',
@@ -323,6 +329,11 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     if (opts.bedType !== undefined) body.bed_type = opts.bedType as string;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
+    // 3DS 挑战续单凭证：持卡人完成认证后带回该交易号，服务端复用那笔已授权的预授权，
+    // 不再新发起一次（否则又拿到新挑战页且重复冻结资金）。
+    if (opts.authorizedMerchantTransId) {
+      body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
+    }
     // 归因标签：只在调用方显式传了非空 --member 时写入，缺省订单保持无归属（见
     // doc/member-id-attribution-design.md 不变量 3）。
     const member = memberIdOf(opts);

@@ -29,6 +29,12 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     .option('--passengers <json>', 'JSON array of passengers (gender/id_type are strings)')
     .option('--payment-method-id <id>', 'Optional bound-card id (pay_per_call only)')
     .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
+    .option(
+      '--authorized-merchant-trans-id <id>',
+      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
+      'When set, the server reuses that authorization instead of creating a new one, ' +
+      'avoiding a second hold on the card (pay_per_call mode only).',
+    )
     .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header');
   attachSchemaHelp(cmd, flightCreateOrderSchema);
@@ -57,6 +63,11 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     // UPI(unionpay) 扣款路径：透传已 ACTIVE 的 network token id；platform create-order
     // 据 payment_token_id 非空走 ChargeService 实扣（跳过 EVO 预授权/捕获）。
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
+    // 3DS 挑战续单凭证：持卡人完成认证后带回该交易号，服务端复用那笔已授权的预授权，
+    // 不再新发起一次（否则又拿到新挑战页且重复冻结资金）。
+    if (opts.authorizedMerchantTransId) {
+      body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
+    }
     // 归因标签（可选）：非空才写入，缺省保持无归属。
     const member = memberIdOf(opts);
     if (member !== undefined) body.member_id = member;
