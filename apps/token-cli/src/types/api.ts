@@ -44,6 +44,12 @@ export interface DropinCreateResponse {
   id: string;
   /** Session id used by the front-end SDK to render the add-payment UI. */
   session_id: string;
+  /**
+   * Full Evo hosted-checkout URL. Open it directly (browser / SheetWebView) to
+   * collect the card and, when `allow_authentication` was set, run cardholder
+   * authentication — bypassing the Drop-in SDK entirely.
+   */
+  link_url?: string;
   /** Upstream merchant transaction id, format T{y}{MMddHHmmss}{rand3}. */
   merchant_trans_id: string;
   /** Always "PENDING" on creation. */
