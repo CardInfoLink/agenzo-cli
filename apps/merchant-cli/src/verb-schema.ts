@@ -1405,12 +1405,15 @@ export const flightCreateOrderSchema = flightSchema(
 
 export const flightPayOrderSchema = flightSchema(
   'pay-order',
-  'Settle a created order by --order-no (triggers upstream ticketing). AWAITING_PAYMENT → PAID.',
+  'Charge the order and trigger upstream ticketing. AWAITING_PAYMENT → PAID. Funds move HERE, not in create-order.',
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference from create-order.' },
+    'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id to charge (pay_per_call only; omit to use the default card).' },
+    'payment-token-id': { type: 'string', required: false, description: 'Optional network-token id; settles via direct charge instead of EVO preauth.' },
+    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with an already-authorised preauth trans id.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
   },
-  { order_no: { type: 'string', description: 'Our order reference.' }, status: { type: 'string', description: 'PAID on success.' } },
+  { order_no: { type: 'string', description: 'Our order reference.' }, status: { type: 'string', description: 'PAID on success; AUTHENTICATION_REQUIRED when the card needs 3DS.' } },
   { command: 'agenzo-merchant-cli flight-flink pay-order --order-no ffo_... --idempotency-key k2', output_summary: 'Order becomes PAID; poll get-order until TICKETED.' },
 );
 
