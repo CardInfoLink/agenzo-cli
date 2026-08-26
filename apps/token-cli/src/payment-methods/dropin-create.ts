@@ -39,6 +39,10 @@ export function registerDropinCreateCommand(
     .option(
       '--member <id>',
       'End-user member id this card belongs to (optional; scopes the bound card to the member so it appears in list --member <id> and can be charged for them). Omit it and the card is developer-scoped: usable only for bookings that pass no member.',
+    )
+    .option(
+      '--allow-authentication',
+      'Let Evo run cardholder authentication (3DS / FIDO passkey page) during the Drop-in flow. Required for Visa tokenisation: without it Evo returns no networkToken.tokenID, so the card cannot be enrolled into Visa Intelligent Commerce and stays on the Evo rail. Default off, keeping the existing Evo binding request unchanged.',
     );
 
   cmd.action(async () => {
@@ -58,11 +62,19 @@ export function registerDropinCreateCommand(
     // mints the Drop-in session for the front-end SDK. Returns synchronously.
     // --member (optional) scopes the bound card to the end-user so it surfaces
     // in list --member <id> (parity with unionpay-enroll / manual binds).
+    // --allow-authentication (optional) is a thin pass-through: the platform
+    // decides what it means. Only sent when set, so the default Evo request body
+    // stays byte-identical.
     const member = ((opts.member as string | undefined) ?? '').trim();
+    const allowAuthentication = opts.allowAuthentication === true;
     const sessionResult = await deps.apiClient.post<DropinCreateResponse>(
       '/payment-methods/dropin/create',
       { type: 'api-key', key: apiKey },
-      { email, ...(member ? { member_id: member } : {}) },
+      {
+        email,
+        ...(member ? { member_id: member } : {}),
+        ...(allowAuthentication ? { allow_authentication: true } : {}),
+      },
     );
 
     if (!sessionResult.success) {
