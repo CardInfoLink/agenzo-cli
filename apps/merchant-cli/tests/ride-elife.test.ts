@@ -17,6 +17,8 @@ import { registerQuoteCommand } from '../src/ride-elife/quote.js';
 import { registerBookCommand } from '../src/ride-elife/book.js';
 import { registerRideGetCommand } from '../src/ride-elife/get.js';
 import { registerCancelCommand } from '../src/ride-elife/cancel.js';
+import { registerRideUpdateCommand } from '../src/ride-elife/update.js';
+import { registerRideTripStatusCommand } from '../src/ride-elife/trip-status.js';
 import { registerListOrdersCommand } from '../src/ride-elife/list-orders.js';
 import { buildProgram, captureStdout, captureStderr, parseJsonOutput, mockApiClient } from './helpers.js';
 
@@ -117,6 +119,8 @@ function rideProgram(apiClient: Mock) {
   registerBookCommand(ride, deps);
   registerRideGetCommand(ride, deps);
   registerCancelCommand(ride, deps);
+  registerRideUpdateCommand(ride, deps);
+  registerRideTripStatusCommand(ride, deps);
   registerListOrdersCommand(ride, deps);
   return program;
 }
@@ -710,6 +714,173 @@ describe('ride-elife list-orders', () => {
 
     await expect(
       program.parseAsync([...BASE, 'list-orders', '--api-key', 'k', '--page', '0']),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    expect(api.get).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// ride-elife update (elife-capability-parity)
+// ============================================================
+
+const UPDATE_RESP = {
+  ride_id: 'ride_1',
+  status: 'updated',
+  ride_updated: true,
+  passenger_updated: false,
+};
+
+describe('ride-elife update', () => {
+  it('TC-UPDATE-01: --yes POSTs /ride/<id>/update with only the passed fields; key only in header', async () => {
+    const api = mockApiClient({ '/ride/ride_1/update': UPDATE_RESP });
+    const program = rideProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'update', '--api-key', 'test-key', '--yes',
+      '--order-id', 'ride_1', '--pickup-time', '1780000000', '--vehicle-class', 'SUV',
+      '--idempotency-key', 'upd-1', '--format', 'json',
+    ]);
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const [path, auth, body, headers] = api.post.mock.calls[0] as [string, unknown, Record<string, unknown>, Record<string, string>];
+    expect(path).toBe('/ride/ride_1/update');
+    expect(auth).toEqual({ type: 'api-key', key: 'test-key' });
+    // Only what the caller passed is sent — no implicit nulls that would blank fields upstream.
+    expect(body).toEqual({ pickup_time: 1780000000, vehicle_class: 'SUV' });
+    expect(headers).toEqual({ 'Idempotency-Key': 'upd-1' });
+
+    const payload = parseJsonOutput(out.text()) as Record<string, any>;
+    expect(payload.ride_updated).toBe(true);
+    expect(payload.passenger_updated).toBe(false);
+  });
+
+  it('TC-UPDATE-02: passenger flags are forwarded so the passenger side runs', async () => {
+    const api = mockApiClient({ '/ride/ride_1/update': UPDATE_RESP });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'update', '--api-key', 'k', '--yes', '--order-id', 'ride_1',
+      '--passenger-name', 'Ann Lee', '--luggage-count', '2',
+      '--idempotency-key', 'upd-2', '--format', 'json',
+    ]);
+
+    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, unknown>];
+    expect(body).toEqual({ passenger_name: 'Ann Lee', luggage_count: 2 });
+  });
+
+  it('TC-UPDATE-03: no modifiable field throws PARAM_INVALID and sends no request', async () => {
+    const api = mockApiClient();
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([...BASE, 'update', '--api-key', 'k', '--yes', '--order-id', 'ride_1', '--idempotency-key', 'upd-3']),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('TC-UPDATE-04: missing --order-id throws PARAM_INVALID and sends no request', async () => {
+    const api = mockApiClient();
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([...BASE, 'update', '--api-key', 'k', '--yes', '--vehicle-class', 'SUV']),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('TC-UPDATE-05: half-specified pickup is rejected before any request', async () => {
+    const api = mockApiClient();
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        ...BASE, 'update', '--api-key', 'k', '--yes', '--order-id', 'ride_1',
+        '--pickup-lat', '1.35', '--idempotency-key', 'upd-5',
+      ]),
+    ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('TC-UPDATE-06: declining the confirmation maps to CLIENT_ABORTED and sends no request', async () => {
+    const api = mockApiClient();
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+    (confirm as unknown as Mock).mockResolvedValueOnce(false);
+
+    await expect(
+      program.parseAsync([
+        ...BASE, 'update', '--api-key', 'k', '--order-id', 'ride_1',
+        '--vehicle-class', 'SUV', '--idempotency-key', 'upd-6',
+      ]),
+    ).rejects.toMatchObject({ code: 'CLIENT_ABORTED' });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// ride-elife trip-status (elife-capability-parity)
+// ============================================================
+
+const TRIP_RESP = {
+  ride_id: 'ride_1',
+  trip_no: 2,
+  status: 'On my way',
+  points: [{ lat: 1.35, lng: 103.98, utc_timestamp: 1780000000 }],
+};
+
+describe('ride-elife trip-status', () => {
+  it('TC-TRIP-01: GET /ride/<id>/trips/<n> with X-Api-Key auth', async () => {
+    const api = mockApiClient({ '/ride/ride_1/trips/2': TRIP_RESP });
+    const program = rideProgram(api);
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'trip-status', '--api-key', 'test-key', '--order-id', 'ride_1',
+      '--trip-no', '2', '--format', 'json',
+    ]);
+
+    expect(api.get).toHaveBeenCalledTimes(1);
+    const [path, auth] = api.get.mock.calls[0] as [string, unknown];
+    expect(path).toBe('/ride/ride_1/trips/2');
+    expect(auth).toEqual({ type: 'api-key', key: 'test-key' });
+
+    const payload = parseJsonOutput(out.text()) as Record<string, any>;
+    expect(payload.trip_no).toBe(2);
+    expect(payload.status).toBe('On my way');
+  });
+
+  it('TC-TRIP-02: --trip-no defaults to leg 1', async () => {
+    const api = mockApiClient({ '/ride/ride_1/trips/1': { ...TRIP_RESP, trip_no: 1 } });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([...BASE, 'trip-status', '--api-key', 'k', '--order-id', 'ride_1', '--format', 'json']);
+
+    const [path] = api.get.mock.calls[0] as [string];
+    expect(path).toBe('/ride/ride_1/trips/1');
+  });
+
+  it('TC-TRIP-03: --trip-no below 1 throws PARAM_INVALID and sends no request', async () => {
+    const api = mockApiClient();
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([...BASE, 'trip-status', '--api-key', 'k', '--order-id', 'ride_1', '--trip-no', '0']),
     ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
     expect(api.get).not.toHaveBeenCalled();
   });
