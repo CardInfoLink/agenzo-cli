@@ -223,6 +223,11 @@ export const bookSchema: VerbSchema = {
       required: false,
       description: 'Bound payment method id to charge (pay_per_call only). Opaque id from `token payment-methods list`; ignored for monthly_settlement',
     },
+    'payment-token-id': {
+      type: 'string',
+      required: false,
+      description: 'UPI Agent Pay: network-token id from an already-completed UnionPay/Visa capture. When set, the platform skips EVO preauth/capture and only books the ride + records this credential (funds already charged)',
+    },
     member: MEMBER_FLAG_SCHEMA,
     'passenger-name': { type: 'string', required: true, description: 'Passenger full name' },
     'passenger-phone': { type: 'string', required: true, description: 'Passenger phone in E.164 format (e.g. +14155551234)' },

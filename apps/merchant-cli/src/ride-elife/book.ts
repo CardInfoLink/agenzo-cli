@@ -139,6 +139,12 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       'Bound payment method id to charge (pay_per_call mode only)',
     )
     .option(
+      '--payment-token-id <id>',
+      'UPI Agent Pay: payment token id from an already-completed UnionPay/Visa network-token ' +
+        'capture. When set, the platform skips EVO preauth/capture and only books the ride + ' +
+        'records this credential (funds already charged).',
+    )
+    .option(
       '--authorized-merchant-trans-id <id>',
       'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
         'When set, the server reuses that authorization instead of creating a new one, ' +
@@ -203,6 +209,9 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     // monthly_settlement omits both entirely.
     if (opts.paymentOrderId) body.payment_order_id = opts.paymentOrderId as string;
     if (opts.paymentMethodId) body.payment_method_id = opts.paymentMethodId as string;
+    // UPI Agent Pay 直扣凭证：银联/Visa 已通过 network-token 扣款完成，带上该 token id。
+    // 服务端据此绕开 EVO 预授权/请款，只锁单 + 落库该凭证（资金已扣）。
+    if (opts.paymentTokenId) body.payment_token_id = opts.paymentTokenId as string;
     // 3DS 挑战续单凭证：持卡人完成认证后带回该交易号，服务端复用那笔已授权的预授权，
     // 不再新发起一次（否则又拿到新挑战页且重复冻结资金）。
     if (opts.authorizedMerchantTransId) {
