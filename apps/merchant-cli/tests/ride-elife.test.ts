@@ -372,6 +372,38 @@ describe('ride-elife book', () => {
     expect(body).not.toHaveProperty('card');
   });
 
+  it('TC-BOOK-02c: --payment-token-id is forwarded verbatim（Visa/UPI 网络令牌直扣路径）', async () => {
+    // 打车此前独缺该参数（酒店 create-order 与机票 pay-order 早已支持），于是 Visa 轨
+    // 打车只能带 payment_method_id 过去，被 platform 以 PAYMENT_METHOD_REQUIRED(1913)
+    // 拒掉：「The selected card cannot be used for this payment」。platform 侧
+    // payment_token_id 与 payment_method_id 二选一，带 token 时走 network-token 直扣。
+    const api = mockApiClient({ '/ride/book': BOOK_RESP });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(
+      bookArgs(['--yes', '--idempotency-key', 'book-ptk', '--payment-token-id', 'ptk_visa_1']),
+    );
+
+    const body = api.post.mock.calls[0][2] as Record<string, any>;
+    expect(body.payment_token_id).toBe('ptk_visa_1');
+    expect(body).not.toHaveProperty('card_number');
+    expect(body).not.toHaveProperty('cvv');
+  });
+
+  it('TC-BOOK-02d: 不传时不带该字段，保持向后兼容', async () => {
+    const api = mockApiClient({ '/ride/book': BOOK_RESP });
+    const program = rideProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(bookArgs(['--yes', '--idempotency-key', 'book-no-ptk']));
+
+    const body = api.post.mock.calls[0][2] as Record<string, any>;
+    expect(body).not.toHaveProperty('payment_token_id');
+  });
+
   it('TC-BOOK-03: --payment-order-id is forwarded (pay_per_call); omitted otherwise (monthly_settlement)', async () => {
     const api = mockApiClient({ '/ride/book': BOOK_RESP });
     const program = rideProgram(api);
