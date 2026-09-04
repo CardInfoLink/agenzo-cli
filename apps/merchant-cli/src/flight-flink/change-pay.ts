@@ -11,6 +11,8 @@ import { type Deps, need, num, render, resolveApiKey } from './_helpers.js';
  * --payment-token-id is given, else EVO), then calls flink pay(type=1) for the change
  * order. Calls POST /flight/change/{change_order_no}/pay with an Idempotency-Key header.
  * Non-`--yes` path confirms (restating amount) before the write.
+ * --authorized-merchant-trans-id re-enters this verb after a 3DS challenge: no second
+ * charge is made — the platform verifies the already-settled one and finishes ticketing.
  */
 export function registerChangePayCommand(parent: Command, deps: Deps): void {
   const cmd = parent
@@ -23,6 +25,10 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
     .option('--currency <currency>', 'ISO 4217 currency code', 'USD')
     .option('--payment-method-id <id>', 'Optional bound-card id (EVO path)')
     .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
+    .option(
+      '--authorized-merchant-trans-id <id>',
+      'Resume a 3DS challenge: merchant trans id of the already-settled direct charge',
+    )
     .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header');
   attachSchemaHelp(cmd, flightChangePaySchema);
 
@@ -45,12 +51,20 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
     // UPI(unionpay) 扣款路径：透传已 ACTIVE 的 network token id；platform change-pay
     // 据 payment_token_id 非空走 ChargeService 实扣（跳过 EVO 预授权/捕获）。
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
+    // 3DS 挑战续单凭证：改签费现结已从「预授权+捕获」改为绑卡直扣一次成交，直扣遇 EVO
+    // 要求 3DS 时返回挑战；前端带用户认证完成后用这个参数重入 change-pay，平台只核验
+    // 那笔已成交的直扣并补做出票，不再扣第二笔。
+    if (opts.authorizedMerchantTransId !== undefined) {
+      body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
+    }
 
     if (!isYes) {
-      const ok = await confirm({
-        message: `Pay change fee ${amount} ${currency} for change order ${changeOrderNo}? This charges the customer and triggers change ticketing.`,
-        default: false,
-      });
+      // 续单路径上钱已经扣过了，别再跟操作员说「charges the customer」。
+      const isResume = opts.authorizedMerchantTransId !== undefined;
+      const message = isResume
+        ? `Resume change fee ${amount} ${currency} for change order ${changeOrderNo}? The charge already settled; this only verifies it and triggers change ticketing.`
+        : `Pay change fee ${amount} ${currency} for change order ${changeOrderNo}? This charges the customer and triggers change ticketing.`;
+      const ok = await confirm({ message, default: false });
       if (!ok) throw new CliError('CLIENT_ABORTED', 'Change payment aborted by user.');
     }
 

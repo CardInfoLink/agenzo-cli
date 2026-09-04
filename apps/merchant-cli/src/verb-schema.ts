@@ -1639,12 +1639,13 @@ export const flightChangePaySchema = flightSchema(
     currency: { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code.' },
     'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id (EVO path).' },
     'payment-token-id': { type: 'string', required: false, description: 'Optional UPI network-token id (unionpay charge path).' },
+    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with the merchant trans id of the already-settled direct charge; no second charge is made.' },
     'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
   },
   {
     change_order_no: { type: 'string', description: 'Change order number.' },
     status: { type: 'string', description: 'PROCESSING after payment.' },
-    payment_status: { type: 'string', description: 'SETTLED on success.' },
+    payment_status: { type: 'string', description: 'SETTLED on success; AUTHENTICATION_REQUIRED when the card needs 3DS.' },
   },
   { command: 'agenzo-merchant-cli flight-flink change-pay --change-order-no C1 --order-no ffo_... --amount 120 --currency USD --idempotency-key k6', output_summary: 'Change fee charged; change ticketing triggered.' },
 );
