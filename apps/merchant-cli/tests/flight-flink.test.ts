@@ -200,8 +200,8 @@ describe('flight-flink: change-pay', () => {
   });
 
   it('--authorized-merchant-trans-id is forwarded as authorized_merchant_trans_id（3DS 挑战续单）', async () => {
-    // 改签费现结已从「预授权+捕获」改为绑卡直扣一次成交；直扣遇 EVO 要求 3DS 时返回挑战，
-    // 前端带用户认证完成后用这个参数重入 change-pay，平台只核验那笔已成交并补做出票。
+    // 改签费现结走 EVO 预授权 + 捕获。预授权遇 EVO 要求持卡人认证时资金尚未冻结、平台返回
+    // 挑战；前端带用户认证完成后用这个参数重入 change-pay，平台复用那笔已认证的预授权再 capture。
     const { prog, post } = setupWithPost(registerChangePayCommand, { '/flight/change/': CHANGE_PAY });
     const out = captureStdout();
     await prog.parseAsync(args(['--yes', '--idempotency-key', 'k6-3ds', '--authorized-merchant-trans-id', 'mt_evo_1']));
@@ -211,7 +211,7 @@ describe('flight-flink: change-pay', () => {
     expect(path).toBe('/flight/change/C1/pay');
     expect(auth).toEqual({ type: 'api-key', key: 'k' });
     expect(body.authorized_merchant_trans_id).toBe('mt_evo_1');
-    // 续单不额外指定支付凭证时，仍不带这两个字段（平台据 trans id 找那笔已成交的直扣）。
+    // 续付不额外指定支付凭证时，仍不带这两个字段（平台据 trans id 找那笔已认证的预授权）。
     expect(body).not.toHaveProperty('payment_method_id');
     expect(body).not.toHaveProperty('payment_token_id');
   });
@@ -240,7 +240,7 @@ describe('flight-flink: change-pay', () => {
     out.spy.mockRestore();
 
     const message = String((confirmMock.mock.calls[0][0] as { message: string }).message);
-    expect(message).toContain('already settled');
+    expect(message).toContain('already authorised');
     expect(message).not.toContain('charges the customer');
   });
 

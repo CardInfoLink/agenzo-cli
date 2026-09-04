@@ -1639,7 +1639,7 @@ export const flightChangePaySchema = flightSchema(
     currency: { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code.' },
     'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id (EVO path).' },
     'payment-token-id': { type: 'string', required: false, description: 'Optional UPI network-token id (unionpay charge path).' },
-    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with the merchant trans id of the already-settled direct charge; no second charge is made.' },
+    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with the merchant trans id of the already-authorised preauth; the platform reuses and captures it instead of authorizing again.' },
     'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
   },
   {
