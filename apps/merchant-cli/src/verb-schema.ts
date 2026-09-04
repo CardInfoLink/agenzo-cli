@@ -1645,7 +1645,7 @@ export const flightChangePaySchema = flightSchema(
   {
     change_order_no: { type: 'string', description: 'Change order number.' },
     status: { type: 'string', description: 'PROCESSING after payment.' },
-    payment_status: { type: 'string', description: 'SETTLED on success; AUTHENTICATION_REQUIRED when the card needs 3DS.' },
+    payment_status: { type: 'string', description: 'SETTLED on success. Absent when the card needs 3DS — the response then carries a challenge object instead (status AUTHENTICATION_REQUIRED, three_ds_url, merchant_trans_id) and nothing has been charged yet.' },
   },
   { command: 'agenzo-merchant-cli flight-flink change-pay --change-order-no C1 --order-no ffo_... --amount 120 --currency USD --idempotency-key k6', output_summary: 'Change fee charged; change ticketing triggered.' },
 );

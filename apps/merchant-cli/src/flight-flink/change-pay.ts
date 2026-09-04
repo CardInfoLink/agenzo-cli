@@ -82,8 +82,28 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
     );
     spinner?.stop();
     if (!result.success) throw CliError.fromApi(result, { auth: 'api-key' });
-    await render(result.data, opts.format as string | undefined, (d) =>
-      [
+    await render(result.data, opts.format as string | undefined, (d) => {
+      // 3DS 挑战：平台把它放在 `challenge` 键下（内含自己的 `status`），顶层没有
+      // payment_status。照原样按已扣款渲染会打出一张几乎全是 '-' 的表，并且告诉操作员
+      // 「Change fee charged」——而这笔恰恰还没扣钱。
+      const challenge = (d.challenge ?? null) as Record<string, unknown> | null;
+      if (challenge) {
+        return [
+          Formatter.keyValue([
+            ['Change order no', String(challenge.change_order_no ?? '-')],
+            ['Status', String(challenge.status ?? '-')],
+            ['Amount', `${challenge.amount ?? '-'} ${challenge.currency ?? ''}`.trim()],
+            ['Authentication URL', String(challenge.three_ds_url ?? '-')],
+            ['Merchant trans id', String(challenge.merchant_trans_id ?? '-')],
+          ]),
+          Formatter.status(
+            'warning',
+            'Not charged yet — the card requires 3-D Secure. Open the authentication URL, '
+              + 'then re-run change-pay with --authorized-merchant-trans-id <merchant trans id>.',
+          ),
+        ].join('\n\n');
+      }
+      return [
         Formatter.keyValue([
           ['Change order no', String(d.change_order_no ?? '-')],
           ['Status', String(d.status ?? '-')],
@@ -91,7 +111,7 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
           ['Payment status', String(d.payment_status ?? '-')],
         ]),
         Formatter.status('info', 'Change fee charged; change ticketing triggered. Poll change-detail until SUCCESS.'),
-      ].join('\n\n'),
-    );
+      ].join('\n\n');
+    });
   });
 }
