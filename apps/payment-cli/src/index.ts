@@ -14,6 +14,9 @@ import {
 } from '@agenzo/cli-core';
 
 import { registerPayCommand } from './payments/capture.js';
+import { registerChargeCardCommand } from './payments/charge-card.js';
+import { registerChargeCardResumeCommand } from './payments/charge-card-resume.js';
+import { registerRefundCommand } from './payments/refund.js';
 
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag.
@@ -54,8 +57,13 @@ async function main() {
   // payments command group (noun) — capture verb lives under it, so the
   // orchestrator's `payment__payments__capture` tool name resolves to:
   // `agenzo-payment-cli payments capture`.
-  const paymentsCmd = program.command('payments').description('Payment token capture');
-  registerPayCommand(paymentsCmd, deps);
+  const paymentsCmd = program
+    .command('payments')
+    .description('Payment token capture, standalone card charge (EVO 3DS) and refund');
+  registerPayCommand(paymentsCmd, deps); // payments capture      → POST /pay        (UnionPay/EVO token)
+  registerChargeCardCommand(paymentsCmd, deps); // payments charge-card         → POST /charge/card        (EVO authorize)
+  registerChargeCardResumeCommand(paymentsCmd, deps); // payments charge-card-resume  → POST /charge/card/resume (EVO capture)
+  registerRefundCommand(paymentsCmd, deps); // payments refund             → POST /refund
 
   await program.parseAsync(process.argv);
 }

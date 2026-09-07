@@ -1,7 +1,7 @@
 {
   "name": "@agenzo/payment-cli",
-  "version": "0.3.2",
-  "description": "Payment capture CLI for the Agenzo platform (capture a payment token)",
+  "version": "0.4.0",
+  "description": "Payment CLI for the Agenzo platform (capture a payment token, standalone EVO card charge, refund)",
   "type": "module",
   "engines": {
     "node": ">=22"
