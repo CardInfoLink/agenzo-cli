@@ -87,11 +87,13 @@ function isPaymentTerminal(record: unknown): boolean {
  * `create-order`. Calls `POST /hotel/{order_id}/pay` with an `Idempotency-Key`
  * header and an empty body.
  *
- * - `--order-id` (required): the order to pay. This is the ONLY identifier the
- *   command needs — the settlement path is decided server-side by the order's
- *   billing_mode. For the pay_per_call mode the EVO merchantTransID IS the
- *   order_id (the user pays via EVO under the order_id), so the platform
- *   verifies that payment itself; there is no merchant-transaction-id flag.
+ * - `--order-id` (required): the order to pay. The settlement path is decided
+ *   server-side by the order's billing_mode.
+ * - `--payment-method-id` / `--payment-token-id` / `--authorized-merchant-trans-id`
+ *   (all optional): payment credentials forwarded to the pay body. Charging happens
+ *   in this step (platform create-order only locks inventory); omit to let the
+ *   platform settle by the developer default card. Token wins over method id
+ *   server-side; `--authorized-merchant-trans-id` resumes a 3DS challenge.
  * - `--idempotency-key` (required): forwarded as header.
  * - `--watch` / `--watch-interval` / `--watch-timeout`: polling mode that
  *   retries on PAYMENT_NOT_COMPLETED until PAID or timeout.
@@ -111,6 +113,12 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     .description('Settle an existing hotel order (path decided by billing_mode: monthly_settlement or pay_per_call)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--order-id <id>', 'Order ID to pay (from create-order response)')
+    .option('--payment-method-id <id>', 'Optional bound-card id to charge (pay_per_call / EVO preauth)')
+    .option('--payment-token-id <id>', 'Optional network-token id (unionpay/visa charge path)')
+    .option(
+      '--authorized-merchant-trans-id <id>',
+      'Resume a 3DS challenge: merchant trans id of an already-authorised preauth',
+    )
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -156,9 +164,15 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     const watchInterval = resolveSeconds(opts.watchInterval as string, DEFAULT_PAY_WATCH_INTERVAL_SECONDS);
     const watchTimeout = resolveSeconds(opts.watchTimeout as string, DEFAULT_PAY_WATCH_TIMEOUT_SECONDS);
 
-    // Pay-order sends no body params — settlement is routed server-side by the
-    // order's billing_mode.
+    // Pay-order 携带支付凭证（扣款发生在本步骤）：平台侧 create-order 只锁库存/锁价、
+    // 分文不碰钱（lock-then-pay），扣款后移到这一步。全部可选——省略时平台按订单
+    // billing_mode 自行分流（月结扣额度、现结选默认卡）。CLI 是薄透传层，不做必填校验。
     const body: Record<string, unknown> = {};
+    if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
+    if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
+    if (opts.authorizedMerchantTransId !== undefined) {
+      body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
+    }
 
     // Confirm before the write unless --yes. This is the step that actually
     // moves money (settlement account debit for monthly_settlement, or EVO

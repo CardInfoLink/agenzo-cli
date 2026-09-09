@@ -763,9 +763,24 @@ export const hotelPayOrderSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'pay-order',
   description:
-    'Settle an existing AWAITING_PAYMENT order created by create-order. Takes only --order-id; the billing path is decided server-side by the order billing_mode. monthly_settlement deducts from the developer credit account then confirms with the supplier; pay_per_call verifies the user EVO payment — the EVO merchantTransID IS the order_id (the user pays via EVO under the order_id), so the platform queries EVO for that order_id and requires an exact amount/currency match before confirming (the response settlement_path is then "pay_per_call"). On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
+    'Settle an existing AWAITING_PAYMENT order created by create-order. Charging happens in this step — platform create-order only locks inventory/price and moves no money (lock-then-pay). Optional payment credentials (--payment-method-id / --payment-token-id / --authorized-merchant-trans-id) are forwarded to the pay body; omit them to let the platform settle by billing_mode (monthly_settlement deducts credit; pay_per_call selects the developer default card / EVO preauth). Token wins over method id server-side. On EVO cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; resume by re-calling pay-order with --authorized-merchant-trans-id. On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
   flags: {
-    'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id). For pay_per_call this is also the EVO merchantTransID the user paid under.' },
+    'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id).' },
+    'payment-method-id': {
+      type: 'string',
+      required: false,
+      description: 'Optional bound-card id to charge (pay_per_call / EVO preauth). Ignored for monthly_settlement and when payment-token-id is set.',
+    },
+    'payment-token-id': {
+      type: 'string',
+      required: false,
+      description: 'Optional network-token id (UnionPay/Visa). When set the platform settles via network-token direct charge instead of EVO preauth+capture. Wins over payment-method-id.',
+    },
+    'authorized-merchant-trans-id': {
+      type: 'string',
+      required: false,
+      description: 'Resume a 3DS challenge: merchant trans id of an already-authorised preauth returned by a prior AUTHENTICATION_REQUIRED response. Reuses that authorization instead of creating a new one (pay_per_call only).',
+    },
     'idempotency-key': {
       type: 'string',
       required: true,
