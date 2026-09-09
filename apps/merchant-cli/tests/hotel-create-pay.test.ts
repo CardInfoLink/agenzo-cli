@@ -231,6 +231,29 @@ describe('hotel-redaug pay-order (default path)', () => {
     ).rejects.toMatchObject({ code: 'PARAM_INVALID' });
     expect(api.post).not.toHaveBeenCalled();
   });
+
+  it('forwards --payment-method-id / --payment-token-id / --authorized-merchant-trans-id into the pay body (lock-then-pay)', async () => {
+    const api = mockApiClient({ '/hotel/ord_new1/pay': PAY_ORDER_SUCCESS_RESP });
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'pay-order', '--api-key', 'k',
+      '--order-id', 'ord_new1',
+      '--payment-token-id', 'ptk_1',
+      '--authorized-merchant-trans-id', 'mt_evo_1',
+      '--idempotency-key', 'pay-cred-1',
+      '--yes', '--format', 'json',
+    ]);
+
+    const [path, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(path).toBe('/hotel/ord_new1/pay');
+    expect(body.payment_token_id).toBe('ptk_1');
+    expect(body.authorized_merchant_trans_id).toBe('mt_evo_1');
+    // payment_method_id omitted when not supplied.
+    expect(body).not.toHaveProperty('payment_method_id');
+  });
 });
 
 // ============================================================
