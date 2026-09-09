@@ -29,6 +29,8 @@ import { registerListCommand as registerPtListCommand } from './payment-tokens/l
 import { registerGetCommand as registerPtGetCommand } from './payment-tokens/get.js';
 import { registerRevokeCommand } from './payment-tokens/revoke.js';
 import { registerUnionpayCreateCommand } from './payment-tokens/unionpay-create.js';
+import { registerVisaCreateCommand } from './payment-tokens/visa-create.js';
+import { registerEvoCreateCommand } from './payment-tokens/evo-create.js';
 
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
@@ -93,6 +95,10 @@ async function main() {
   registerRevokeCommand(ptCmd, deps);
   // UnionPay non-blocking command (programmatic callers; not in SKILL/README).
   registerUnionpayCreateCommand(ptCmd, deps);
+  // Visa non-blocking command (programmatic callers; not in SKILL/README).
+  registerVisaCreateCommand(ptCmd, deps);
+  // EVO non-blocking command (programmatic callers; not in SKILL/README).
+  registerEvoCreateCommand(ptCmd, deps);
 
   // Parse and execute
   await program.parseAsync(process.argv);
