@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { confirm } from '@inquirer/prompts';
 import { CliError, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, flightChangeApplySchema } from '../verb-schema.js';
 import { type Deps, need, render, resolveApiKey } from './_helpers.js';
 
@@ -11,6 +12,7 @@ export function registerChangeApplyCommand(parent: Command, deps: Deps): void {
     .command('change-apply')
     .description('Submit a change request (returns change_order_no, pending review)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-no <id>', 'Our order reference')
     .option('--passenger <code>', 'passengerCode')
     .option('--segment-id <ids>', 'Comma-separated segment ids')
@@ -27,7 +29,7 @@ export function registerChangeApplyCommand(parent: Command, deps: Deps): void {
     const format = resolveFormat(opts.format as string | undefined);
     const isYes = Boolean(opts.yes);
     const apiKey = await resolveApiKey(opts.apiKey as string | undefined);
-    const body = {
+    const body: Record<string, unknown> = {
       order_no: need(opts.orderNo as string | undefined, 'order-no'),
       passenger: need(opts.passenger as string | undefined, 'passenger'),
       segment_id: need(opts.segmentId as string | undefined, 'segment-id'),
@@ -37,6 +39,12 @@ export function registerChangeApplyCommand(parent: Command, deps: Deps): void {
       contact_phone: need(opts.contactPhone as string | undefined, 'contact-phone'),
       contact_email: need(opts.contactEmail as string | undefined, 'contact-email'),
     };
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
 
     if (!isYes) {
       const ok = await confirm({

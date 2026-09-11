@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { confirm } from '@inquirer/prompts';
 import { CliError, Formatter, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, flightChangePaySchema } from '../verb-schema.js';
 import { type Deps, need, num, render, resolveApiKey } from './_helpers.js';
 
@@ -20,6 +21,7 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
     .command('change-pay')
     .description('Pay a change request fee (like a normal order) and trigger change ticketing')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--change-order-no <id>', 'Change order number')
     .option('--order-no <id>', 'Original order reference (ownership check)')
     .option('--amount <amount>', 'Change fee total in decimal units (change-detail price_total)')
@@ -48,6 +50,12 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
       amount,
       currency,
     };
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
     // UPI(unionpay) 扣款路径：透传已 ACTIVE 的 network token id；platform change-pay
     // 据 payment_token_id 非空走 ChargeService 实扣（跳过 EVO 预授权/捕获）。

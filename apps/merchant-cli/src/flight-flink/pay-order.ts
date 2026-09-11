@@ -3,6 +3,7 @@ import { confirm } from '@inquirer/prompts';
 import { CliError, Formatter, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import type { PayFlightOrderResponse } from '../types/flight.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, flightPayOrderSchema } from '../verb-schema.js';
 import { type Deps, need, render, resolveApiKey } from './_helpers.js';
 
@@ -15,6 +16,7 @@ export function registerPayOrderCommand(parent: Command, deps: Deps): void {
     .command('pay-order')
     .description('Settle a created order by --order-no (triggers ticketing)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-no <id>', 'Our order reference from create-order')
     .option('--payment-method-id <id>', 'Optional bound-card id to charge (pay_per_call only)')
     .option('--payment-token-id <id>', 'Optional network-token id (unionpay/visa charge path)')
@@ -50,6 +52,12 @@ export function registerPayOrderCommand(parent: Command, deps: Deps): void {
     // 扣款发生在这一步。全部可选 —— 省略时平台按订单 billing_mode 自行分流（月结扣额度、
     // 现结选默认卡）。CLI 是薄透传层，不做必填校验。
     const body: Record<string, unknown> = {};
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
     if (opts.authorizedMerchantTransId !== undefined) {

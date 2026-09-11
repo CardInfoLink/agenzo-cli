@@ -17,6 +17,7 @@ import {
   resolveSeconds,
   watchRideStatus,
 } from './watch.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, rideGetSchema } from '../verb-schema.js';
 
 // ============================================================
@@ -109,6 +110,7 @@ export function registerRideGetCommand(parent: Command, deps: { apiClient: ApiCl
     .command('get')
     .description('Retrieve a ride order status by id (repeatable for polling)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-id <id>', 'Ride order id (the ride_id returned by `ride-elife book`)')
     .option('--watch', 'Poll until a terminal status, emitting one NDJSON line per update')
     .option(
@@ -151,9 +153,17 @@ export function registerRideGetCommand(parent: Command, deps: { apiClient: ApiCl
     // Animated spinner: visible in table mode, silent in json mode.
     const spinner = format === 'json' ? null : createSpinner('Fetching ride status...');
 
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    const params: Record<string, string> = {};
+    if (member !== undefined) params.member_id = member;
+
     const result = await deps.apiClient.get<GetOrderResponse>(
       `/ride/${encodeURIComponent(orderId)}/status`,
       { type: 'api-key', key: apiKey },
+      params,
     );
 
     spinner?.stop();

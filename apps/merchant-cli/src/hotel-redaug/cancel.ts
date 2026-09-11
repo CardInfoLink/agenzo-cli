@@ -11,6 +11,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { CancelHotelResponse } from '../types/hotel.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, hotelCancelSchema } from '../verb-schema.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
@@ -129,6 +130,7 @@ export function registerHotelCancelCommand(parent: Command, deps: { apiClient: A
     .command('cancel')
     .description('Cancel a whole hotel order within its policy (a cancellation fee may apply)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-id <id>', 'Our order reference (coOrderCode) to cancel (book.response.order_id)')
     .option('--fc-order-code <code>', 'Supplier order reference (book.response.fc_order_code)')
     .option('--reason <text>', 'Cancellation reason')
@@ -159,6 +161,12 @@ export function registerHotelCancelCommand(parent: Command, deps: { apiClient: A
     // Optional reason — included only when supplied (an omitted key never
     // enters the body). --idempotency-key is NEVER in the body.
     if (opts.reason !== undefined) body.reason = opts.reason as string;
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
 
     // No interactive cancel confirmation — cancel proceeds directly (the extra
     // "A cancellation fee may apply" y/N prompt was removed so the command never

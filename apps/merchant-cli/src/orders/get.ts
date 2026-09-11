@@ -11,6 +11,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { UnifiedOrderDetailResponse } from '../types/api.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, unifiedOrdersGetSchema } from '../verb-schema.js';
 
 /**
@@ -25,6 +26,7 @@ export function registerOrdersGetCommand(parent: Command, deps: { apiClient: Api
     .command('get')
     .description('Get a single order detail by id, regardless of provider (ride/hotel)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .requiredOption('--order-id <id>', 'Order id (e.g. rio_... or hho_...)');
 
   attachSchemaHelp(cmd, unifiedOrdersGetSchema);
@@ -40,9 +42,17 @@ export function registerOrdersGetCommand(parent: Command, deps: { apiClient: Api
 
     const spinner = format === 'json' ? null : createSpinner('Fetching order...');
 
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    const params: Record<string, string> = {};
+    if (member !== undefined) params.member_id = member;
+
     const result = await deps.apiClient.get<UnifiedOrderDetailResponse>(
       `/orders/${encodeURIComponent(opts.orderId as string)}`,
       { type: 'api-key', key: apiKey },
+      params,
     );
 
     spinner?.stop();

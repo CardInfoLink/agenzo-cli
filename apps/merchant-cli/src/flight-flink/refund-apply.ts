@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { confirm } from '@inquirer/prompts';
 import { CliError, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, flightRefundApplySchema } from '../verb-schema.js';
 import { type Deps, need, num, render, resolveApiKey } from './_helpers.js';
 
@@ -11,6 +12,7 @@ export function registerRefundApplyCommand(parent: Command, deps: Deps): void {
     .command('refund-apply')
     .description('Submit a refund request (returns refund_order_no, pending review)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-no <id>', 'Our order reference')
     .option('--passenger <code>', 'passengerCode')
     .option('--segment-id <ids>', 'Comma-separated segment ids')
@@ -38,6 +40,12 @@ export function registerRefundApplyCommand(parent: Command, deps: Deps): void {
       contact_phone: need(opts.contactPhone as string | undefined, 'contact-phone'),
       contact_email: need(opts.contactEmail as string | undefined, 'contact-email'),
     };
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
     if (opts.reason !== undefined) body.reason = opts.reason as string;
 
     if (!isYes) {

@@ -292,6 +292,7 @@ export const rideGetSchema: VerbSchema = {
   description: 'Retrieve a ride order status by id; with --watch, poll until a terminal status',
   flags: {
     'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) — use the `ride_id` field from book/list-orders responses, NOT the rio_... order_id' },
+    member: MEMBER_FLAG_SCHEMA,
     watch: { type: 'bool', required: false, default: false, description: 'Poll until a terminal status, emitting one NDJSON line per update' },
     'watch-interval': { type: 'int', required: false, default: DEFAULT_WATCH_INTERVAL_SECONDS, description: 'Seconds between polls when --watch is set' },
     'watch-timeout': { type: 'int', required: false, default: 600, description: 'Max seconds to poll before giving up' },
@@ -340,6 +341,7 @@ export const cancelSchema: VerbSchema = {
   description: 'Cancel a ride order by id (a cancellation fee may apply depending on ride status)',
   flags: {
     'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) to cancel — use the `ride_id` field from book/list-orders responses, NOT the rio_... order_id' },
+    member: MEMBER_FLAG_SCHEMA,
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -391,6 +393,7 @@ export const rideUpdateSchema: VerbSchema = {
     'Modify an existing ride booking: trip details (time / route / flight info) and/or passenger details. Fare changes are rejected — cancel and book again instead',
   flags: {
     'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) to modify — use the `ride_id` field from book/list-orders responses, NOT the rio_... order_id' },
+    member: MEMBER_FLAG_SCHEMA,
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -446,6 +449,7 @@ export const rideTripStatusSchema: VerbSchema = {
   description: 'Query the status and driver location points of a single leg of a multi-leg ride',
   flags: {
     'order-id': { type: 'string', required: true, description: 'The numeric ride_id (e.g. 4112961) — use the `ride_id` field from book/list-orders responses' },
+    member: MEMBER_FLAG_SCHEMA,
     'trip-no': { type: 'int', required: false, default: 1, description: '1-based leg index; defaults to the first leg' },
   },
   response: {
@@ -766,6 +770,7 @@ export const hotelPayOrderSchema: VerbSchema = {
     'Settle an existing AWAITING_PAYMENT order created by create-order. Charging happens in this step — platform create-order only locks inventory/price and moves no money (lock-then-pay). Optional payment credentials (--payment-method-id / --payment-token-id / --authorized-merchant-trans-id) are forwarded to the pay body; omit them to let the platform settle by billing_mode (monthly_settlement deducts credit; pay_per_call selects the developer default card / EVO preauth). Token wins over method id server-side. On EVO cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; resume by re-calling pay-order with --authorized-merchant-trans-id. On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id).' },
+    member: MEMBER_FLAG_SCHEMA,
     'payment-method-id': {
       type: 'string',
       required: false,
@@ -831,6 +836,7 @@ export const hotelGetSchema: VerbSchema = {
     'Query a hotel order status by id; with --watch, poll until a terminal status. Confirmation from the property is asynchronous, so order_status is usually PROCESSING (2) immediately after book — poll until CONFIRMED (3)',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Our order reference (coOrderCode) returned by book (book.response.order_id)' },
+    member: MEMBER_FLAG_SCHEMA,
     watch: { type: 'bool', required: false, default: false, description: 'Poll until a terminal status, emitting one NDJSON line per update' },
     'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between polls when --watch is set' },
     'watch-timeout': { type: 'int', required: false, default: 600, description: 'Max seconds to poll before giving up' },
@@ -876,6 +882,7 @@ export const hotelCancelSchema: VerbSchema = {
     'Cancel an entire hotel order within the cancellation policy (a cancellation fee may apply). Returns synchronously, but a successful call is acceptance only, NOT proof: poll get until order_status=CANCELLED (4). For partial-night or out-of-policy cancellation, use checkout instead',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Our order reference (coOrderCode) to cancel (book.response.order_id)' },
+    member: MEMBER_FLAG_SCHEMA,
     'fc-order-code': { type: 'string', required: true, description: 'Supplier order reference (book.response.fc_order_code)' },
     reason: { type: 'string', required: false, description: 'Cancellation reason' },
     'idempotency-key': {
@@ -926,6 +933,7 @@ export const hotelCheckoutSchema: VerbSchema = {
     'Request a partial check-out or an out-of-policy cancellation (drop some nights, or cancel after the free window so the property must approve). This is an APPLICATION: it returns a task_order_code synchronously, then the supplier decides asynchronously — poll get-checkout. Use cancel for a simple whole-order in-policy cancellation',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Our order reference (coOrderCode) for the URL path (book.response.order_id)' },
+    member: MEMBER_FLAG_SCHEMA,
     'fc-order-code': { type: 'string', required: true, description: 'Supplier order reference of the booking to change (book.response.fc_order_code)' },
     reason: { type: 'string', required: true, description: 'Why the partial check-out / out-of-policy cancellation is requested' },
     'checkout-rooms': {
@@ -1379,6 +1387,7 @@ export const unifiedOrdersGetSchema: VerbSchema = {
     'Get a single order detail by id, regardless of which provider (ride/hotel) it belongs to. The platform resolves order_id -> provider internally and returns that provider\'s own detail shape.',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Order id from `orders list` (rio_... for ride, hho_... for hotel)' },
+    member: MEMBER_FLAG_SCHEMA,
   },
   response: {
     '(varies by order_type)': {
@@ -1535,6 +1544,7 @@ export const flightPayOrderSchema = flightSchema(
   'Charge the order and trigger upstream ticketing. AWAITING_PAYMENT → PAID. Funds move HERE, not in create-order.',
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference from create-order.' },
+    member: MEMBER_FLAG_SCHEMA,
     'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id to charge (pay_per_call only; omit to use the default card).' },
     'payment-token-id': { type: 'string', required: false, description: 'Optional network-token id; settles via direct charge instead of EVO preauth.' },
     'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with an already-authorised preauth trans id.' },
@@ -1549,6 +1559,7 @@ export const flightGetOrderSchema = flightSchema(
   'Query flight order status by --order-no. Ticketing is asynchronous — poll until TICKETED.',
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    member: MEMBER_FLAG_SCHEMA,
     watch: { type: 'bool', required: false, default: false, description: 'Poll until terminal, one NDJSON line per update.' },
     'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between polls.' },
     'watch-timeout': { type: 'int', required: false, default: 600, description: 'Max seconds to poll.' },
@@ -1573,6 +1584,7 @@ export const flightCancelOrderSchema = flightSchema(
   'Cancel an un-ticketed order by --order-no (with refund). A ticketed order is rejected upstream.',
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    member: MEMBER_FLAG_SCHEMA,
     reason: { type: 'string', required: false, description: 'Optional cancellation reason.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
   },
@@ -1612,6 +1624,7 @@ export const flightChangeApplySchema = flightSchema(
   'Submit a change request. Returns change_order_no, status 0 (pending review).',
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    member: MEMBER_FLAG_SCHEMA,
     passenger: { type: 'string', required: true, description: 'passengerCode.' },
     'segment-id': { type: 'string', required: true, description: 'Comma-separated segment ids.' },
     'product-token': { type: 'string', required: true, description: 'Change priceKey token.' },
@@ -1649,6 +1662,7 @@ export const flightChangePaySchema = flightSchema(
   'Pay a change request fee (charges like a normal order) and trigger change ticketing. flink pay type=1.',
   {
     'change-order-no': { type: 'string', required: true, description: 'Change order number.' },
+    member: MEMBER_FLAG_SCHEMA,
     'order-no': { type: 'string', required: true, description: 'Original order reference (ownership check).' },
     amount: { type: 'float', required: true, description: 'Change fee total (change-detail price_total, decimal units).' },
     currency: { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code.' },
@@ -1670,6 +1684,7 @@ export const flightRefundApplySchema = flightSchema(
   'Submit a refund request. Returns refund_order_no, status 0 (pending review).',
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference.' },
+    member: MEMBER_FLAG_SCHEMA,
     passenger: { type: 'string', required: true, description: 'passengerCode.' },
     'segment-id': { type: 'string', required: true, description: 'Comma-separated segment ids.' },
     'reason-type': { type: 'int', required: true, description: 'Refund reason type code.' },

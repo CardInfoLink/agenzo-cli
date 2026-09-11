@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { CliError, Formatter, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import type { GetFlightOrderResponse } from '../types/flight.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, flightGetOrderSchema } from '../verb-schema.js';
 import { type Deps, need, num, render, resolveApiKey } from './_helpers.js';
 
@@ -20,6 +21,7 @@ export function registerGetOrderCommand(parent: Command, deps: Deps): void {
     .command('get-order')
     .description('Query a flight order status by id (poll ticketing 5→8)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-no <id>', 'Our order reference')
     .option('--watch', 'Poll until a terminal status, one NDJSON line per update')
     .option('--watch-interval <seconds>', 'Seconds between polls', '5')
@@ -32,6 +34,13 @@ export function registerGetOrderCommand(parent: Command, deps: Deps): void {
     const apiKey = await resolveApiKey(opts.apiKey as string | undefined);
     const orderNo = need(opts.orderNo as string | undefined, 'order-no');
     const path = `/flight/${encodeURIComponent(orderNo)}/status`;
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    const params: Record<string, string> = {};
+    if (member !== undefined) params.member_id = member;
     const auth = { type: 'api-key' as const, key: apiKey };
 
     if (opts.watch) {
@@ -39,7 +48,7 @@ export function registerGetOrderCommand(parent: Command, deps: Deps): void {
       const timeoutMs = num(opts.watchTimeout as string | undefined, 'watch-timeout') * 1000;
       const deadline = Date.now() + timeoutMs;
       for (;;) {
-        const r = await deps.apiClient.get<GetFlightOrderResponse>(path, auth);
+        const r = await deps.apiClient.get<GetFlightOrderResponse>(path, auth, params);
         if (!r.success) throw CliError.fromApi(r, { auth: 'api-key' });
         process.stdout.write(`${JSON.stringify(r.data)}\n`);
         if (TERMINAL.has(String(r.data.status))) return;
@@ -52,7 +61,7 @@ export function registerGetOrderCommand(parent: Command, deps: Deps): void {
     }
 
     const spinner = format === 'json' ? null : createSpinner('Fetching flight order status...');
-    const result = await deps.apiClient.get<GetFlightOrderResponse>(path, auth);
+    const result = await deps.apiClient.get<GetFlightOrderResponse>(path, auth, params);
     spinner?.stop();
     if (!result.success) throw CliError.fromApi(result, { auth: 'api-key' });
     await render(result.data, opts.format as string | undefined, (d) =>

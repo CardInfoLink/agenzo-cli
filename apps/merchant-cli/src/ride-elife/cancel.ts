@@ -12,6 +12,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { CancelResponse } from '../types/api.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, cancelSchema } from '../verb-schema.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
@@ -81,6 +82,7 @@ export function registerCancelCommand(parent: Command, deps: { apiClient: ApiCli
     .command('cancel')
     .description('Cancel a ride order by id (may incur a cancellation fee)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-id <id>', 'Ride order id to cancel (the ride_id returned by book)')
     .option(
       '--idempotency-key <key>',
@@ -129,10 +131,20 @@ export function registerCancelCommand(parent: Command, deps: { apiClient: ApiCli
     const spinner = format === 'json' ? null : createSpinner('Cancelling ride...');
 
     // POST /ride/<id>/cancel carries NO body — only the Idempotency-Key header.
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    //
+    // 保持 undefined 而不是 `{}`：本命令的契约是「不带 body，key 只在 header」
+    // （ride-elife.test.ts TC-CANCEL-01/02 与 ride-compatibility.test.ts 都钉着这条）。
+    // 依不变量 3「不传即不存在」，没有 member 就不该凭空多出一个空 body。
+    const member = memberIdOf(opts);
+    const body = member !== undefined ? { member_id: member } : undefined;
+
     const result = await deps.apiClient.post<CancelResponse>(
       `/ride/${encodeURIComponent(orderId)}/cancel`,
       { type: 'api-key', key: apiKey },
-      undefined,
+      body,
       { 'Idempotency-Key': idempotencyKey },
     );
 

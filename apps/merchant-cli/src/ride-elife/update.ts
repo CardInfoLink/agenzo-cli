@@ -12,6 +12,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { UpdateResponse } from '../types/api.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, rideUpdateSchema } from '../verb-schema.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
@@ -128,6 +129,7 @@ export function registerRideUpdateCommand(
     .command('update')
     .description('Modify an existing ride order (trip details and/or passenger)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-id <id>', 'Ride order id to modify (the ride_id returned by book)')
     .option(
       '--idempotency-key <key>',
@@ -244,6 +246,17 @@ export function registerRideUpdateCommand(
         throw new CliError('CLIENT_ABORTED', 'Update aborted by user.');
       }
     }
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    //
+    // **注入点刻意放在这里**，即空检查与确认提示之后：body 的键数在本命令里有两个
+    // 语义用途 —— 上面那道「Nothing to update」检查，和确认语里的「N change(s)」。
+    // member 不是一个更新字段，混进去会让只传 --member 的调用被当成有效更新，
+    // 也会让提示多报一个变更数。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
 
     const idempotencyKey = await resolveIdempotencyKey(opts.idempotencyKey as string | undefined, {
       yes: isYes,

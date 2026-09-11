@@ -12,6 +12,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { CheckoutHotelResponse, CheckoutRoom } from '../types/hotel.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, hotelCheckoutSchema } from '../verb-schema.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
@@ -168,6 +169,7 @@ export function registerHotelCheckoutCommand(parent: Command, deps: { apiClient:
     .command('checkout')
     .description('Request a partial check-out or an out-of-policy cancellation (async; the property must approve)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-id <id>', 'Our order reference (coOrderCode) for the URL path (book.response.order_id)')
     .option('--fc-order-code <code>', 'Supplier order reference of the booking to change (book.response.fc_order_code)')
     .option('--reason <text>', 'Why the partial check-out / out-of-policy cancellation is requested')
@@ -208,6 +210,12 @@ export function registerHotelCheckoutCommand(parent: Command, deps: { apiClient:
       refund_type: refundType,
       checkout_rooms: checkoutRooms,
     };
+
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    if (member !== undefined) body.member_id = member;
 
     // Confirm before the write unless --yes. A check-out application may incur
     // charges and must be approved by the property, so the prompt makes that

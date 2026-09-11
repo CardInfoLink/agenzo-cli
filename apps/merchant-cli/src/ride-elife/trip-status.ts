@@ -11,6 +11,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { TripStatusResponse } from '../types/api.js';
+import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { attachSchemaHelp, rideTripStatusSchema } from '../verb-schema.js';
 
 // ============================================================
@@ -79,6 +80,7 @@ export function registerRideTripStatusCommand(
     .command('trip-status')
     .description('Retrieve the status and driver location points of one leg of a ride')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
+    .option('--member <id>', MEMBER_OPTION_DESCRIPTION)
     .option('--order-id <id>', 'Ride order id (the ride_id returned by `ride-elife book`)')
     .option('--trip-no <no>', '1-based leg index (default 1)');
 
@@ -97,9 +99,17 @@ export function registerRideTripStatusCommand(
 
     const spinner = format === 'json' ? null : createSpinner('Fetching trip status...');
 
+    // 归因 + 归属：orchestrator 从已验签 JWT 注入（`source: 'session'`，对 LLM 不可见）。
+    // 订单带 member_id 时平台按它校验归属，缺省则只按 developer+org 判定 —— 见
+    // doc/member-id-attribution-design.md 修订后的不变量 2。
+    const member = memberIdOf(opts);
+    const params: Record<string, string> = {};
+    if (member !== undefined) params.member_id = member;
+
     const result = await deps.apiClient.get<TripStatusResponse>(
       `/ride/${encodeURIComponent(orderId)}/trips/${leg}`,
       { type: 'api-key', key: apiKey },
+      params,
     );
 
     spinner?.stop();
