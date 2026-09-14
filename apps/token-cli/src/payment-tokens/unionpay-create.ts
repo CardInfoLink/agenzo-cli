@@ -83,6 +83,10 @@ export function registerUnionpayCreateCommand(
       'Optional front-end redirect URL after UPI payment completes',
     )
     .option(
+      '--external-transaction-id <id>',
+      'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
@@ -188,6 +192,12 @@ export function registerUnionpayCreateCommand(
       });
     }
 
+    // Bind the token to a merchant order (order_id) when supplied. Maps to the
+    // platform create_token request body field `external_transaction_id`
+    // (distinct from the generic `payment-tokens create --external-tx-id`,
+    // which maps to `external_tx_id`).
+    const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
+
     const body: Record<string, unknown> = {
       type: 'network_token',
       payment_method_id: paymentMethodId,
@@ -197,6 +207,7 @@ export function registerUnionpayCreateCommand(
       ...(recipientEmail ? { recipient_email: recipientEmail } : {}),
       ...(recipientPhone ? { recipient_phone: recipientPhone } : {}),
       ...(opts.returnUrl ? { return_url: String(opts.returnUrl) } : {}),
+      ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
     };
 
     const result = await deps.apiClient.post<Record<string, unknown>>(

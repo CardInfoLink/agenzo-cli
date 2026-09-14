@@ -11,8 +11,8 @@ import {
   renderWithContext,
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
-import type { BookResponse } from '../types/api.js';
-import { attachSchemaHelp, bookSchema } from '../verb-schema.js';
+import type { CreateRideOrderResponse } from '../types/api.js';
+import { attachSchemaHelp, rideCreateOrderSchema } from '../verb-schema.js';
 import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
@@ -22,8 +22,7 @@ import { resolveIdempotencyKey } from '../idempotency.js';
 
 /**
  * Require a flag value. Missing required input maps to `PARAM_INVALID`
- * (requirement 2.2 / design §4.4.1.3) — a catalog code (exit 1), mirroring the
- * sibling `quote` command's convention.
+ * (a catalog code, exit 1), mirroring the sibling `book` / `quote` commands.
  */
 function need(value: string | undefined, flag: string): string {
   if (value === undefined) {
@@ -43,9 +42,9 @@ function num(value: string | undefined, flag: string): number {
 
 /**
  * Validate a passenger phone as E.164 shape (edge fail-fast). The authoritative
- * region-aware validity check (libphonenumber) runs server-side; this catches
- * obviously malformed input before a request is sent. Accepts spaces/dashes,
- * normalizes them away, and requires a leading "+" country code.
+ * region-aware validity check runs server-side; this catches obviously
+ * malformed input before a request is sent. Accepts spaces/dashes, normalizes
+ * them away, and requires a leading "+" country code.
  */
 function phone(value: string | undefined, flag: string): string {
   const raw = need(value, flag);
@@ -60,8 +59,8 @@ function phone(value: string | undefined, flag: string): string {
 }
 
 /**
- * Number-ify a seat count and enforce the 0–5 range (design §4.4.1.3 book
- * schema). Out-of-range values map to `PARAM_INVALID`.
+ * Number-ify a seat count and enforce the 0–5 range (mirrors `book`).
+ * Out-of-range values map to `PARAM_INVALID`.
  */
 function seatCount(value: string, flag: string): number {
   const n = num(value, flag);
@@ -76,28 +75,33 @@ function seatCount(value: string, flag: string): number {
 // ============================================================
 
 /**
- * Render a booked ride as a key/value block for `--format table`. Amounts are
- * decimal currency units (NOT cents) — printed verbatim.
+ * Render the locked order as a key/value block for `--format table`. Amounts
+ * are decimal currency units (NOT cents) — printed verbatim. The order
+ * reference is resolved from `order_ref` when present, else `order_id` (both
+ * carry the authoritative rio_… value).
  */
-function formatBook(data: BookResponse): string {
+function formatCreateOrder(data: CreateRideOrderResponse): string {
+  const orderRef = String(data.order_ref ?? data.order_id ?? '-');
   const lines: [string, string][] = [
-    ['Ride ID', String(data.ride_id ?? '-')],
-    ['Order ID', String(data.order_id ?? '-')],
+    ['Order ref', orderRef],
     ['Status', String(data.status ?? '-')],
-    ['Scheduled', String(data.is_scheduled ?? false)],
-    ['Order type', String(data.order_type ?? '-')],
+    ['Payment status', String(data.payment_status ?? '-')],
   ];
   if (data.price) {
-    lines.push(['Price', `${data.price.amount} ${data.price.currency}`]);
+    lines.push(['Amount', `${data.price.amount} ${data.price.currency}`]);
     if (data.price.quote_id) lines.push(['Quote ID', String(data.price.quote_id)]);
   }
-  lines.push(['Payment status', String(data.payment_status ?? '-')]);
-  // Mode-dependent: monthly_settlement returns billing_entry_id, pay_per_call
-  // echoes back payment_order_id.
-  if (data.billing_entry_id) lines.push(['Billing entry', String(data.billing_entry_id)]);
-  if (data.payment_order_id) lines.push(['Payment order', String(data.payment_order_id)]);
+  if (data.is_scheduled !== undefined) lines.push(['Scheduled', String(data.is_scheduled)]);
+  if (data.order_type) lines.push(['Order type', String(data.order_type)]);
 
-  return Formatter.keyValue(lines);
+  return [
+    Formatter.keyValue(lines),
+    Formatter.status(
+      'info',
+      `Fare locked (AWAITING_PAYMENT) — bind ${orderRef} as the network token external_transaction_id, ` +
+        `then settle with 'ride-elife pay-order --order-id ${orderRef}'. No funds moved yet.`,
+    ),
+  ].join('\n\n');
 }
 
 // ============================================================
@@ -105,52 +109,39 @@ function formatBook(data: BookResponse): string {
 // ============================================================
 
 /**
- * `ride-elife book` — book a ride against a previously returned quote
- * (§4.4.1.3 book schema + §4.4.2.1). Write op (W/Y).
+ * `ride-elife create-order` — lock a ride fare WITHOUT charging (the first step
+ * of the two-step network-token direct-charge flow;
+ * ride-network-token-direct-charge R11.1). Mirrors
+ * `flight-flink create-order` / `hotel-redaug create-order`: the order enters
+ * AWAITING_PAYMENT / payment_status=PENDING, NO funds move, and eLife is NOT
+ * called. It returns the authoritative `order_ref` (rio_…) so the caller can
+ * mint a network token bound to it (external_transaction_id = order_ref) and
+ * then settle via `ride-elife pay-order`.
  *
- * Funding is decided server-side by the developer's `billing_mode`:
- *   - monthly_settlement: no payment handle; fare is deducted from the
- *     settlement account (payment_status=ON_ACCOUNT).
- *   - pay_per_call: pass `--payment-order-id` (a PAID order from payment-cli),
- *     and/or `--payment-method-id` to charge a specific already-bound card.
- * `--payment-method-id` is an opaque bound-card id (the same handle
- * `hotel-redaug create-order` / `flight-flink create-order` accept) — the CLI
- * still never accepts raw card data (PAN/CVV) in any form.
+ * Deliberately carries the SAME trip/quote/passenger/surcharge context as
+ * `book` MINUS every payment credential (payment_order_id / payment_method_id /
+ * payment_token_id / authorized_merchant_trans_id) — funding is deferred to
+ * `pay-order`, so no payment handle is accepted here.
  *
- * `POST /ride/book` with `X-Api-Key` auth + the `Idempotency-Key` header (key
- * forwarded verbatim, never in the body). `--yes` skips the confirm; a missing
+ * `POST /ride/create-order` with `X-Api-Key` auth + the `Idempotency-Key`
+ * header (key forwarded verbatim, never in the body). Locking a fare is a real
+ * commitment (though not a charge), so the non-`--yes` path confirms (restating
+ * amount/currency) before the write; `--yes` skips it and a missing
  * `--idempotency-key` under `--yes` throws `PARAM_IDEMPOTENCY_KEY_REQUIRED`
- * before any request is sent. Renders `BookResponse` via `renderWithContext`
- * (json carries the profile/endpoint envelope); the progress line goes to
- * stderr via `notify` and stays silent in json mode.
+ * before any request is sent. A declined confirm maps to `CLIENT_ABORTED`.
  */
-export function registerBookCommand(parent: Command, deps: { apiClient: ApiClient }): void {
+export function registerRideCreateOrderCommand(
+  parent: Command,
+  deps: { apiClient: ApiClient },
+): void {
   const cmd = parent
-    .command('book')
-    .description('Book a ride using a quote_id returned by quote')
+    .command('create-order')
+    .description('Lock a ride fare without charging (await payment); returns the order_ref to pay')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--quote-id <id>', 'Quote id from `ride-elife quote`')
     .option('--vehicle-class <class>', 'Chosen vehicle class')
     .option('--price-amount <amount>', 'Fare in decimal currency units (not cents)')
     .option('--price-currency <currency>', 'Currency code (default USD)')
-    .option('--payment-order-id <id>', 'Paid payment order id (pay_per_call mode only)')
-    .option(
-      '--payment-method-id <id>',
-      'Bound payment method id to charge (pay_per_call mode only)',
-    )
-    .option(
-      '--payment-token-id <id>',
-      'DEPRECATED — use `ride-elife create-order` + `pay-order` for network-token direct charge. ' +
-        'A single-step book carrying a network token hits Charge_Service strict order↔token ' +
-        'binding and is rejected server-side with a retriable=false guidance error. Kept only for ' +
-        'backward compatibility; monthly_settlement / EVO / no-credential booking still work via book.',
-    )
-    .option(
-      '--authorized-merchant-trans-id <id>',
-      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
-        'When set, the server reuses that authorization instead of creating a new one, ' +
-        'avoiding a second hold on the card (pay_per_call mode only).',
-    )
     .option('--passenger-name <name>', 'Passenger full name')
     .option('--passenger-phone <phone>', 'Passenger phone')
     .option('--passenger-email <email>', 'Passenger email')
@@ -179,7 +170,7 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
 
-  attachSchemaHelp(cmd, bookSchema);
+  attachSchemaHelp(cmd, rideCreateOrderSchema);
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();
@@ -191,38 +182,26 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       type: 'password',
     });
 
-    // Build request body. Required fields throw PARAM_INVALID before any
-    // request is sent (mirrors the sibling `quote` command). The body carries NO
-    // raw card data; payment handles are limited to the opaque
-    // payment_order_id / payment_method_id ids below.
+    // Build request body. Required fields throw PARAM_INVALID before any request
+    // is sent (mirrors the sibling `book` command). The body carries NO payment
+    // credential of any kind — create-order only locks the fare; funding is
+    // deferred to `pay-order`.
     const quoteId = need(opts.quoteId as string | undefined, 'quote-id');
+    const priceAmount = num(opts.priceAmount as string | undefined, 'price-amount');
+    const priceCurrency = (opts.priceCurrency as string | undefined) ?? 'USD';
     const body: Record<string, unknown> = {
       quote_id: quoteId,
       vehicle_class: need(opts.vehicleClass as string | undefined, 'vehicle-class'),
-      price_amount: num(opts.priceAmount as string | undefined, 'price-amount'),
-      price_currency: (opts.priceCurrency as string | undefined) ?? 'USD',
+      price_amount: priceAmount,
+      price_currency: priceCurrency,
       passenger_name: need(opts.passengerName as string | undefined, 'passenger-name'),
       passenger_phone: phone(opts.passengerPhone as string | undefined, 'passenger-phone'),
+      passenger_email: need(opts.passengerEmail as string | undefined, 'passenger-email'),
     };
 
-    // Optional payment handles for pay_per_call. `payment_method_id` is an opaque
-    // bound-card id; raw card data is never accepted nor forwarded.
-    // monthly_settlement omits both entirely.
-    if (opts.paymentOrderId) body.payment_order_id = opts.paymentOrderId as string;
-    if (opts.paymentMethodId) body.payment_method_id = opts.paymentMethodId as string;
-    // 【已废弃】network-token 直扣请改走两步主路径：create-order 锁单取 order_ref → pay-order 直扣。
-    // 这里仍原样透传 payment_token_id 以保持向后兼容；服务端会对单步 book 携带令牌的请求返回
-    // retriable=false 的引导错误（指向 create-order + pay-order），不扣款、不建行程、不落单。
-    if (opts.paymentTokenId) body.payment_token_id = opts.paymentTokenId as string;
-    // 3DS 挑战续单凭证：持卡人完成认证后带回该交易号，服务端复用那笔已授权的预授权，
-    // 不再新发起一次（否则又拿到新挑战页且重复冻结资金）。
-    if (opts.authorizedMerchantTransId) {
-      body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
-    }
     // 归因标签（可选）：非空才写入，缺省保持无归属。
     const member = memberIdOf(opts);
     if (member !== undefined) body.member_id = member;
-    if (opts.passengerEmail) body.passenger_email = opts.passengerEmail as string;
     if (opts.luggageCount !== undefined) {
       body.luggage_count = num(opts.luggageCount as string, 'luggage-count');
     }
@@ -276,31 +255,33 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       };
     }
 
-    // Confirm before the write unless --yes. The warning/prompt go to stderr;
-    // declining maps to CLIENT_ABORTED (exit 5) via the top-level envelope.
+    // Confirm before the write unless --yes. Locking a fare is a commitment but
+    // NOT a charge — the prompt restates the amount and says so. The prompt goes
+    // to stderr; declining maps to CLIENT_ABORTED (exit 5) via the top-level
+    // envelope.
     if (!isYes) {
       const confirmed = await confirm({
-        message: `Book ride with quote ${quoteId}?`,
-        default: true,
+        message: `Lock this ride fare for ${priceAmount} ${priceCurrency}? This reserves the order (AWAITING_PAYMENT) but does NOT charge yet.`,
+        default: false,
       });
       if (!confirmed) {
-        throw new CliError('CLIENT_ABORTED', 'Booking cancelled by user.');
+        throw new CliError('CLIENT_ABORTED', 'Order creation aborted by user.');
       }
     }
 
-    // Idempotency key (requirement 5.3): resolved before the request. Under
-    // --yes a missing key is a hard error and no request is sent. The key is
-    // sent as a header, never in the body.
+    // Idempotency key: resolved before the request. Under --yes a missing key is
+    // a hard error and no request is sent. The key is sent as a header, never in
+    // the body.
     const idempotencyKey = await resolveIdempotencyKey(opts.idempotencyKey as string | undefined, {
       yes: isYes,
-      commandPath: 'ride-elife book',
+      commandPath: 'ride-elife create-order',
     });
 
     // Animated spinner: visible in table mode, silent in json mode.
-    const spinner = format === 'json' ? null : createSpinner('Booking ride...');
+    const spinner = format === 'json' ? null : createSpinner('Locking ride fare...');
 
-    const result = await deps.apiClient.post<BookResponse>(
-      '/ride/book',
+    const result = await deps.apiClient.post<CreateRideOrderResponse>(
+      '/ride/create-order',
       { type: 'api-key', key: apiKey },
       body,
       { 'Idempotency-Key': idempotencyKey },
@@ -315,9 +296,9 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
     const data = result.data;
 
     const configManager = new ConfigManager();
-    const commandResult: CommandResult<BookResponse> = {
+    const commandResult: CommandResult<CreateRideOrderResponse> = {
       data,
-      text: () => formatBook(data),
+      text: () => formatCreateOrder(data),
     };
 
     await renderWithContext(commandResult, { format }, configManager);

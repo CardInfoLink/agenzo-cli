@@ -120,6 +120,10 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
       'Resume a 3DS challenge: merchant trans id of an already-authorised preauth',
     )
     .option(
+      '--evo-explicit',
+      '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     )
@@ -173,6 +177,8 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     if (opts.authorizedMerchantTransId !== undefined) {
       body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
     }
+    // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
+    if (opts.evoExplicit) body.evo_explicit = true;
 
     // Confirm before the write unless --yes. This is the step that actually
     // moves money (settlement account debit for monthly_settlement, or EVO
