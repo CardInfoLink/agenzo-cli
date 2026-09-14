@@ -254,6 +254,45 @@ describe('hotel-redaug pay-order (default path)', () => {
     // payment_method_id omitted when not supplied.
     expect(body).not.toHaveProperty('payment_method_id');
   });
+
+  it('forwards --evo-explicit as evo_explicit=true alongside --payment-method-id (方案 B/R16 EVO opt-in)', async () => {
+    const api = mockApiClient({ '/hotel/ord_evo1/pay': PAY_ORDER_SUCCESS_RESP });
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'pay-order', '--api-key', 'k',
+      '--order-id', 'ord_evo1',
+      '--payment-method-id', 'df45384264ec457a87559e2098273983',
+      '--evo-explicit',
+      '--idempotency-key', 'pay-evo-1',
+      '--yes', '--format', 'json',
+    ]);
+
+    const [path, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(path).toBe('/hotel/ord_evo1/pay');
+    expect(body.payment_method_id).toBe('df45384264ec457a87559e2098273983');
+    expect(body.evo_explicit).toBe(true);
+  });
+
+  it('omits evo_explicit when --evo-explicit is absent (platform defaults false)', async () => {
+    const api = mockApiClient({ '/hotel/ord_noevo1/pay': PAY_ORDER_SUCCESS_RESP });
+    const program = hotelProgram(api);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      ...BASE, 'pay-order', '--api-key', 'k',
+      '--order-id', 'ord_noevo1',
+      '--payment-method-id', 'df45384264ec457a87559e2098273983',
+      '--idempotency-key', 'pay-noevo-1',
+      '--yes', '--format', 'json',
+    ]);
+
+    const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(body).not.toHaveProperty('evo_explicit');
+  });
 });
 
 // ============================================================

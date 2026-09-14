@@ -135,6 +135,34 @@ describe('flight-flink: pay-order', () => {
     const p = parseJsonOutput(out.text()) as any;
     expect(p.pay_status).toBe(1);
   });
+
+  // Task 8.3 (R11.2): the network-token direct-charge main path — --payment-token-id
+  // must reach the pay body as `payment_token_id` so Charge_Service can run the
+  // strict order↔token binding check. Hotel (hotel-create-pay.test.ts) and ride
+  // (ride-elife.test.ts) already assert the same passthrough for their domains.
+  it('--payment-token-id is forwarded verbatim as payment_token_id（网络令牌直扣主路径）', async () => {
+    const { prog, post } = setupWithPost(registerPayOrderCommand, { '/pay': PAY });
+    const out = captureStdout();
+    await prog.parseAsync(['node', 'test', 'flight-flink', 'pay-order', '--api-key', 'k', '--format', 'json', '--yes',
+      '--order-no', 'ffo_1', '--payment-token-id', 'ptk_visa_1', '--idempotency-key', 'k2-ptk']);
+    out.spy.mockRestore();
+
+    const [path, auth, body] = post.mock.calls[0] as [string, unknown, Record<string, any>];
+    expect(path).toBe('/flight/ffo_1/pay');
+    expect(auth).toEqual({ type: 'api-key', key: 'k' });
+    expect(body.payment_token_id).toBe('ptk_visa_1');
+  });
+
+  it('不传 --payment-token-id 时不带该字段，保持向后兼容', async () => {
+    const { prog, post } = setupWithPost(registerPayOrderCommand, { '/pay': PAY });
+    const out = captureStdout();
+    await prog.parseAsync(['node', 'test', 'flight-flink', 'pay-order', '--api-key', 'k', '--format', 'json', '--yes',
+      '--order-no', 'ffo_1', '--idempotency-key', 'k2-plain']);
+    out.spy.mockRestore();
+
+    const body = post.mock.calls[0][2] as Record<string, any>;
+    expect(body).not.toHaveProperty('payment_token_id');
+  });
 });
 
 describe('flight-flink: get-order', () => {

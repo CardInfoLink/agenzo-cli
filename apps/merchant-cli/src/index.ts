@@ -16,6 +16,8 @@ import {
 // ride-elife commands (injection-style register, D6)
 import { registerQuoteCommand } from './ride-elife/quote.js';
 import { registerBookCommand } from './ride-elife/book.js';
+import { registerRideCreateOrderCommand } from './ride-elife/create-order.js';
+import { registerRidePayOrderCommand } from './ride-elife/pay-order.js';
 import { registerRideGetCommand } from './ride-elife/get.js';
 import { registerCancelCommand } from './ride-elife/cancel.js';
 import { registerRideUpdateCommand } from './ride-elife/update.js';
@@ -161,6 +163,8 @@ Key notes:
   );
   registerQuoteCommand(rideCmd, deps);
   registerBookCommand(rideCmd, deps);
+  registerRideCreateOrderCommand(rideCmd, deps);
+  registerRidePayOrderCommand(rideCmd, deps);
   registerRideGetCommand(rideCmd, deps);
   registerCancelCommand(rideCmd, deps);
   registerRideUpdateCommand(rideCmd, deps);

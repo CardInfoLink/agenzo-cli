@@ -121,6 +121,10 @@ export function registerEvoCreateCommand(
     )
     .option('--currency <currency>', 'Currency code, e.g. USD (optional)')
     .option(
+      '--external-transaction-id <id>',
+      'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
@@ -181,6 +185,11 @@ export function registerEvoCreateCommand(
     const amountCents = parseAmountCents(amountCentsStr);
 
     const currency = (opts.currency as string | undefined)?.trim() || undefined;
+    // Bind the token to a merchant order (order_id) when supplied. Maps to the
+    // platform create_token request body field `external_transaction_id`
+    // (distinct from the generic `payment-tokens create --external-tx-id`,
+    // which maps to `external_tx_id`).
+    const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
@@ -202,6 +211,7 @@ export function registerEvoCreateCommand(
       payment_method_id: paymentMethodId,
       amount: amountCents,
       ...(currency ? { currency } : {}),
+      ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
     };
 
     // Exactly one POST /payment-tokens/create; `--idempotency-key` forwarded

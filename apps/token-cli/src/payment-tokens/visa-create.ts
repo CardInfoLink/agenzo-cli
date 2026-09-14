@@ -109,6 +109,10 @@ export function registerVisaCreateCommand(
     .option('--order-description <text>', 'Order description (optional)')
     .option('--merchant-order-id <id>', 'Merchant order id (optional)')
     .option(
+      '--external-transaction-id <id>',
+      'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
@@ -166,6 +170,12 @@ export function registerVisaCreateCommand(
     const currency = (opts.currency as string | undefined)?.trim() || undefined;
     const orderDescription = (opts.orderDescription as string | undefined) || undefined;
     const merchantOrderId = (opts.merchantOrderId as string | undefined) || undefined;
+    // Bind the token to a merchant order (order_id) when supplied. Maps to the
+    // platform create_token request body field `external_transaction_id`
+    // (distinct from the generic `payment-tokens create --external-tx-id`,
+    // which maps to `external_tx_id`). Sits at the TOP level of the body — the
+    // nested `visa.merchant_order_id` is a separate, Visa-specific field.
+    const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
@@ -182,6 +192,7 @@ export function registerVisaCreateCommand(
       type: 'network_token',
       payment_method_id: paymentMethodId,
       ...(currency ? { currency } : {}),
+      ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
       visa: {
         order_amount_cents: orderAmountCents,
         ...(orderDescription ? { order_description: orderDescription } : {}),

@@ -226,7 +226,7 @@ export const bookSchema: VerbSchema = {
     'payment-token-id': {
       type: 'string',
       required: false,
-      description: 'UPI Agent Pay: network-token id from an already-completed UnionPay/Visa capture. When set, the platform skips EVO preauth/capture and only books the ride + records this credential (funds already charged)',
+      description: 'DEPRECATED — use `ride-elife create-order` + `pay-order` for network-token direct charge. A single-step book carrying a network token hits Charge_Service strict order↔token binding and is rejected server-side with a retriable=false guidance error. Kept only for backward compatibility; monthly_settlement / EVO / no-credential booking still work via book',
     },
     member: MEMBER_FLAG_SCHEMA,
     'passenger-name': { type: 'string', required: true, description: 'Passenger full name' },
@@ -280,6 +280,158 @@ export const bookSchema: VerbSchema = {
     PAYMENT_ORDER_ALREADY_CONSUMED: 'Create a new payment order, then retry with the new payment-order-id and a NEW --idempotency-key.',
     ACCOUNT_INSUFFICIENT_BALANCE: 'Top up the settlement account (offline) or pick a cheaper vehicle_class, then retry.',
     BOOKING_FAILED: 'elife rejected after settlement. The message contains a ref: for manual reconciliation. Do NOT auto-retry.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+  },
+};
+
+/**
+ * `ride-elife create-order` schema (ride-network-token-direct-charge R11.1).
+ * Write op (W/Y). Lock-only first step of the two-step network-token flow:
+ * locks the fare + returns the authoritative `order_ref`, and does NOT charge
+ * or call eLife. Carries the SAME trip/quote/passenger/surcharge context as
+ * `book` MINUS every payment credential — funding is deferred to `pay-order`.
+ */
+export const rideCreateOrderSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'create-order',
+  description:
+    'Lock a ride fare without charging (status AWAITING_PAYMENT). Returns the authoritative order_ref to bind as the network token external_transaction_id, then settle with pay-order. No payment credentials here — funding happens in pay-order',
+  flags: {
+    'quote-id': { type: 'string', required: true, description: 'Quote id from quote response (vehicle_classes[].price.quote_id)' },
+    'vehicle-class': { type: 'string', required: true, description: 'Vehicle class: Sedan / SUV / MPV-5 / MPV-7 / Van / Luxury / Train' },
+    'price-amount': { type: 'float', required: true, description: 'Fare in decimal currency units (NOT cents), from the quote' },
+    'price-currency': { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code' },
+    member: MEMBER_FLAG_SCHEMA,
+    'passenger-name': { type: 'string', required: true, description: 'Passenger full name' },
+    'passenger-phone': { type: 'string', required: true, description: 'Passenger phone in E.164 format (e.g. +14155551234)' },
+    'passenger-email': { type: 'string', required: true, description: 'Passenger email (persisted at lock; eLife needs it when pay-order creates the ride)' },
+    'luggage-count': { type: 'int', required: false, description: 'Number of luggage items' },
+    'special-requests': { type: 'string', required: false, description: 'Free-text special requests or notes' },
+    'pickup-lat': { type: 'float', required: false, description: 'Pickup latitude (must match the quote)', constraints: '-90 to 90' },
+    'pickup-lng': { type: 'float', required: false, description: 'Pickup longitude (must match the quote)', constraints: '-180 to 180' },
+    'pickup-name': { type: 'string', required: false, description: 'Pickup location name (must match the quote)' },
+    'dropoff-lat': { type: 'float', required: false, description: 'Dropoff latitude (must match the quote)', constraints: '-90 to 90' },
+    'dropoff-lng': { type: 'float', required: false, description: 'Dropoff longitude (must match the quote)', constraints: '-180 to 180' },
+    'dropoff-name': { type: 'string', required: false, description: 'Dropoff location name (must match the quote)' },
+    'pickup-time': { type: 'int|string', required: false, description: "Epoch seconds or 'now' (must match the quote)" },
+    'meet-and-greet': { type: 'bool', required: false, default: false, description: 'Enable meet & greet service' },
+    'meet-and-greet-price': { type: 'float', required: false, description: 'Meet & greet surcharge from the quote (meet_and_greet.price.amount)' },
+    'welcome-sign': { type: 'string', required: false, description: 'Welcome sign text (meet & greet)' },
+    'child-seat-count': { type: 'int', required: false, description: 'Number of child seats needed', constraints: '0 to 5' },
+    'infant-seat-count': { type: 'int', required: false, description: 'Number of infant seats needed', constraints: '0 to 5' },
+    'toddler-seat-count': { type: 'int', required: false, description: 'Number of toddler seats needed', constraints: '0 to 5' },
+    'arrival-flight-no': { type: 'string', required: false, description: 'Arrival flight number (airport pickup)' },
+    'arrival-airline': { type: 'string', required: false, description: 'Arrival airline name' },
+    'departure-flight-no': { type: 'string', required: false, description: 'Departure flight number (airport dropoff)' },
+    'departure-airline': { type: 'string', required: false, description: 'Departure airline name' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key (1-128 chars [A-Za-z0-9_-]) forwarded verbatim as the Idempotency-Key header; never auto-generated',
+    },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Authoritative order_ref (rio_…, = order document _id). Bind it as the network token external_transaction_id and pass it to pay-order' },
+    status: { type: 'string', description: 'AWAITING_PAYMENT after a successful lock' },
+    payment_status: { type: 'string', description: 'PENDING after lock (funds untouched)' },
+    is_scheduled: { type: 'bool', description: 'true = scheduled/airport ride; false = realtime' },
+    order_type: { type: 'string', description: "'realtime' or 'airport'" },
+    price: { type: 'object', description: '{ amount, currency, quote_id } — the authoritative amount + currency the token must match' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli ride-elife create-order --quote-id qte_01HZXD --vehicle-class Sedan --price-amount 42.50 --passenger-name "Alice" --passenger-phone +14155551234 --passenger-email alice@example.com --idempotency-key ride-create-123',
+    output_summary:
+      'Returns order_id (the order_ref). Bind it as the token external_transaction_id, mint the token for price.amount, then settle with `ride-elife pay-order --order-id <order_ref>`.',
+  },
+  error_recovery: {
+    QUOTE_EXPIRED: "Re-invoke 'quote' for a fresh quote_id, then retry 'create-order' with the SAME --idempotency-key.",
+    VEHICLE_CLASS_MISMATCH: 'The vehicle-class does not match the quote. Re-quote and pass the exact vehicle_class back.',
+    PRICE_MISMATCH: 'The submitted total does not equal the authoritative fare. Re-quote and pass price-amount from the fresh quote.',
+    IDEMPOTENCY_CONFLICT: 'Same --idempotency-key reused with different order params. Use a fresh idempotency-key.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+  },
+};
+
+/**
+ * `ride-elife pay-order` schema (ride-network-token-direct-charge
+ * R11.2/R11.4/R11.5). Write op (W/Y). Settlement second step of the two-step
+ * network-token flow: charges the locked AWAITING_PAYMENT order and creates the
+ * ride upstream, pushing it to PAID / SETTLED. Funds move HERE, not in
+ * create-order. Exactly one of --payment-token-id / --payment-method-id is
+ * required (mutually exclusive) — both missing or both present is rejected
+ * locally as PARAM_INVALID before any request is sent.
+ */
+export const ridePayOrderSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'pay-order',
+  description:
+    'Settle a locked ride order created by create-order. Charging happens in this step (create-order only locks the fare and moves no money). Provide EXACTLY ONE of --payment-token-id (network-token direct charge — the main path; charge(order_id=order_ref) triggers strict order↔token binding) or --payment-method-id (EVO bound-card fallback); both missing or both present is rejected as PARAM_INVALID before any request. The amount/currency are NOT accepted here — the platform settles at the order-locked authoritative amount and the token minted amount. On success the order becomes status=PAID / payment_status=SETTLED',
+  flags: {
+    'order-id': {
+      type: 'string',
+      required: true,
+      description: 'The authoritative order_ref (rio_…) from create-order.response.order_id to settle',
+    },
+    'payment-token-id': {
+      type: 'string',
+      required: 'conditional',
+      description:
+        'Network-token id (UnionPay/Visa) for the direct-charge main path. Bind order_ref as its external_transaction_id first. Exactly one of --payment-token-id / --payment-method-id is required (mutually exclusive)',
+    },
+    'payment-method-id': {
+      type: 'string',
+      required: 'conditional',
+      description:
+        'Bound-card id to charge via EVO preauth+capture (fallback path). Exactly one of --payment-token-id / --payment-method-id is required (mutually exclusive)',
+    },
+    'authorized-merchant-trans-id': {
+      type: 'string',
+      required: false,
+      description:
+        'Resume a 3DS challenge: merchant trans id of an already-authorised EVO preauth returned by a prior AUTHENTICATION_REQUIRED response',
+    },
+    'evo-explicit': {
+      type: 'bool',
+      required: false,
+      default: false,
+      description:
+        '[方案 B/R16] Explicit opt-in to settle this pay_per_call ride via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
+    },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Unique key (1-128 chars [A-Za-z0-9_-]) forwarded verbatim as the Idempotency-Key header; never auto-generated',
+    },
+  },
+  response: {
+    order_id: { type: 'string', description: 'Authoritative order_ref (rio_…, = order document _id) that was settled' },
+    ride_id: { type: 'string|int', description: 'eLife upstream ride id, assigned once create_ride succeeds — use for `ride-elife get`' },
+    status: { type: 'string', description: 'PAID after a successful settlement' },
+    payment_status: { type: 'string', description: 'SETTLED after a successful network-token direct charge' },
+    payment_channel: { type: 'string', description: "'upi_agent' for the network-token direct-charge path" },
+    price: { type: 'object', description: '{ amount, currency, quote_id } — the authoritative amount the token matched' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli ride-elife pay-order --order-id rio_01HZXD --payment-token-id ntk_01J2ABC --idempotency-key ride-pay-123',
+    output_summary:
+      'Settles the order via network-token direct charge and creates the ride. Returns order_id + ride_id; the order becomes status=PAID / payment_status=SETTLED. Poll `ride-elife get --order-id <ride_id>` for driver dispatch.',
+  },
+  error_recovery: {
+    PARAM_INVALID:
+      'Provide EXACTLY ONE of --payment-token-id or --payment-method-id (both missing or both present is invalid), and a non-empty --order-id.',
+    TOKEN_ORDER_MISMATCH:
+      "The token's external_transaction_id is not this order_ref. Mint a token bound to THIS order_ref (external_transaction_id = order_ref) and retry; no funds moved.",
+    RESOURCE_STATE_INVALID:
+      'The order is not in AWAITING_PAYMENT (it may already be PAID or CANCELLED). Check status via get; do NOT retry pay-order.',
+    RIDE_NOT_FOUND: 'No order for this --order-id. Verify it is the order_ref returned by create-order. Do NOT retry.',
+    QUOTE_EXPIRED:
+      "The quote expired before settlement. Re-quote; if the authoritative price is unchanged retry pay-order with the SAME order_ref + SAME token and a NEW --idempotency-key, otherwise create a new order.",
+    BOOKING_FAILED:
+      'eLife create_ride failed after a successful charge; the charge was reversed and the order stays AWAITING_PAYMENT. Retry with a NEW --idempotency-key.',
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
   },
 };
@@ -780,6 +932,12 @@ export const hotelPayOrderSchema: VerbSchema = {
       type: 'string',
       required: false,
       description: 'Resume a 3DS challenge: merchant trans id of an already-authorised preauth returned by a prior AUTHENTICATION_REQUIRED response. Reuses that authorization instead of creating a new one (pay_per_call only).',
+    },
+    'evo-explicit': {
+      type: 'bool',
+      required: false,
+      default: false,
+      description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
     },
     'idempotency-key': {
       type: 'string',
@@ -1538,6 +1696,7 @@ export const flightPayOrderSchema = flightSchema(
     'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id to charge (pay_per_call only; omit to use the default card).' },
     'payment-token-id': { type: 'string', required: false, description: 'Optional network-token id; settles via direct charge instead of EVO preauth.' },
     'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with an already-authorised preauth trans id.' },
+    'evo-explicit': { type: 'bool', required: false, default: false, description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
   },
   { order_no: { type: 'string', description: 'Our order reference.' }, status: { type: 'string', description: 'PAID on success; AUTHENTICATION_REQUIRED when the card needs 3DS.' } },

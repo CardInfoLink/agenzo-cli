@@ -91,6 +91,77 @@ export interface BookResponse {
   payment_order_id?: string;
 }
 
+// ---- Create-order (two-step network-token flow, lock only) ----
+
+/**
+ * `ride-elife create-order` response — the lock-only first step of the two-step
+ * network-token direct-charge flow (design §1, requirement 1). Mirrors
+ * `RideService.create_order`: the order is locked at `status=AWAITING_PAYMENT`
+ * / `payment_status=PENDING` and NO funds move and eLife is NOT called.
+ *
+ * The returned order reference is the authoritative `order_ref` (`rio_…`, equal
+ * to the order document `_id`). The caller obtains it here — BEFORE minting a
+ * network token — and binds it as the token's `external_transaction_id`, then
+ * settles via `ride-elife pay-order`. `price.amount` / `price.currency` are the
+ * Order_Authoritative_Amount / Order_Authoritative_Currency the token must
+ * match at pay time.
+ *
+ * `order_ref` is accepted as an alias for `order_id` so the renderer resolves
+ * the authoritative reference regardless of which key the platform emits.
+ */
+export interface CreateRideOrderResponse {
+  /** Authoritative order reference (`rio_…`, = order doc `_id`). Bind as the token `external_transaction_id`. */
+  order_id: string;
+  /** Alias for `order_id` (requirement wording is `order_ref`); preferred when present. */
+  order_ref?: string;
+  /** `AWAITING_PAYMENT` after a successful lock. */
+  status: OrderStatus | string;
+  /** `PENDING` after lock (funds untouched). */
+  payment_status: string;
+  /** true = scheduled/airport ride; false = realtime ride. */
+  is_scheduled?: boolean;
+  /** 'realtime' or 'airport'. */
+  order_type?: string;
+  /** Authoritative amount + currency (+ originating quote_id) the token must match. */
+  price: Price;
+}
+
+// ---- Pay-order (two-step network-token flow, settle) ----
+
+/**
+ * `ride-elife pay-order` response — the settlement second step of the two-step
+ * network-token direct-charge flow (design §2, requirements 2 & 11.4). Mirrors
+ * `RideService.pay`: the AWAITING_PAYMENT order is charged (network token direct
+ * charge via `charge(order_id=order_ref)` — strict order↔token binding — or the
+ * EVO/monthly fallback), then eLife `create_ride` runs, and on success the order
+ * is pushed to `status=PAID` / `payment_status=SETTLED`.
+ *
+ * The order reference echoes the authoritative `order_ref` (`rio_…`, = order doc
+ * `_id`); `order_ref` is accepted as an alias for `order_id` so the renderer
+ * resolves it regardless of which key the platform emits. `ride_id` is the eLife
+ * upstream ride id assigned once `create_ride` succeeds.
+ */
+export interface PayRideOrderResponse {
+  /** Authoritative order reference (`rio_…`, = order doc `_id`). */
+  order_id: string;
+  /** Alias for `order_id` (requirement wording is `order_ref`); preferred when present. */
+  order_ref?: string;
+  /** eLife upstream ride id, assigned once `create_ride` succeeds. */
+  ride_id?: string | number;
+  /** `PAID` after a successful settlement. */
+  status: OrderStatus | string;
+  /** `SETTLED` after a successful network-token direct charge. */
+  payment_status: string;
+  /** `upi_agent` for the network-token direct-charge path. */
+  payment_channel?: string;
+  /** Authoritative amount + currency (+ originating quote_id) the token matched. */
+  price?: Price;
+  /** true = scheduled/airport ride; false = realtime ride. */
+  is_scheduled?: boolean;
+  /** 'realtime' or 'airport'. */
+  order_type?: string;
+}
+
 // ---- Get status ----
 
 export interface Driver {
