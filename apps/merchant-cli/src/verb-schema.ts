@@ -1473,13 +1473,9 @@ export const hotelDetailSchema: VerbSchema = {
 // Unified cross-provider orders verb schemas ("orders" noun)
 // ============================================================
 //
-// Unlike ride-elife / hotel-redaug, `orders` has NO business logic of its own
-// — it is a thin read-only index spanning ALL providers (ride + hotel, and any
-// future ones). Use it when the user asks for "my orders" / "order history"
-// generically, without naming a specific business. Once you already know
-// which business the user means (or need domain-specific columns like
-// vehicle_class / hotel_name), prefer `ride-elife list-orders` /
-// `hotel-redaug list-orders` instead.
+// `orders` is the read-only index spanning ride, hotel, flight, and future
+// providers. Use it for generic order history and common filters; use a
+// domain-specific list command only when provider-specific columns are needed.
 
 export const ORDERS_NOUN = 'orders';
 
@@ -1489,42 +1485,50 @@ export const unifiedOrdersListSchema: VerbSchema = {
   noun: ORDERS_NOUN,
   verb: 'list',
   description:
-    'List orders across ALL providers (ride + hotel) in one call. Use this for generic "my orders" / "order history" requests. Prefer ride-elife/hotel-redaug list-orders when the user names a specific business.',
+    'List orders across ALL providers (ride + hotel + flight) with common filters and offset/cursor pagination. Use domain-specific list-orders only for provider-specific fields.',
   flags: {
-    'order-type': { type: 'string', required: false, description: 'Filter by provider: ride | hotel' },
+    'order-type': { type: 'string', required: false, description: 'Legacy single order type: ride | hotel | flight' },
+    'order-types': { type: 'string', required: false, description: 'Comma-separated order types: ride,hotel,flight' },
     member: MEMBER_FLAG_SCHEMA,
-    status: { type: 'string', required: false, description: 'Filter by NORMALIZED status (NOT the domain-specific status): PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
-    page: { type: 'int', required: false, default: 1, description: 'Page number', constraints: '>= 1' },
-    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '>= 1' },
+    status: { type: 'string', required: false, description: 'Legacy single normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
+    statuses: { type: 'string', required: false, description: 'Comma-separated normalized statuses' },
+    'created-from': { type: 'string', required: false, description: 'ISO 8601 created-at lower bound (inclusive)' },
+    'created-to': { type: 'string', required: false, description: 'ISO 8601 created-at upper bound (exclusive)' },
+    cursor: { type: 'string', required: false, description: 'Opaque cursor returned by the previous page' },
+    page: { type: 'int', required: false, default: 1, description: 'Legacy 1-based page number', constraints: '>= 1' },
+    'page-size': { type: 'int', required: false, default: 20, description: 'Items per page', constraints: '1-100' },
   },
   response: {
     orders: {
       type: 'array',
-      description: 'Slim cross-provider order-index items. For business-specific fields (vehicle_class, hotel_name, etc.), call `orders get --order-id <id>` or the domain-specific `get`.',
+      description: 'Slim cross-provider index items. Call `orders get` for business-specific detail.',
       items: {
-        order_id: { type: 'string', description: 'Order id (rio_... for ride, hho_... for hotel). Pass to `orders get`.' },
-        member_id: { type: 'string|null', description: 'End-user this order is attributed to; null when unattributed' },
-        order_type: { type: 'string', description: "'ride' or 'hotel'" },
-        status: { type: 'string', description: 'Normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
-        amount: { type: 'float|null', description: 'Order amount in DECIMAL currency units (NOT cents)' },
+        order_id: { type: 'string', description: 'Order id (rio_..., hho_..., or ffo_...). Pass to `orders get`.' },
+        member_id: { type: 'string|null', description: 'Attributed end-user id; null when unattributed' },
+        order_type: { type: 'string', description: 'ride | hotel | flight' },
+        status: { type: 'string', description: 'Original provider-domain status for display' },
+        unified_status: { type: 'string', description: 'PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED' },
+        amount: { type: 'float|null', description: 'Order amount in decimal currency units' },
         currency: { type: 'string|null', description: 'ISO 4217 currency code' },
         created_at: { type: 'string|null', description: 'ISO 8601 datetime' },
         updated_at: { type: 'string|null', description: 'ISO 8601 datetime' },
       },
     },
     total: { type: 'int', description: 'Total matching orders across all providers' },
-    page: { type: 'int', description: 'Current page' },
+    page: { type: 'int', description: 'Legacy current page' },
     page_size: { type: 'int', description: 'Items per page' },
+    next_cursor: { type: 'string|null', description: 'Opaque cursor for the next page; null at the end' },
+    has_more: { type: 'bool', description: 'Whether another page is available' },
+    applied_filters: { type: 'object', description: 'Normalized filters applied by the platform' },
   },
   example: {
-    command: 'agenzo-merchant-cli orders list --page 1 --page-size 10',
-    output_summary:
-      'Returns a paginated, cross-provider list of orders (both ride and hotel). If the user then asks about one order, use its order_id with `orders get`.',
+    command: 'agenzo-merchant-cli orders list --order-types flight,hotel --created-from 2026-07-01T00:00:00Z --page-size 20',
+    output_summary: 'Returns ride, hotel, and flight orders with stable pagination metadata.',
   },
   error_recovery: {
-    INVALID_REQUEST: 'The --status value is not one of PENDING/CONFIRMED/COMPLETED/CANCELLED/FAILED. Fix and retry.',
+    INVALID_REQUEST: 'Fix invalid type/status/date/cursor filters and retry.',
     INTERNAL_ERROR: 'Transient backend error. Retry once after a short delay.',
-    PARAM_INVALID: 'Ensure --page / --page-size are positive integers, then retry.',
+    PARAM_INVALID: 'Fix conflicting or invalid CLI options, then retry.',
   },
 };
 
@@ -1534,23 +1538,23 @@ export const unifiedOrdersGetSchema: VerbSchema = {
   noun: ORDERS_NOUN,
   verb: 'get',
   description:
-    'Get a single order detail by id, regardless of which provider (ride/hotel) it belongs to. The platform resolves order_id -> provider internally and returns that provider\'s own detail shape.',
+    'Get a ride, hotel, or flight order detail by id. The platform resolves order_id to the owning domain and returns that domain detail shape.',
   flags: {
-    'order-id': { type: 'string', required: true, description: 'Order id from `orders list` (rio_... for ride, hho_... for hotel)' },
+    'order-id': { type: 'string', required: true, description: 'Order id from `orders list` (rio_..., hho_..., or ffo_...)' },
   },
   response: {
     '(varies by order_type)': {
       type: 'object',
       description:
-        'The response shape is delegated to the owning provider and therefore varies: a ride order returns the same shape as `ride-elife get`; a hotel order returns the same shape as `hotel-redaug get`. Treat the result as an opaque object and surface whatever fields it contains — do NOT assume a fixed schema.',
+        'Delegated ride, hotel, or flight detail. Treat the result as an opaque domain object and surface the returned fields.',
     },
   },
   example: {
-    command: 'agenzo-merchant-cli orders get --order-id hho_01K...',
-    output_summary: "Returns the order's detail, delegated to its owning provider (ride or hotel).",
+    command: 'agenzo-merchant-cli orders get --order-id ffo_01K...',
+    output_summary: "Returns the order's provider-domain detail.",
   },
   error_recovery: {
-    ORDER_NOT_FOUND: 'The order_id does not exist or does not belong to this developer/org. Verify the id from `orders list`. Do NOT retry blindly.',
+    ORDER_NOT_FOUND: 'The order_id does not exist or does not belong to this developer/org. Verify the id from `orders list`.',
     INTERNAL_ERROR: "The order's provider detail lookup is temporarily unavailable. Retry once after a short delay.",
   },
 };

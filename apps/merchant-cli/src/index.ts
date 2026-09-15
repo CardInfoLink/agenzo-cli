@@ -180,11 +180,10 @@ Key notes:
   registerServiceGetCommand(servicesCmd, { discoveryClient, program });
 
   // orders command group (unified cross-provider order index, GET /orders).
-  // Spans ride + hotel (+ future providers) in one call — use it for generic
-  // "my orders" requests; prefer the domain-specific list-orders/get once the
-  // business (ride vs hotel) is known.
+  // Spans ride + hotel + flight (+ future providers) in one call. Prefer a
+  // domain-specific command only when provider-specific columns are needed.
   const ordersCmd = program.command('orders').description(
-    'Unified cross-provider order index (spans ride + hotel). Use for generic "my orders" requests; use ride-elife/hotel-redaug commands once the business is known.',
+    'Unified cross-provider order index (ride + hotel + flight). Use for order history, common filters, and stable pagination.',
   );
   registerOrdersListCommand(ordersCmd, deps);
   registerOrdersGetCommand(ordersCmd, deps);
