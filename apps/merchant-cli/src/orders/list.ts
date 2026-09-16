@@ -14,10 +14,6 @@ import type { UnifiedListOrdersResponse, UnifiedOrderListItem } from '../types/a
 import { attachSchemaHelp, unifiedOrdersListSchema } from '../verb-schema.js';
 import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
 
-// ============================================================
-// Input helpers
-// ============================================================
-
 const DEFAULT_PAGE = '1';
 const DEFAULT_PAGE_SIZE = '20';
 
@@ -29,16 +25,19 @@ function positiveInt(value: string, flag: string): string {
   return String(n);
 }
 
-// ============================================================
-// Output helper (table summary)
-// ============================================================
+function assertCompatibleOptions(opts: Record<string, unknown>): void {
+  if (opts.orderType !== undefined && opts.orderTypes !== undefined) {
+    throw new CliError('PARAM_INVALID', '--order-type and --order-types cannot be used together.');
+  }
+  if (opts.status !== undefined && opts.statuses !== undefined) {
+    throw new CliError('PARAM_INVALID', '--status and --statuses cannot be used together.');
+  }
+  if (opts.cursor !== undefined && Number(opts.page ?? DEFAULT_PAGE) !== 1) {
+    throw new CliError('PARAM_INVALID', '--cursor cannot be combined with --page greater than 1.');
+  }
+}
 
-/**
- * Render the unified order list as a table for `--format table`. Kept to a
- * SMALL, fixed column set (order_id / type / status / amount / currency) —
- * cross-provider items intentionally carry no domain-specific columns (hotel
- * name, vehicle class, etc.); those live behind `orders get`.
- */
+/** Render a compact cross-provider list summary for table output. */
 function formatOrders(data: UnifiedListOrdersResponse): string {
   const orders: UnifiedOrderListItem[] = data.orders ?? [];
   if (orders.length === 0) {
@@ -59,31 +58,30 @@ function formatOrders(data: UnifiedListOrdersResponse): string {
     ['Page', String(data.page ?? '-')],
     ['Page size', String(data.page_size ?? '-')],
   ];
+  if (data.has_more !== undefined) summary.push(['Has more', String(data.has_more)]);
+  if (data.next_cursor) summary.push(['Next cursor', data.next_cursor]);
 
   return `${Formatter.table(headers, rows)}\n${Formatter.keyValue(summary)}`;
 }
 
-// ============================================================
-// Command registration
-// ============================================================
-
 /**
  * `orders list` — cross-provider order list (`GET /orders`). This is the
- * ONLY tool that spans ride + hotel (+ future providers) in one call; use it
- * whenever the user asks for "my orders" / "order history" without naming a
- * specific business (ride vs hotel). Use `ride-elife list-orders` /
- * `hotel-redaug list-orders` only when the user explicitly asks about rides
- * or hotels specifically, or once you already know the order_type and want
- * domain-specific columns.
+ * only list spanning ride, hotel, and flight in one call. Domain-specific
+ * list commands remain available when provider-specific columns are needed.
  */
 export function registerOrdersListCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('list')
-    .description('List orders across ALL providers (ride + hotel), with optional type/status filters')
+    .description('List orders across ALL providers (ride + hotel + flight), with filters and pagination')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
-    .option('--order-type <type>', 'Filter by order type: ride | hotel')
-    .option('--status <status>', 'Filter by normalized status: PENDING | CONFIRMED | COMPLETED | CANCELLED | FAILED')
-    .option('--page <page>', 'Page number', DEFAULT_PAGE)
+    .option('--order-type <type>', 'Legacy single order type filter: ride | hotel | flight')
+    .option('--order-types <types>', 'Comma-separated order types: ride,hotel,flight')
+    .option('--status <status>', 'Legacy single normalized status filter')
+    .option('--statuses <statuses>', 'Comma-separated statuses: PENDING,CONFIRMED,COMPLETED,CANCELLED,FAILED')
+    .option('--created-from <datetime>', 'Created at or after this ISO 8601 datetime (inclusive)')
+    .option('--created-to <datetime>', 'Created before this ISO 8601 datetime (exclusive)')
+    .option('--cursor <cursor>', 'Opaque cursor returned by the previous page')
+    .option('--page <page>', 'Legacy 1-based page number', DEFAULT_PAGE)
     .option('--page-size <size>', 'Page size', DEFAULT_PAGE_SIZE)
     .option('--member <id>', MEMBER_OPTION_DESCRIPTION);
 
@@ -91,6 +89,7 @@ export function registerOrdersListCommand(parent: Command, deps: { apiClient: Ap
 
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();
+    assertCompatibleOptions(opts);
     const format = resolveFormat(opts.format as string | undefined);
 
     const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
@@ -103,18 +102,21 @@ export function registerOrdersListCommand(parent: Command, deps: { apiClient: Ap
       page_size: positiveInt((opts.pageSize as string | undefined) ?? DEFAULT_PAGE_SIZE, 'page-size'),
     };
     if (opts.orderType !== undefined) params.order_type = opts.orderType as string;
+    if (opts.orderTypes !== undefined) params.order_types = opts.orderTypes as string;
     if (opts.status !== undefined) params.status = opts.status as string;
+    if (opts.statuses !== undefined) params.statuses = opts.statuses as string;
+    if (opts.createdFrom !== undefined) params.created_from = opts.createdFrom as string;
+    if (opts.createdTo !== undefined) params.created_to = opts.createdTo as string;
+    if (opts.cursor !== undefined) params.cursor = opts.cursor as string;
     const member = memberIdOf(opts);
     if (member !== undefined) params.member_id = member;
 
     const spinner = format === 'json' ? null : createSpinner('Fetching orders...');
-
     const result = await deps.apiClient.get<UnifiedListOrdersResponse>(
       '/orders',
       { type: 'api-key', key: apiKey },
       params,
     );
-
     spinner?.stop();
 
     if (!result.success) {
@@ -122,7 +124,6 @@ export function registerOrdersListCommand(parent: Command, deps: { apiClient: Ap
     }
 
     const data = result.data;
-
     const configManager = new ConfigManager();
     const commandResult: CommandResult<UnifiedListOrdersResponse> = {
       data,

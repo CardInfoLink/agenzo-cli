@@ -15,17 +15,15 @@ import { attachSchemaHelp, unifiedOrdersGetSchema } from '../verb-schema.js';
 
 /**
  * `orders get` — cross-provider order detail (`GET /orders/{id}`). The
- * platform resolves order_id -> order_type from the unified index and
- * delegates to the owning domain's detail query; the response shape therefore
- * varies by order_type (ride vs hotel) — treat it as an opaque object and
- * surface whatever fields it contains.
+ * platform resolves order_id -> order_type and delegates to the owning ride,
+ * hotel, or flight domain. Treat the domain detail as an opaque object.
  */
 export function registerOrdersGetCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
     .command('get')
-    .description('Get a single order detail by id, regardless of provider (ride/hotel)')
+    .description('Get a single order detail by id, regardless of provider (ride/hotel/flight)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
-    .requiredOption('--order-id <id>', 'Order id (e.g. rio_... or hho_...)');
+    .requiredOption('--order-id <id>', 'Order id (e.g. rio_..., hho_..., or ffo_...)');
 
   attachSchemaHelp(cmd, unifiedOrdersGetSchema);
 
@@ -52,7 +50,6 @@ export function registerOrdersGetCommand(parent: Command, deps: { apiClient: Api
     }
 
     const data = result.data;
-
     const configManager = new ConfigManager();
     const commandResult: CommandResult<UnifiedOrderDetailResponse> = {
       data,
