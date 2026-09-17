@@ -68,29 +68,47 @@ function formatVisaPendingToken(data: Record<string, unknown>): string {
   return Formatter.keyValue(lines);
 }
 
+/** Format an ACTIVE Visa network token for output (DPAN + cryptogram now present). */
+function formatVisaActiveToken(data: Record<string, unknown>): string {
+  const nt = (data.network_token as Record<string, unknown> | undefined) ?? {};
+  const lines: [string, string][] = [
+    ['Payment Token ID', String(data.id || '')],
+    ['Type', 'Network Token'],
+    ['Status', String(data.status || 'ACTIVE')],
+    ['Payment Brand', String(data.payment_brand || 'visa')],
+    ['Network Token (DPAN)', String(nt.value || '')],
+    ['Cryptogram (TAVV)', String(nt.cryptogram || '')],
+    ['Expiry', String(nt.expiry_date || '')],
+  ];
+  if (data.instruction_id) {
+    lines.push(['Instruction ID', String(data.instruction_id)]);
+  }
+  return Formatter.keyValue(lines);
+}
+
 // ============================================================
 // Command registration
 // ============================================================
 
 /**
- * `payment-tokens visa-create` — start Visa direct (VTS) network-token creation
- * and return immediately (no polling).
+ * `payment-tokens visa-create` — start Visa direct (VTS) network-token creation,
+ * print the payment_url, then poll until the token reaches a terminal status.
  *
- * This is the non-blocking, Visa counterpart to `payment-tokens unionpay-create`
- * against a `payment_brand=visa` payment method: it POSTs /payment-tokens/create
- * with a `type=network_token` body carrying the nested Visa DTO
- * (`visa.order_amount_cents` in integer cents), prints the returned
- * `payment_url` (+ token id + status, PENDING at this point — the platform's
- * self-hosted page hosts the Visa FIDO passkey iframe), then exits. Unlike the
- * blocking `create`, it does NOT poll for the terminal ACTIVE/FAILED status —
- * callers poll separately via `payment-tokens get <token_id>` once the user
- * finishes the passkey in the browser (assertion completion flips the token to
- * ACTIVE synchronously, with no webhook).
+ * It POSTs /payment-tokens/create with a `type=network_token` body carrying the
+ * nested Visa DTO (`visa.order_amount_cents` in integer cents), prints the
+ * returned `payment_url` (+ token id + status, PENDING at this point — the
+ * platform's self-hosted page hosts the Visa FIDO passkey iframe), then polls
+ * GET /payment-tokens/{id} every 5s for up to 180s. The token's ACTIVE is
+ * written synchronously by the browser's later `visa/payment/resolve` request
+ * (no webhook), so re-reading the token is the only way to observe activation;
+ * the 180s cap is longer than UnionPay's 60s because completion is driven by a
+ * human passkey action, not a backend event. On timeout the token stays PENDING
+ * and the follow-up `payment-tokens get <id>` hint is printed. Polling runs
+ * unconditionally (also under --yes): the internal orchestrator wants the
+ * terminal state, not just the URL.
  *
- * Intended for programmatic callers (e.g. the agent orchestrator) that need the
- * `payment_url` synchronously to render an action card, rather than a CLI
- * operator waiting at the terminal. Not advertised in the SKILL/README and does
- * NOT register attachSchemaHelp (mirrors unionpay-create / dropin-create).
+ * Not advertised in the SKILL/README and does NOT register attachSchemaHelp
+ * (mirrors unionpay-create / dropin-create).
  */
 export function registerVisaCreateCommand(
   parent: Command,
@@ -98,7 +116,7 @@ export function registerVisaCreateCommand(
 ): void {
   const cmd = parent
     .command('visa-create')
-    .description('Start a Visa network-token creation and return the payment_url (no polling)')
+    .description('Start a Visa network-token creation, print the payment_url, then poll until ACTIVE/FAILED (up to 180s)')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-method-id <id>', 'Visa payment method ID to use (required)')
     .option(
@@ -243,11 +261,58 @@ export function registerVisaCreateCommand(
     await renderWithContext(commandResult, { format }, configManager);
 
     const tokenId = tokenData.id as string;
+
+    // Built-in polling: the payment_url is already printed above, so the user
+    // can start the passkey verification in the browser now. The token's ACTIVE
+    // is written synchronously by the browser's later `visa/payment/resolve`
+    // request (no webhook), so the only way to observe activation is to re-read
+    // GET /payment-tokens/{id}. Poll every 5s up to 180s (longer than
+    // UnionPay's 60s because completion is driven by a human passkey action,
+    // not a backend event) waiting for ACTIVE/FAILED. On timeout the token
+    // stays PENDING — print the follow-up `get` hint. Poll unconditionally
+    // (also under --yes): the internal orchestrator wants the terminal state.
     notify(
       format,
       'info',
-      'Open the Payment URL to complete the Visa passkey verification, then check status with: ' +
-        `agenzo-token-cli payment-tokens get ${tokenId}`,
+      'Open the Payment URL to complete the Visa passkey verification. Waiting for result...',
+    );
+
+    const VISA_TOKEN_POLL_INTERVAL_MS = 5000;
+    const VISA_TOKEN_POLL_TIMEOUT_MS = 180_000;
+    const pollStart = Date.now();
+
+    while (Date.now() - pollStart < VISA_TOKEN_POLL_TIMEOUT_MS) {
+      await new Promise((resolve) => setTimeout(resolve, VISA_TOKEN_POLL_INTERVAL_MS));
+
+      const pollResult = await deps.apiClient.get<Record<string, unknown>>(
+        `/payment-tokens/${tokenId}`,
+        { type: 'api-key', key: apiKey },
+      );
+
+      if (pollResult.success) {
+        const status = String(pollResult.data.status ?? '');
+        if (status === 'ACTIVE') {
+          notify(format, 'success', 'Visa network token activated!');
+          if (!pollResult.data.type) pollResult.data.type = 'network_token';
+          const activatedResult: CommandResult<Record<string, unknown>> = {
+            data: pollResult.data,
+            text: () => formatVisaActiveToken(pollResult.data),
+          };
+          await renderWithContext(activatedResult, { format }, configManager);
+          return;
+        }
+        if (status === 'FAILED') {
+          notify(format, 'error', 'Visa network token failed.');
+          return;
+        }
+      }
+      // Still PENDING — continue polling.
+    }
+
+    notify(
+      format,
+      'info',
+      `Timed out waiting for token activation. Check status later with: agenzo-token-cli payment-tokens get ${tokenId}`,
     );
   });
 }

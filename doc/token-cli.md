@@ -23,6 +23,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 | `payment-tokens` | `get` | Read | View token details (`--reveal` for full VCN) |
 | `payment-tokens` | `revoke` | Write | Revoke a token |
 | `payment-tokens` | `unionpay-create` | Write | Start a UnionPay network-token checkout and return `checkout_url` — **no polling** |
+| `payment-tokens` | `visa-create` | Write | Mint a Visa network token: print `payment_url`, then **poll** GET `payment-tokens/{id}` up to 180s until ACTIVE/FAILED |
 
 **Blocking vs non-blocking.** `add` and `create` are the operator-facing verbs: they start the flow *and* poll for the result, so the process must stay alive. The `dropin-*` / `unionpay-*` pairs are the non-blocking split for programmatic callers (e.g. the agent orchestrator): the `-create` / `-enroll` half returns the URL or session id synchronously, and the caller polls the `-status` half (or `payment-tokens get`) on its own cadence.
 
