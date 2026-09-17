@@ -32,6 +32,9 @@ import { registerUnionpayCreateCommand } from './payment-tokens/unionpay-create.
 import { registerVisaCreateCommand } from './payment-tokens/visa-create.js';
 import { registerEvoCreateCommand } from './payment-tokens/evo-create.js';
 
+// visa commands
+import { registerVisaRegisterCommand } from './visa/register.js';
+
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
 // is constructed; may be undefined if an error is thrown before then.
@@ -99,6 +102,10 @@ async function main() {
   registerVisaCreateCommand(ptCmd, deps);
   // EVO non-blocking command (programmatic callers; not in SKILL/README).
   registerEvoCreateCommand(ptCmd, deps);
+
+  // visa: enabler 显式前置注册（API Key 鉴权，developer_id 从 API Key 上下文解析）。
+  const visaCmd = program.command('visa').description('Visa agent registration (enabler mode)');
+  registerVisaRegisterCommand(visaCmd, deps);
 
   // Parse and execute
   await program.parseAsync(process.argv);
