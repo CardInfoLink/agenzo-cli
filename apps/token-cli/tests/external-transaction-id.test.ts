@@ -55,6 +55,29 @@ const VISA_PENDING = {
   payment_url_expires_in: 600,
 };
 
+/** ACTIVE terminal shape so visa-create's built-in poll ends on an early tick. */
+const VISA_ACTIVE = {
+  id: 'ptk_visa_001',
+  type: 'network_token',
+  status: 'ACTIVE',
+  payment_brand: 'visa',
+  network_token: { brand: 'Visa', value: '4323126883611456', cryptogram: 'x', expiry_date: '0128' },
+};
+
+/** Drive an action that awaits visa-create's poll sleeps, using fake timers. */
+async function runWithPoll(action: () => Promise<void>): Promise<void> {
+  vi.useFakeTimers();
+  try {
+    const done = action();
+    for (let i = 0; i < 40; i += 1) {
+      await vi.advanceTimersByTimeAsync(5000);
+    }
+    await done;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 /** An ACTIVE EVO network-token response — evo-create requires ACTIVE. */
 const EVO_ACTIVE = {
   id: 'ptk_evo_001',
@@ -130,7 +153,10 @@ describe('payment-tokens visa-create — --external-transaction-id passthrough (
   ];
 
   it('forwards --external-transaction-id at the TOP level as external_transaction_id', async () => {
-    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
     const program = buildProgram();
     const cmd = program.command('payment-tokens');
     registerVisaCreateCommand(cmd, { apiClient } as any);
@@ -138,8 +164,10 @@ describe('payment-tokens visa-create — --external-transaction-id passthrough (
     captureStdout();
     captureStderr();
 
-    await program.parseAsync(
-      baseArgs(['--external-transaction-id', ORDER_ID, '--idempotency-key', 'idem_visa']),
+    await runWithPoll(() =>
+      program.parseAsync(
+        baseArgs(['--external-transaction-id', ORDER_ID, '--idempotency-key', 'idem_visa']),
+      ),
     );
 
     expect(apiClient.post).toHaveBeenCalledTimes(1);
@@ -152,7 +180,10 @@ describe('payment-tokens visa-create — --external-transaction-id passthrough (
   });
 
   it('omits external_transaction_id when --external-transaction-id is not supplied', async () => {
-    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
     const program = buildProgram();
     const cmd = program.command('payment-tokens');
     registerVisaCreateCommand(cmd, { apiClient } as any);
@@ -160,7 +191,9 @@ describe('payment-tokens visa-create — --external-transaction-id passthrough (
     captureStdout();
     captureStderr();
 
-    await program.parseAsync(baseArgs(['--idempotency-key', 'idem_visa_plain']));
+    await runWithPoll(() =>
+      program.parseAsync(baseArgs(['--idempotency-key', 'idem_visa_plain'])),
+    );
 
     const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
     expect(body).not.toHaveProperty('external_transaction_id');
