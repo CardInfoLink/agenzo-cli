@@ -24,6 +24,12 @@ export interface PaymentMethod {
   enroll_url?: string;
   /** UnionPay only: enrollment correlation id, present when payment_brand === 'unionpay'. */
   correlation_id?: string;
+  /** Visa only: two-phase enrollment reference; pass back to resume phase 2. */
+  client_reference_id?: string;
+  /** Visa only: VIC card enrollment status (e.g. 'PENDING' | 'ACTIVE'). */
+  vic_card_status?: string;
+  /** Visa only: whether the device's Payment Passkey is registered yet. */
+  passkey_registered?: boolean;
   /** The end-user member id this payment method belongs to (set at enrollment). */
   member_id?: string | null;
 }

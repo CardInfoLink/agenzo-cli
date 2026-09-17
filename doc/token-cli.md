@@ -10,7 +10,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 
 | Noun | Verb | Type | Description |
 |---|---|---|---|
-| `payment-methods` | `add` | Write | Add a payment method — Evo manual 3DS, Evo Drop-in (`--mode dropin`), or UnionPay enrollment (`--payment-brand unionpay`). Blocks and polls to a terminal status. |
+| `payment-methods` | `add` | Write | Add a payment method — Evo manual 3DS, Evo Drop-in (`--mode dropin`), UnionPay enrollment (`--payment-brand unionpay`), or Visa VIC two-phase passkey enrollment (`--payment-brand visa`). Blocks and polls to a terminal status. |
 | `payment-methods` | `list` | Read | List payment methods (optionally `--member`) |
 | `payment-methods` | `get` | Read | View payment method details |
 | `payment-methods` | `disable` | Write | Disable a payment method (revokes its tokens) |
@@ -46,6 +46,14 @@ agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@
 agenzo-token-cli payment-methods add --payment-brand unionpay --member <member_id> \
   --api-key <key> --email user@example.com
 
+# Visa VIC enrollment — phase 1 (submit card, returns PENDING + passkey_url + client_reference_id)
+agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
+  --email user@example.com --card-number 4622943123122245 --expiry 0128 --cvv 816
+# … user registers a Payment Passkey in a browser via passkey_url …
+# Visa VIC enrollment — phase 2 (resume with client_reference_id, flips to ACTIVE)
+agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
+  --email user@example.com --client-reference-id <client_reference_id from phase 1>
+
 agenzo-token-cli payment-methods list --api-key <key> [--member <member_id>]
 agenzo-token-cli payment-methods get <pm_id> --api-key <key>
 agenzo-token-cli payment-methods disable <pm_id> --api-key <key> --idempotency-key idem_002
@@ -57,10 +65,11 @@ agenzo-token-cli payment-methods disable <pm_id> --api-key <key> --idempotency-k
 |---|---|---|
 | `--api-key <key>` | all | Reuse the key from admin-cli; do not ask again |
 | `--type <type>` | all | Default `card` |
-| `--payment-brand <brand>` | all | `evo` (default) or `unionpay` |
+| `--payment-brand <brand>` | all | `evo` (default), `unionpay`, or `visa` |
 | `--mode <mode>` | evo | `manual` (default) or `dropin` |
-| `--email <email>` | all | Manual: 3DS verification address. Dropin: session reference. UnionPay: binding email. |
-| `--card-number` / `--expiry <mmyy>` / `--cvv` | evo manual | Skip interactive prompts. ⚠️ Values may land in shell history — automation only. |
+| `--email <email>` | all | Manual: 3DS verification address. Dropin: session reference. UnionPay: binding email. Visa: required in both phases (VIC enrollment address). |
+| `--card-number` / `--expiry <mmyy>` / `--cvv` | evo manual, visa phase 1 | Skip interactive prompts. ⚠️ Values may land in shell history — automation only. |
+| `--client-reference-id <id>` | visa | Resume an in-flight two-phase Visa enrollment. Omit for phase 1 (submit card); pass the phase-1 `client_reference_id` — after the Payment Passkey is registered — to complete phase 2 (no card needed). |
 | `--idempotency-key <key>` | evo manual | Required; prompted if omitted, hard-fails under `--yes`. Not used by dropin/unionpay. |
 | `--no-poll` | evo dropin | Mint the session, print it, exit — for front-end-driven flows |
 | `--member <id>` | unionpay | **Required** (prompted interactively; hard-fails under `--yes`) |
@@ -117,6 +126,32 @@ No card details are entered at the terminal. The user completes enrollment by au
 5. On timeout the PM stays PENDING — check later with `payment-methods get <pm_id>` or `unionpay-status <pm_id>`.
 
 `--member <id>` is caller-defined (your own end-user id) and must be **stable**: the same value is reused server-side for token creation, so a mismatch makes UnionPay reject the token request.
+
+### add `--payment-brand visa` — Visa VIC two-phase passkey enrollment
+
+Enrolls a card onto the **Visa Intelligent Commerce (VIC)** rail. This is a **two-phase** flow because the Visa protocol forces a browser WebAuthn **Payment Passkey** registration between the two phases — the private key is created on the user's device, so the server cannot proxy it.
+
+**Phase 1** — submit the card:
+```bash
+agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
+  --email user@example.com --card-number <pan> --expiry <mmyy> --cvv <cvv>
+```
+1. `POST /payment-methods/create` with `payment_brand=visa` + card details. The VTS network token is minted immediately (`token_status=ACTIVE`).
+2. Because the device has no passkey yet (`passkey_registered=false`), the PM stays **PENDING** and the response includes **`passkey_url`** (valid ~15 min) and **`client_reference_id`**.
+3. The user opens `passkey_url` in a **browser** (HTTPS required by the Visa FIDO SDK) and registers a Payment Passkey.
+
+**Phase 2** — resume after passkey registration:
+```bash
+agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
+  --email user@example.com --client-reference-id <client_reference_id from phase 1>
+```
+4. `POST /payment-methods/create` again with the same `client_reference_id` (no card details). `--email` is still **required** — the backend re-validates the full create body.
+5. The PM flips to **ACTIVE** with `payment_brand=visa`, `passkey_registered=true`, `vic_card_status=ACTIVE`.
+
+Notes:
+- The two phases **cannot be collapsed** — the passkey registration between them is a browser/device action.
+- Idempotent by `(developer, card)`: re-submitting an already-ACTIVE card returns ACTIVE directly, with **no** `passkey_url` and no PENDING. To see a fresh PENDING + `passkey_url`, use a card this developer has never enrolled.
+- Once ACTIVE, the card can mint network tokens via `payment-tokens visa-create`.
 
 ### Non-blocking pairs (programmatic callers)
 
@@ -255,6 +290,6 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 | `CLIENT_CARD_NOT_MATCHED` | `--card` last-4 matched no ACTIVE card | Run `payment-methods list` and pick a real one |
 | `TOKEN_FEATURE_DISABLED` | VCN is switched off server-side | Use `network-token` or `x402`; do not retry VCN |
 | `PARAM_IDEMPOTENCY_KEY_REQUIRED` | `--yes` without `--idempotency-key` | Supply a unique key (1–128 chars, `[A-Za-z0-9_-]`) |
-| `PARAM_INVALID` | Bad `--payment-brand` / `--mode`, missing `--member`, UnionPay selected via `--card`, ambiguous card under `--yes` | Fix the flag named in the message |
+| `PARAM_INVALID` | Bad `--payment-brand` / `--mode`, missing `--member`, UnionPay selected via `--card`, ambiguous card under `--yes`, or Visa resume missing `--email` | Fix the flag named in the message |
 | `This card does not support Network Token` | Issuer does not support NT | Use a card that does |
 | `Evo preauth failed` | PSP or issuer rejected preauth | Try another card or retry later |
