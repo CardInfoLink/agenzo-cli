@@ -27,13 +27,54 @@ const VISA_PENDING = {
   payment_url_expires_in: 600,
 };
 
+/** The ACTIVE terminal shape the built-in poll reads via GET /payment-tokens/{id}. */
+const VISA_ACTIVE = {
+  id: 'ptk_visa_001',
+  type: 'network_token',
+  status: 'ACTIVE',
+  payment_brand: 'visa',
+  network_token: {
+    brand: 'Visa',
+    value: '4323126883611456',
+    cryptogram: 'AgAAAAAAPX7dmwEAmfSdgwQAAAg=',
+    expiry_date: '0128',
+  },
+  instruction_id: 'instr_visa_001',
+};
+
+/**
+ * Drive an async action that awaits the built-in poll's `setTimeout` sleeps.
+ * Uses fake timers so the 5s poll interval does not really elapse in tests:
+ * kick off the action, then repeatedly flush pending timers + microtasks until
+ * it settles. `mockApiClient` must be seeded with a terminal
+ * `/payment-tokens/{id}` GET so the loop reaches ACTIVE/FAILED on an early tick
+ * rather than running the full 180s window.
+ */
+async function runWithPoll(action: () => Promise<void>): Promise<void> {
+  vi.useFakeTimers();
+  try {
+    const done = action();
+    // Flush a bounded number of poll ticks (each `advanceTimersByTimeAsync`
+    // also drains the microtask queue, so the awaited GET resolves).
+    for (let i = 0; i < 40; i += 1) {
+      await vi.advanceTimersByTimeAsync(5000);
+    }
+    await done;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 // ============================================================
 // payment-tokens visa-create — request body shape (R6.1, R6.2, R13.1)
 // ============================================================
 
 describe('payment-tokens visa-create — request body', () => {
   it('POSTs exactly one network_token body with nested visa.order_amount_cents and top-level currency', async () => {
-    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
     const program = buildProgram();
     const cmd = program.command('payment-tokens');
     registerVisaCreateCommand(cmd, { apiClient } as any);
@@ -41,21 +82,27 @@ describe('payment-tokens visa-create — request body', () => {
     captureStdout();
     captureStderr();
 
-    await program.parseAsync([
-      'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
-      '--api-key', 'sk_key',
-      '--payment-method-id', 'pm_visa_1',
-      '--order-amount-cents', '12345',
-      '--currency', 'USD',
-      '--order-description', 'Test order',
-      '--merchant-order-id', 'mo_1',
-      '--idempotency-key', 'idem_visa',
-    ]);
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '12345',
+        '--currency', 'USD',
+        '--order-description', 'Test order',
+        '--merchant-order-id', 'mo_1',
+        '--idempotency-key', 'idem_visa',
+      ]),
+    );
 
     // Exactly one minting request, to the shared create endpoint, with the
     // api-key auth, the assembled body, and the verbatim Idempotency-Key header.
     expect(apiClient.post).toHaveBeenCalledTimes(1);
-    expect(apiClient.get).not.toHaveBeenCalled();
+    // The built-in poll re-reads the token at least once (GET /payment-tokens/{id}).
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/payment-tokens/ptk_visa_001',
+      { type: 'api-key', key: 'sk_key' },
+    );
     expect(apiClient.post).toHaveBeenCalledWith(
       '/payment-tokens/create',
       { type: 'api-key', key: 'sk_key' },
@@ -83,7 +130,10 @@ describe('payment-tokens visa-create — request body', () => {
   });
 
   it('omits currency and the optional visa fields when not provided', async () => {
-    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
     const program = buildProgram();
     const cmd = program.command('payment-tokens');
     registerVisaCreateCommand(cmd, { apiClient } as any);
@@ -91,13 +141,15 @@ describe('payment-tokens visa-create — request body', () => {
     captureStdout();
     captureStderr();
 
-    await program.parseAsync([
-      'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
-      '--api-key', 'sk_key',
-      '--payment-method-id', 'pm_visa_1',
-      '--order-amount-cents', '500',
-      '--idempotency-key', 'idem_visa2',
-    ]);
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '500',
+        '--idempotency-key', 'idem_visa2',
+      ]),
+    );
 
     const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
     expect(body).not.toHaveProperty('currency');
@@ -188,8 +240,11 @@ describe('payment-tokens visa-create — idempotency-key', () => {
 // ============================================================
 
 describe('payment-tokens visa-create — --format json', () => {
-  it('emits a single JSON-parseable object with id / status / payment_url and no log noise on stdout', async () => {
-    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+  it('emits JSON-parseable objects; the final one carries the ACTIVE token with its DPAN', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
     const program = buildProgram();
     const cmd = program.command('payment-tokens');
     registerVisaCreateCommand(cmd, { apiClient } as any);
@@ -197,19 +252,24 @@ describe('payment-tokens visa-create — --format json', () => {
     const out = captureStdout();
     captureStderr();
 
-    await program.parseAsync([
-      'node', 'cli', '--format', 'json', '--yes', 'payment-tokens', 'visa-create',
-      '--api-key', 'sk_key',
-      '--payment-method-id', 'pm_visa_1',
-      '--order-amount-cents', '12345',
-      '--idempotency-key', 'idem_json',
-    ]);
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--format', 'json', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '12345',
+        '--idempotency-key', 'idem_json',
+      ]),
+    );
 
-    // The entire stdout must parse as ONE JSON object (no progress/log lines mixed in).
-    const json = JSON.parse(out.text().trim()) as Record<string, unknown>;
-    expect(json.id).toBe('ptk_visa_001');
-    expect(json.status).toBe('PENDING');
-    expect(json.payment_url).toBe('https://checkout.visa.example/passkey/abc123');
+    // Two JSON renders: the PENDING create result, then the ACTIVE poll result.
+    // Output is pretty-printed (multi-line), so assert on the full text rather
+    // than parsing line-by-line.
+    const text = out.text();
+    expect(text).toContain('"status": "PENDING"');
+    expect(text).toContain('https://checkout.visa.example/passkey/abc123');
+    expect(text).toContain('"status": "ACTIVE"');
+    expect(text).toContain('4323126883611456'); // DPAN present after the poll
   });
 });
 
@@ -285,6 +345,100 @@ describe('payment-tokens visa-create — failure guards', () => {
 });
 
 // ============================================================
+// payment-tokens visa-create — built-in polling
+// ============================================================
+
+describe('payment-tokens visa-create — built-in polling', () => {
+  it('polls GET /payment-tokens/{id} after create and renders the ACTIVE token', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    captureStderr();
+
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--format', 'json', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '120',
+        '--idempotency-key', 'idem_poll_active',
+      ]),
+    );
+
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/payment-tokens/ptk_visa_001',
+      { type: 'api-key', key: 'sk_key' },
+    );
+    expect(out.text()).toContain('4323126883611456'); // DPAN surfaced after poll
+  });
+
+  it('stops polling and reports failure when the token goes FAILED', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': {
+        id: 'ptk_visa_001',
+        type: 'network_token',
+        status: 'FAILED',
+        payment_brand: 'visa',
+      },
+    });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    // Does not throw; the loop observes FAILED and returns.
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '120',
+        '--idempotency-key', 'idem_poll_failed',
+      ]),
+    );
+
+    // At least one poll happened; it did not render an ACTIVE token.
+    expect(apiClient.get).toHaveBeenCalled();
+  });
+
+  it('times out gracefully when the token never leaves PENDING (no throw)', async () => {
+    // GET keeps returning the PENDING create shape → the 180s window elapses.
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_PENDING,
+    });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '120',
+        '--idempotency-key', 'idem_poll_timeout',
+      ]),
+    );
+
+    // Polled repeatedly (36 ticks fit in the 180s window) and exited without throwing.
+    expect(apiClient.get).toHaveBeenCalled();
+  });
+});
+
+// ============================================================
 // payment-tokens visa-create — programmatic-only (R6.7)
 // ============================================================
 
@@ -341,7 +495,10 @@ describe('payment-tokens visa-create — Property 1: amount-unit round-trip (R13
   it.each(ROUND_TRIP_CASES)(
     'order_amount_cents == entry cents byte-for-byte with no unit conversion (%i → %i)',
     async (cents, wrongDecimal) => {
-      const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+      const apiClient = mockApiClient({
+        '/payment-tokens/create': VISA_PENDING,
+        '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+      });
       const program = buildProgram();
       const cmd = program.command('payment-tokens');
       registerVisaCreateCommand(cmd, { apiClient } as any);
@@ -349,13 +506,15 @@ describe('payment-tokens visa-create — Property 1: amount-unit round-trip (R13
       captureStdout();
       captureStderr();
 
-      await program.parseAsync([
-        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
-        '--api-key', 'sk_key',
-        '--payment-method-id', 'pm_visa_1',
-        '--order-amount-cents', String(cents),
-        '--idempotency-key', `idem_rt_${cents}`,
-      ]);
+      await runWithPoll(() =>
+        program.parseAsync([
+          'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+          '--api-key', 'sk_key',
+          '--payment-method-id', 'pm_visa_1',
+          '--order-amount-cents', String(cents),
+          '--idempotency-key', `idem_rt_${cents}`,
+        ]),
+      );
 
       expect(apiClient.post).toHaveBeenCalledTimes(1);
       const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
