@@ -75,7 +75,7 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .option('--type <type>', 'Payment method type (default: card)', 'card')
     .option(
       '--payment-brand <brand>',
-      'Payment brand: "evo" (default; existing 3DS/Drop-in binding) or "unionpay" (UPI Agent Pay enrollment)',
+      'Payment brand: "evo" (default; existing 3DS/Drop-in binding), "unionpay" (UPI Agent Pay enrollment), or "visa" (Visa Intelligent Commerce passkey enrollment)',
       'evo',
     )
     .option(
@@ -105,6 +105,10 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .option(
       '--return-url <url>',
       'Optional front-end redirect URL after UPI enrollment completes. Only applicable to --payment-brand unionpay. If not provided, the caller determines post-enrollment navigation.',
+    )
+    .option(
+      '--client-reference-id <id>',
+      'Visa only (--payment-brand visa): resume an in-flight two-phase enrollment. Omit for phase 1 (submit card details); pass back the client_reference_id returned by phase 1 — after the Payment Passkey has been registered — to complete phase 2 (no card details needed).',
     );
 
   attachSchemaHelp(cmd, pmAddSchema);
@@ -115,15 +119,20 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     const isYes = Boolean(opts.yes);
 
     const paymentBrand = String(opts.paymentBrand ?? 'evo').toLowerCase();
-    if (paymentBrand !== 'evo' && paymentBrand !== 'unionpay') {
+    if (paymentBrand !== 'evo' && paymentBrand !== 'unionpay' && paymentBrand !== 'visa') {
       throw new CliError(
         'PARAM_INVALID',
-        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo" or "unionpay".`,
+        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo", "unionpay", or "visa".`,
       );
     }
 
     if (paymentBrand === 'unionpay') {
       await handleUnionpayPaymentBrand(deps, opts, format);
+      return;
+    }
+
+    if (paymentBrand === 'visa') {
+      await handleVisaPaymentBrand(deps, opts, format, isYes);
       return;
     }
 
@@ -429,6 +438,180 @@ async function handleUnionpayPaymentBrand(
   }
 
   spinner?.stop('info', 'Timed out waiting for card binding result. Check status later with: payment-methods get ' + pm.id);
+}
+
+// ============================================================
+// Visa payment brand (VIC passkey enrollment: POST create(payment_brand=visa))
+// ============================================================
+
+/**
+ * Visa payment brand: POST /payment-methods/create with `payment_brand=visa`
+ * against the platform's Visa Intelligent Commerce (VIC) two-phase passkey
+ * enrollment (see platform `_create_visa_pm`).
+ *
+ *  - Phase 1 (no --client-reference-id): submit the card details
+ *    (--card-number / --expiry / --cvv / --email). The platform provisions the
+ *    VTS token and, if the device has no registered Payment Passkey yet, stops
+ *    at PENDING and returns a `client_reference_id`.
+ *  - Phase 2 (--client-reference-id from phase 1): after the Payment Passkey is
+ *    registered, re-submit with the SAME client_reference_id (card details are
+ *    NOT required) to resume the in-flight enrollment — VIC card enrollment
+ *    completes and the PM turns ACTIVE.
+ *
+ * The request hits the same POST /payment-methods/create + 3DS-style
+ * verification/status polling as manual evo mode; only the request body
+ * (payment_brand=visa, optional client_reference_id) differs.
+ */
+async function handleVisaPaymentBrand(
+  deps: AddDeps,
+  opts: Record<string, unknown>,
+  format: OutputFormat,
+  isYes: boolean,
+): Promise<void> {
+  const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
+    message: 'API Key:',
+    type: 'password',
+  });
+
+  const type = (opts.type as string) || 'card';
+  const clientReferenceId = ((opts.clientReferenceId as string | undefined) ?? '').trim();
+  const resuming = clientReferenceId.length > 0;
+
+  // Phase 1 needs the card triplet + email; phase 2 (resume) does not — the
+  // card was already provisioned, so only the client_reference_id is required.
+  // --member is optional and never enforced CLI-side (server owns attribution).
+  const member = ((opts.member as string | undefined) ?? '').trim();
+
+  const body: Record<string, unknown> = {
+    type,
+    payment_brand: 'visa',
+    ...(member ? { member_id: member } : {}),
+  };
+
+  if (resuming) {
+    body.client_reference_id = clientReferenceId;
+    // The platform still requires `email` on resume (it re-validates the full
+    // create body, not a partial resume payload). Collect it the same way phase
+    // 1 does: use --email when given, otherwise prompt; in --yes mode a missing
+    // email is a hard error rather than a silent 2101 from the server.
+    let email = (opts.email as string | undefined)?.trim();
+    if (!email) {
+      if (isYes) {
+        throw new CliError(
+          'PARAM_INVALID',
+          'Missing required --email for visa enrollment resume (required in --yes mode).',
+        );
+      }
+      email = (
+        await PromptEngine.resolveInput(undefined, {
+          message: 'Email (for 3DS/VIC verification):',
+          validate: (v) => v.trim().length > 0 || 'Email is required',
+        })
+      ).trim();
+    }
+    body.email = email;
+  } else {
+    const flags: Record<string, string | undefined> = {
+      email: opts.email as string | undefined,
+      cardNumber: opts.cardNumber as string | undefined,
+      expiry: opts.expiry as string | undefined,
+      cvv: opts.cvv as string | undefined,
+    };
+    const params = await collectPaymentMethodParams(type, flags);
+    Object.assign(body, params);
+    body.payment_brand = 'visa';
+  }
+
+  const result = await deps.apiClient.post<PaymentMethod>(
+    '/payment-methods/create',
+    { type: 'api-key', key: apiKey },
+    body,
+  );
+
+  if (!result.success) {
+    throw CliError.fromApi(result, { auth: 'api-key' });
+  }
+
+  const pm = result.data;
+  const configManager = new ConfigManager();
+
+  notify(format, 'success', resuming ? 'Visa enrollment resumed' : 'Visa enrollment initiated');
+
+  const createdResult: CommandResult<PaymentMethod> = {
+    data: pm,
+    text: () => {
+      const lines: [string, string][] = [
+        ['ID', pm.id],
+        ['Type', pm.type ?? 'card'],
+        ['Status', pm.status],
+      ];
+      if (pm.payment_brand) lines.push(['Payment Brand', pm.payment_brand]);
+      if (pm.client_reference_id) lines.push(['Client Reference ID', pm.client_reference_id]);
+      if (pm.vic_card_status) lines.push(['VIC Card Status', pm.vic_card_status]);
+      if (pm.passkey_registered !== undefined) {
+        lines.push(['Passkey Registered', String(pm.passkey_registered)]);
+      }
+      if (pm.brand) lines.push(['Brand', pm.brand]);
+      if (pm.last4) lines.push(['Last 4', pm.last4]);
+      return Formatter.keyValue(lines);
+    },
+  };
+  await renderWithContext(createdResult, { format }, configManager);
+
+  // Already terminal (ACTIVE after a resume, or a straight ACTIVE) — done.
+  if (pm.status === 'ACTIVE') {
+    return;
+  }
+
+  // PENDING: the device must register a Payment Passkey before enrollment can
+  // complete. Guide the caller to register the passkey, then resume with the
+  // returned client_reference_id.
+  if (pm.status === 'PENDING') {
+    notify(
+      format,
+      'info',
+      'Register the Payment Passkey, then resume with: ' +
+        `agenzo-token-cli payment-methods add --payment-brand visa --client-reference-id ${pm.client_reference_id ?? '<client_reference_id>'} --api-key <your_key>`,
+    );
+
+    // In --yes / automation mode, do not poll: the orchestrator drives the
+    // passkey registration + resume out of band. Print state and exit.
+    if (isYes) {
+      return;
+    }
+
+    const finalStatus = await poll3dsVerification(deps.apiClient, apiKey, pm.id, format);
+    if (finalStatus === 'ACTIVE') {
+      const getResult = await deps.apiClient.get<PaymentMethod>(
+        `/payment-methods/${pm.id}`,
+        { type: 'api-key', key: apiKey },
+      );
+      notify(format, 'success', 'Payment method activated');
+      const activatedPm = getResult.success ? getResult.data : { ...pm, status: 'ACTIVE' };
+      const activatedResult: CommandResult<PaymentMethod> = {
+        data: activatedPm,
+        text: () => {
+          const lines: [string, string][] = [
+            ['ID', activatedPm.id],
+            ['Type', activatedPm.type ?? 'card'],
+            ['Status', activatedPm.status],
+          ];
+          if (activatedPm.brand) lines.push(['Brand', activatedPm.brand]);
+          if (activatedPm.last4) lines.push(['Last 4', activatedPm.last4]);
+          return Formatter.keyValue(lines);
+        },
+      };
+      await renderWithContext(activatedResult, { format }, configManager);
+    } else if (finalStatus === 'FAILED') {
+      notify(format, 'error', 'Visa enrollment failed');
+    } else if (finalStatus === 'TIMEOUT') {
+      notify(
+        format,
+        'info',
+        `Verification timed out (15 min). Check status with: agenzo-token-cli payment-methods get ${pm.id} --api-key <your_key>`,
+      );
+    }
+  }
 }
 
 // ============================================================

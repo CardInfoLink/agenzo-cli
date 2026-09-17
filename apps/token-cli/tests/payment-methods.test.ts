@@ -827,3 +827,137 @@ describe('payment-methods add --mode dropin', () => {
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// payment-methods add --payment-brand visa (VIC passkey two-phase enrollment)
+// ============================================================
+
+describe('payment-methods add --payment-brand visa', () => {
+  it('phase 1: POST create(payment_brand=visa) with card triplet, prints client_reference_id (no polling in --yes)', async () => {
+    const visaPm = {
+      id: 'pm_visa_1',
+      type: 'card',
+      status: 'PENDING',
+      payment_brand: 'visa',
+      client_reference_id: 'visa-enroll-abc123',
+      vic_card_status: 'PENDING',
+      passkey_registered: false,
+    };
+    const apiClient = mockApiClient({ '/payment-methods/create': visaPm });
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-methods', 'add',
+      '--api-key', 'sk_key',
+      '--payment-brand', 'visa',
+      '--card-number', '4111111111111111',
+      '--expiry', '1230',
+      '--cvv', '123',
+      '--email', 'user@example.com',
+      '--member', 'mem_123',
+    ]);
+
+    // phase-1 body carries payment_brand=visa + card triplet + member_id, no client_reference_id
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/create',
+      { type: 'api-key', key: 'sk_key' },
+      expect.objectContaining({
+        type: 'card',
+        payment_brand: 'visa',
+        member_id: 'mem_123',
+        card_number: '4111111111111111',
+        cvv: '123',
+      }),
+    );
+    const body = (apiClient.post as any).mock.calls[0][2];
+    expect(body.client_reference_id).toBeUndefined();
+
+    const output = out.text();
+    expect(output).toContain('pm_visa_1');
+    expect(output).toContain('visa-enroll-abc123');
+
+    // --yes: no polling
+    expect(apiClient.get).not.toHaveBeenCalled();
+  });
+
+  it('phase 2 (resume): POST create with client_reference_id and no card details', async () => {
+    const activatedPm = {
+      id: 'pm_visa_1',
+      type: 'card',
+      status: 'ACTIVE',
+      payment_brand: 'visa',
+      vic_card_status: 'ACTIVE',
+      passkey_registered: true,
+    };
+    const apiClient = mockApiClient({ '/payment-methods/create': activatedPm });
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-methods', 'add',
+      '--api-key', 'sk_key',
+      '--payment-brand', 'visa',
+      '--client-reference-id', 'visa-enroll-abc123',
+      '--email', 'user@example.com',
+    ]);
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/create',
+      { type: 'api-key', key: 'sk_key' },
+      { type: 'card', payment_brand: 'visa', client_reference_id: 'visa-enroll-abc123', email: 'user@example.com' },
+    );
+    // resume must NOT carry card fields
+    const body = (apiClient.post as any).mock.calls[0][2];
+    expect(body.card_number).toBeUndefined();
+    expect(body.cvv).toBeUndefined();
+
+    // Already ACTIVE — no polling needed
+    expect(apiClient.get).not.toHaveBeenCalled();
+  });
+
+  it('phase 2 (resume) in --yes mode rejects when --email is missing, without calling the API', async () => {
+    const apiClient = mockApiClient({});
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-methods', 'add',
+        '--api-key', 'sk_key',
+        '--payment-brand', 'visa',
+        '--client-reference-id', 'visa-enroll-abc123',
+      ]),
+    ).rejects.toThrow(CliError);
+    // The missing-email guard fires before any request.
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown --payment-brand without calling the API', async () => {
+    const apiClient = mockApiClient({});
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await expect(
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-methods', 'add',
+        '--api-key', 'sk_key', '--payment-brand', 'mastercard',
+      ]),
+    ).rejects.toThrow(CliError);
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+});
