@@ -57,11 +57,7 @@ function formatVisaPendingToken(data: Record<string, unknown>): string {
     ['Payment Token ID', String(data.id || '')],
     ['Type', 'Network Token'],
     ['Status', String(data.status || 'PENDING')],
-    ['Payment URL', String(data.payment_url || '')],
   ];
-  if (data.payment_url_expires_in !== undefined && data.payment_url_expires_in !== null) {
-    lines.push(['Payment URL Expires In', String(data.payment_url_expires_in)]);
-  }
   if (data.payment_brand) {
     lines.push(['Payment Brand', String(data.payment_brand)]);
   }
@@ -274,7 +270,7 @@ export function registerVisaCreateCommand(
     notify(
       format,
       'info',
-      'Open the Payment URL to complete the Visa passkey verification. Waiting for result...',
+      'Check your email and open the verification link to complete the Visa passkey verification. Waiting for result...',
     );
 
     const VISA_TOKEN_POLL_INTERVAL_MS = 5000;
