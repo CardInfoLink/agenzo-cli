@@ -18,12 +18,19 @@ export interface PaymentMethod {
   magic_link_token?: string;
   expires_at?: string;
   created_at: string;
-  /** Payment brand: 'evo' (default, existing 3DS/Drop-in binding) | 'unionpay'. */
+  /** Server-side payment brand of the created method (e.g. 'visa' | 'mastercard' | 'unionpay'). */
   payment_brand?: string;
   /** UnionPay only: present when payment_brand === 'unionpay' and status === 'PENDING'. */
   enroll_url?: string;
   /** UnionPay only: enrollment correlation id, present when payment_brand === 'unionpay'. */
   correlation_id?: string;
+  /**
+   * Hosted binding only: the secure link the cardholder opens to enter the card
+   * and complete verification. Returned by POST /payment-methods/binding-session.
+   */
+  link_url?: string;
+  /** Hosted binding only: TTL (seconds) of {@link link_url}. */
+  link_url_expires_in?: number;
   /** Visa only: two-phase enrollment reference; pass back to resume phase 2. */
   client_reference_id?: string;
   /** Visa only: VIC card enrollment status (e.g. 'PENDING' | 'ACTIVE'). */
@@ -34,7 +41,7 @@ export interface PaymentMethod {
   member_id?: string | null;
 }
 
-// ---- Drop-in session (payment-methods add --mode dropin) ----
+// ---- Drop-in session (payment-tokens dropin-create) ----
 
 /**
  * Response from `POST /payment-methods/dropin/create`.

@@ -13,7 +13,6 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { Command } from 'commander';
 import { registerListCommand } from '../src/payment-methods/list.js';
 import { registerGetCommand as registerPmGetCommand } from '../src/payment-methods/get.js';
-import { registerAddCommand } from '../src/payment-methods/add.js';
 import { registerCreateCommand } from '../src/payment-tokens/create.js';
 import { registerRevokeCommand } from '../src/payment-tokens/revoke.js';
 import {
@@ -63,64 +62,6 @@ function captureStderr() {
   return { spy, text: () => chunks.join('\n') };
 }
 
-// ============================================================
-// §1. 3DS Timeout (vi.useFakeTimers)
-// ============================================================
-
-describe('3DS Timeout with fake timers', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    delete process.env.AGENZO_FORMAT;
-  });
-
-  it('polling timeout after 15 min emits timeout hint message', async () => {
-    const createdPm = { id: 'pm_timeout', type: 'card', status: 'PENDING', brand: 'Visa', first6: '411111', last4: '4242' };
-
-    // API always returns PENDING for verification status
-    const apiClient = {
-      get: vi.fn().mockImplementation((path: string) => {
-        if (path === '/payment-methods/verification/status') {
-          return Promise.resolve({ success: true, data: { status: 'PENDING' } });
-        }
-        return Promise.resolve({ success: true, data: {} });
-      }),
-      post: vi.fn().mockResolvedValue({ success: true, data: createdPm }),
-    };
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    captureStdout();
-    const err = captureStderr();
-
-    // Start the command (enters polling loop after POST returns PENDING)
-    const promise = program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--api-key', 'sk_key',
-      '--type', 'card',
-      '--email', 'test@example.com',
-      '--card-number', '4111111111111111',
-      '--expiry', '1228',
-      '--cvv', '123',
-      '--idempotency-key', 'idem_timeout',
-    ]);
-
-    // Advance time past 15-minute timeout (15 * 60 * 1000 = 900_000 ms)
-    await vi.advanceTimersByTimeAsync(15 * 60 * 1000 + 5000);
-
-    await promise;
-
-    const stderrText = err.text();
-    expect(stderrText).toContain('Verification timed out (15 min)');
-    expect(stderrText).toContain('agenzo-token-cli payment-methods get pm_timeout --api-key <your_key>');
-  });
-});
 
 // ============================================================
 // §2. JSON Envelope Field-Precise Assertions
@@ -435,39 +376,6 @@ describe('Idempotency-Key header verification', () => {
     delete process.env.AGENZO_FORMAT;
   });
 
-  it('payment-methods add passes exact --idempotency-key value as Idempotency-Key header', async () => {
-    const createdPm = { id: 'pm_idem', type: 'card', status: 'ACTIVE', brand: 'Visa', first6: '411111', last4: '4242' };
-    const apiClient = {
-      get: vi.fn().mockResolvedValue({ success: true, data: {} }),
-      post: vi.fn().mockResolvedValue({ success: true, data: createdPm }),
-    };
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    captureStdout();
-    captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--api-key', 'sk_key',
-      '--type', 'card',
-      '--email', 'test@example.com',
-      '--card-number', '4111111111111111',
-      '--expiry', '1228',
-      '--cvv', '123',
-      '--idempotency-key', 'my-unique-key-abc-123',
-    ]);
-
-    // Verify the exact header value in the POST call
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/create',
-      expect.anything(),
-      expect.anything(),
-      { 'Idempotency-Key': 'my-unique-key-abc-123' },
-    );
-  });
 
   it('payment-tokens revoke passes exact --idempotency-key value as Idempotency-Key header', async () => {
     const revokeResult = { id: 'pt_idem', status: 'REVOKED', revoked_at: '2026-01-15T12:00:00Z', expires_at: null };

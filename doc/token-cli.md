@@ -10,7 +10,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 
 | Noun | Verb | Type | Description |
 |---|---|---|---|
-| `payment-methods` | `add` | Write | Add a payment method — Evo manual 3DS, Evo Drop-in (`--mode dropin`), UnionPay enrollment (`--payment-brand unionpay`), or Visa VIC two-phase passkey enrollment (`--payment-brand visa`). Blocks and polls to a terminal status. |
+| `payment-methods` | `add` | Write | Add a payment method. `--payment-brand visa`, `mastercard`, or omitted all open the **same hosted binding page** (identical `link_url`) — the CLI never collects card details; the page detects the card brand and runs the matching rail (Visa self-mint+passkey / Mastercard EVO). `--payment-brand unionpay` for UnionPay enrollment (separate flow). Blocks and polls to a terminal status. |
 | `payment-methods` | `list` | Read | List payment methods (optionally `--member`) |
 | `payment-methods` | `get` | Read | View payment method details |
 | `payment-methods` | `disable` | Write | Disable a payment method (revokes its tokens) |
@@ -36,24 +36,15 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 ## Payment Methods
 
 ```bash
-# Evo manual 3DS (blocks until ACTIVE / FAILED / 15-min timeout)
-agenzo-token-cli payment-methods add --api-key <key> --email user@example.com \
-  --card-number 2223001870064586 --expiry 1226 --cvv 935 --idempotency-key idem_001
-
-# Evo Drop-in (blocks up to 30 min; --no-poll to return immediately)
-agenzo-token-cli payment-methods add --mode dropin --api-key <key> --email user@example.com
+# Hosted binding (default): the CLI opens a binding session, prints link_url,
+# and blocks polling up to 30 min. The cardholder opens link_url in a browser,
+# enters the card, and the page runs the matching rail (Visa self-mint + passkey,
+# or Mastercard/others via EVO Drop-in) — the CLI never touches the card.
+agenzo-token-cli payment-methods add --api-key <key> --email user@example.com
 
 # UnionPay enrollment (blocks up to 60s)
 agenzo-token-cli payment-methods add --payment-brand unionpay --member <member_id> \
   --api-key <key> --email user@example.com
-
-# Visa VIC enrollment — phase 1 (submit card, returns PENDING + passkey_url + client_reference_id)
-agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
-  --email user@example.com --card-number 4622943123122245 --expiry 0128 --cvv 816
-# … user registers a Payment Passkey in a browser via passkey_url …
-# Visa VIC enrollment — phase 2 (resume with client_reference_id, flips to ACTIVE)
-agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
-  --email user@example.com --client-reference-id <client_reference_id from phase 1>
 
 agenzo-token-cli payment-methods list --api-key <key> [--member <member_id>]
 agenzo-token-cli payment-methods get <pm_id> --api-key <key>
@@ -66,55 +57,36 @@ agenzo-token-cli payment-methods disable <pm_id> --api-key <key> --idempotency-k
 |---|---|---|
 | `--api-key <key>` | all | Reuse the key from admin-cli; do not ask again |
 | `--type <type>` | all | Default `card` |
-| `--payment-brand <brand>` | all | `evo` (default), `unionpay`, or `visa` |
-| `--mode <mode>` | evo | `manual` (default) or `dropin` |
-| `--email <email>` | all | Manual: 3DS verification address. Dropin: session reference. UnionPay: binding email. Visa: required in both phases (VIC enrollment address). |
-| `--card-number` / `--expiry <mmyy>` / `--cvv` | evo manual, visa phase 1 | Skip interactive prompts. ⚠️ Values may land in shell history — automation only. |
-| `--client-reference-id <id>` | visa | Resume an in-flight two-phase Visa enrollment. Omit for phase 1 (submit card); pass the phase-1 `client_reference_id` — after the Payment Passkey is registered — to complete phase 2 (no card needed). |
-| `--idempotency-key <key>` | evo manual | Required; prompted if omitted, hard-fails under `--yes`. Not used by dropin/unionpay. |
-| `--no-poll` | evo dropin | Mint the session, print it, exit — for front-end-driven flows |
-| `--member <id>` | unionpay | **Required** (prompted interactively; hard-fails under `--yes`) |
+| `--payment-brand <brand>` | all | Omit (default) for the hosted binding page (supports Visa + Mastercard); `unionpay` for UnionPay enrollment. `evo` / `visa` are gone — the page splits by card brand. |
+| `--email <email>` | all | The address the hosted binding link is emailed to (and the UnionPay enrollment email). **Not** a card credential: it is a session reference / cardholder identity, never used to authenticate the card to Visa or Mastercard. |
+| `--member <id>` | all | End-user this card belongs to. Optional at the CLI boundary (server decides if mandatory per brand — UnionPay requires it). Omitting stores a developer-scoped card. |
 | `--return-url <url>` | unionpay | Platform-side post-enrollment navigation hint; never sent to UnionPay |
 
-### add — Evo manual 3DS
+### add (default) — hosted binding
 
-1. Collects email + card details, POSTs `/payment-methods/create` with the `Idempotency-Key` header.
-2. Prints the created PM (PENDING), then polls verification status every **3s for up to 15 minutes**.
-3. The user must complete 3DS in a **browser** — keep the process alive for the whole flow (background it for automation; do not close stdin).
-4. On ACTIVE the CLI re-fetches and prints brand / first6 / last4. On timeout it prints the `payment-methods get <pm_id>` follow-up hint.
-5. Duplicate cards (same first6 + last4) are overwritten, not rejected.
+The CLI never collects card details. It opens a hosted binding session and hands
+the cardholder a link; the card is entered and verified **in the browser**, and
+the hosted page itself detects the card brand and runs the matching rail — Visa
+(VTS self-mint + Payment Passkey) or Mastercard/others (EVO Drop-in) — with both
+landing on the same PM. This mirrors the H5 flow: one card-entry surface, brand
+split inside the page. `--mode`, `--card-number`, `--cvv`, `--expiry`,
+`--client-reference-id`, `--idempotency-key`, and `--payment-brand evo|visa` no
+longer exist on this path.
 
-### add `--mode dropin` — Evo Drop-in
+1. `POST /payment-methods/binding-session` with `{ email, member_id? }` → prints
+   `ID` (PENDING), `Status`, and **`Link URL`** (the hosted page). The link is
+   also emailed to `--email`.
+2. The cardholder opens the Link URL in a browser, enters the card, and completes
+   verification (passkey for Visa, 3DS for Mastercard via EVO Drop-in).
+3. The CLI polls `GET /payment-methods/verification/status` every **5s for up to
+   30 minutes**. Both rails write their result onto the same PM, so this single
+   poll converges regardless of which card brand was entered.
+4. On ACTIVE the CLI prints brand / first6 / last4. `FAILED` / `EXPIRED` / a
+   30-minute timeout print the `PM ID` and exit non-zero — re-run with the same
+   `--email`; the PENDING record is reused.
 
-The CLI mints a hosted LinkPay session; the cardholder enters their card in the **DropIn SDK** rendered by your own front-end. PAN/CVV never reach the CLI or the backend. Card flags and `--idempotency-key` are unused in this mode.
-
-1. `POST /payment-methods/dropin/create` → prints `Session ID` (full `{ id, session_id, merchant_trans_id, status }` under `--format json`).
-2. Your front-end initialises the SDK with that session id.
-3. The CLI polls verification status every **5s for up to 30 minutes** unless `--no-poll` was passed.
-4. ACTIVE prints brand + last4. `FAILED` / `EXPIRED` / timeout print the `PM ID` and exit non-zero.
-
-Front-end integration (abridged):
-
-```bash
-npm install cil-dropin-components
-```
-
-```javascript
-import DropInSDK from 'cil-dropin-components'
-
-const sdk = new DropInSDK({
-  id: '#dropInApp',
-  type: 'payment',
-  sessionID: '<session_id from CLI output>',
-  mode: 'embedded',            // or 'bottomUp' for mobile
-  environment: 'HKG_prod',     // 'UAT' for sandbox
-  payment_completed: (d) => console.log('added', d.merchantTransID),
-  payment_failed: (d) => console.log('failed', d.message),
-  payment_cancelled: () => {}, // session stays PENDING; the CLI keeps polling
-})
-```
-
-The session id is single-use. If it expires (30 min), re-run with the same `--email` — the PENDING record is reused.
+The card number, CVV and expiry never reach the CLI, the calling system, or the
+CLI's argv — only the hosted page (and, downstream, the acquirer/VTS) sees them.
 
 ### add `--payment-brand unionpay` — UnionPay card enrollment
 
@@ -127,32 +99,6 @@ No card details are entered at the terminal. The user completes enrollment by au
 5. On timeout the PM stays PENDING — check later with `payment-methods get <pm_id>` or `unionpay-status <pm_id>`.
 
 `--member <id>` is caller-defined (your own end-user id) and must be **stable**: the same value is reused server-side for token creation, so a mismatch makes UnionPay reject the token request.
-
-### add `--payment-brand visa` — Visa VIC two-phase passkey enrollment
-
-Enrolls a card onto the **Visa Intelligent Commerce (VIC)** rail. This is a **two-phase** flow because the Visa protocol forces a browser WebAuthn **Payment Passkey** registration between the two phases — the private key is created on the user's device, so the server cannot proxy it.
-
-**Phase 1** — submit the card:
-```bash
-agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
-  --email user@example.com --card-number <pan> --expiry <mmyy> --cvv <cvv>
-```
-1. `POST /payment-methods/create` with `payment_brand=visa` + card details. The VTS network token is minted immediately (`token_status=ACTIVE`).
-2. Because the device has no passkey yet (`passkey_registered=false`), the PM stays **PENDING** and the response includes **`passkey_url`** (valid ~15 min) and **`client_reference_id`**.
-3. The user opens `passkey_url` in a **browser** (HTTPS required by the Visa FIDO SDK) and registers a Payment Passkey.
-
-**Phase 2** — resume after passkey registration:
-```bash
-agenzo-token-cli payment-methods add --payment-brand visa --api-key <key> \
-  --email user@example.com --client-reference-id <client_reference_id from phase 1>
-```
-4. `POST /payment-methods/create` again with the same `client_reference_id` (no card details). `--email` is still **required** — the backend re-validates the full create body.
-5. The PM flips to **ACTIVE** with `payment_brand=visa`, `passkey_registered=true`, `vic_card_status=ACTIVE`.
-
-Notes:
-- The two phases **cannot be collapsed** — the passkey registration between them is a browser/device action.
-- Idempotent by `(developer, card)`: re-submitting an already-ACTIVE card returns ACTIVE directly, with **no** `passkey_url` and no PENDING. To see a fresh PENDING + `passkey_url`, use a card this developer has never enrolled.
-- Once ACTIVE, the card can mint network tokens via `payment-tokens visa-create`.
 
 ### Non-blocking pairs (programmatic callers)
 

@@ -19,7 +19,6 @@ import {
   resolveFormat,
 } from '@agenzo/cli-core';
 import { registerDisableCommand } from '../src/payment-methods/disable.js';
-import { registerAddCommand } from '../src/payment-methods/add.js';
 import { registerCreateCommand, formatPaymentToken, mapTokenType, usdToCents } from '../src/payment-tokens/create.js';
 import { registerRevokeCommand } from '../src/payment-tokens/revoke.js';
 import { formatPaymentTokenGet } from '../src/payment-tokens/get.js';
@@ -89,27 +88,6 @@ describe('Property 4: idempotency-key enforcement — write commands + --yes + m
     expect(api.post).not.toHaveBeenCalled();
     expect(api.get).not.toHaveBeenCalled();
   });
-
-  it('payment-methods add --yes without --idempotency-key → IdempotencyKeyRequiredError, no request', async () => {
-    const api = mockApiClient();
-    const root = buildProgram();
-    const group = root.command('payment-methods');
-    registerAddCommand(group, { apiClient: api as never });
-
-    await expect(
-      root.parseAsync([
-        'node', 'cli', '--yes', 'payment-methods', 'add',
-        '--api-key', 'k',
-        '--email', 'a@b.com',
-        '--card-number', '4111111111111111',
-        '--expiry', '1225',
-        '--cvv', '123',
-      ]),
-    ).rejects.toBeInstanceOf(IdempotencyKeyRequiredError);
-
-    expect(api.post).not.toHaveBeenCalled();
-  });
-
   it('payment-tokens create --yes without --idempotency-key → IdempotencyKeyRequiredError, no request', async () => {
     const api = mockApiClient();
     // Mock the feature check + payment method list for create to proceed to the idempotency check
