@@ -111,39 +111,32 @@ export function attachSchemaHelp(cmd: Command, schema: VerbSchema): Command {
 // payment-methods verb schemas
 // ============================================================
 
-/** `payment-methods add` schema. Write op (W/Y in manual mode; dropin mode is non-blocking). */
+/** `payment-methods add` schema. Non-blocking: returns a hosted link_url, then polls to terminal status. */
 export const pmAddSchema: VerbSchema = {
   cli: CLI_NAME,
   noun: PAYMENT_METHODS_NOUN,
   verb: 'add',
-  description: 'Add a payment method (manual 3DS or Drop-in session)',
+  description: 'Add a payment method via the hosted binding page (or UnionPay enrollment)',
   flags: {
     type: { type: 'string', required: false, default: 'card', description: 'Payment method type' },
-    mode: {
+    'payment-brand': {
       type: 'string',
       required: false,
-      default: 'manual',
       description:
-        'Add mode: "manual" (CLI collects card details and polls 3DS) or "dropin" (mint a Drop-in session; the app opens the Drop-in SDK for the user to enter card details securely — use this mode when the user wants to bind/add a card from chat)',
-      constraints: 'manual | dropin',
+        '"visa", "mastercard", or omitted all open the SAME hosted binding page (identical link_url): the CLI never collects card details — it returns a link_url the cardholder opens in a browser, and the page detects the card brand and runs the matching rail (Visa VTS + passkey, or Mastercard EVO). Pass "unionpay" for UnionPay Agent Pay enrollment (separate flow).',
+      constraints: 'visa | mastercard | unionpay | (omitted)',
     },
     email: {
       type: 'string',
       required: 'conditional',
       description:
-        "Manual mode: email for 3DS verification. Dropin mode: email used as the Drop-in session reference. Use the user's login profile email — never ask in chat.",
+        "Cardholder email: the hosted binding link is sent here (and used as the UnionPay enrollment email). Use the user's login profile email — never ask in chat.",
     },
-    'idempotency-key': {
+    'return-url': {
       type: 'string',
       required: false,
-      description: 'Idempotency key forwarded verbatim as the Idempotency-Key header (manual mode only)',
-    },
-    'no-poll': {
-      type: 'bool',
-      required: false,
-      default: false,
       description:
-        'Dropin mode: mint the session, print it, and exit immediately without polling verification status (for server/SDK-driven flows where the front-end completes the binding). Agents integrating with a UI card flow should set this.',
+        'Optional front-end redirect URL after UPI enrollment completes. Only applicable to --payment-brand unionpay.',
     },
     member: {
       type: 'string',
@@ -154,19 +147,28 @@ export const pmAddSchema: VerbSchema = {
     },
   },
   response: {
-    id: { type: 'string', description: 'Payment method id' },
-    session_id: { type: 'string|absent', description: 'Drop-in session id (dropin mode only) — pass to the front-end Drop-in SDK, never read aloud to the user' },
+    id: { type: 'string', description: 'Payment method id — poll verification/status by this' },
+    link_url: {
+      type: 'string|absent',
+      description:
+        'Hosted binding: the secure link the cardholder opens to enter the card and verify. Present on the default (non-unionpay) path.',
+    },
+    enroll_url: {
+      type: 'string|absent',
+      description: 'UnionPay only: the enrollment link the cardholder opens.',
+    },
     status: { type: 'string', description: 'PENDING | ACTIVE | FAILED | EXPIRED' },
     brand: { type: 'string|absent', description: 'Card brand, once known' },
     last4: { type: 'string|absent', description: 'Card last 4 digits, once known' },
   },
   example: {
-    command: 'agenzo-token-cli payment-methods add --mode dropin --email user@example.com --no-poll',
+    command: 'agenzo-token-cli payment-methods add --email user@example.com',
     output_summary:
-      'Dropin mode returns { id, session_id }. Never read card numbers/CVV/expiry to or from the user (PCI) — the Drop-in SDK collects them securely.',
+      'Returns { id, link_url }. Hand the link_url to the cardholder to open in a browser; the page collects the card (Visa or Mastercard) and completes verification. Never read/collect card numbers/CVV/expiry via the CLI (PCI).',
   },
   error_recovery: {
-    PARAM_INVALID: 'Fix the offending flag (mode must be "manual" or "dropin"), then retry.',
+    PARAM_INVALID:
+      'Fix the offending flag (--payment-brand must be "visa", "mastercard", "unionpay", or omitted), then retry.',
   },
 };
 
@@ -289,7 +291,7 @@ export const ptCreateSchema: VerbSchema = {
   },
   error_recovery: {
     TOKEN_FEATURE_DISABLED: 'This token type is not enabled yet. Tell the user and suggest an alternative type if applicable.',
-    CLIENT_NO_PAYMENT_METHOD: 'The user has no ACTIVE payment method. Guide them to add one first (payment-methods add --mode dropin).',
+    CLIENT_NO_PAYMENT_METHOD: 'The user has no ACTIVE payment method. Guide them to add one first (payment-methods add).',
     CLIENT_CARD_NOT_MATCHED: 'The --card last-4 did not match any ACTIVE card. Call payment-methods list to see available cards.',
   },
 };

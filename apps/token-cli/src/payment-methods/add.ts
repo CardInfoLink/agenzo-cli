@@ -8,33 +8,25 @@ import {
   resolveFormat,
   notify,
   CliError,
-  IdempotencyKeyRequiredError,
   renderWithContext,
 } from '@agenzo/cli-core';
 import type { CommandResult, OutputFormat } from '@agenzo/cli-core';
-import type { DropinCreateResponse, PaymentMethod } from '../types/api.js';
-import { collectPaymentMethodParams } from './prompts.js';
+import type { PaymentMethod } from '../types/api.js';
 import { attachSchemaHelp, pmAddSchema } from '../verb-schema.js';
 
 // ============================================================
 // Constants
 // ============================================================
 
-// Manual mode (3DS via email): the user clicks the magic link in their
-// inbox, so polling is short and tight.
-const MANUAL_POLL_INTERVAL_MS = 3000;
-const MANUAL_POLL_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-
-// Drop-in mode (v3): the add-payment-method form is rendered by the Drop-in
-// SDK inside the developer's own front-end, so the operator may need longer
-// to finish in the browser. The backend flips the PM to EXPIRED if the user
-// does not complete in time.
+// Hosted binding: the cardholder enters the card and completes verification in
+// the browser (the hosted page itself splits Visa vs Mastercard), so the CLI
+// polls patiently. The backend flips the PM to EXPIRED if it is not completed
+// in time.
 const DROPIN_POLL_INTERVAL_MS = 5000;
 const DROPIN_POLL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 // Backend writes one of these into PaymentMethod.status when the verification
-// flow reaches a final state. We stop polling on any of them. EXPIRED only
-// ever applies to dropin PMs (manual PMs never expire server-side).
+// flow reaches a final state. We stop polling on any of them.
 const TERMINAL_STATUSES = new Set(['ACTIVE', 'FAILED', 'EXPIRED']);
 
 type AddDeps = { apiClient: ApiClient };
@@ -44,71 +36,45 @@ type AddDeps = { apiClient: ApiClient };
 // ============================================================
 
 /**
- * `payment-methods add` — add a payment method (§3.4.0.1).
+ * `payment-methods add` — add a payment method.
  *
- * Two modes, selected via `--mode`:
+ * Two paths, selected via `--payment-brand`:
  *
- *  - `manual` (default): the CLI collects card details (--email / --card-number
- *    / --expiry / --cvv), POSTs /payment-methods/create, then polls 3DS
- *    verification until ACTIVE / FAILED / 15-minute timeout.
- *  - `dropin`: the CLI mints a Drop-in session (POST /payment-methods/dropin/create
- *    with the developer email), prints the session id so the caller can render
- *    the add-payment UI in their own front-end via the Drop-in SDK, then polls
- *    the same verification/status endpoint until ACTIVE / FAILED / EXPIRED /
- *    30-minute timeout. No card details / idempotency key are needed.
- *
- * Orthogonal to `--mode` is `--payment-brand`, selecting the payment brand:
- *
- *  - `evo` (default): the existing Evo 3DS binding flow above, fully unchanged.
- *  - `unionpay`: dispatches to UPI Agent Pay enrollment. Requires `--member <id>`
- *    (the end-user identity the card is bound to). POSTs /payment-methods/create
- *    with `payment_brand=unionpay`, prints the returned `enroll_url` for the user to open
- *    in a browser to complete card binding, then exits immediately — the CLI
- *    does not poll for unionpay (the async result arrives via webhook; polling
- *    for terminal state is done by the orchestrator, not the CLI).
+ *  - **omitted (default): hosted binding.** The CLI never collects card details.
+ *    It opens a hosted binding session (POST /payment-methods/binding-session),
+ *    prints the returned `link_url`, and polls verification/status until ACTIVE /
+ *    FAILED / EXPIRED / 30-minute timeout. The cardholder enters the card and
+ *    completes verification in the browser; the hosted page itself detects the
+ *    card brand and runs the matching rail — Visa (VTS self-mint + Payment
+ *    Passkey) or Mastercard/others (EVO Drop-in) — with both landing on the same
+ *    PM. This mirrors H5: one card-entry surface, brand split inside the page.
+ *    EVO and Visa are no longer separate CLI brands.
+ *  - **`unionpay`: UPI Agent Pay enrollment.** POSTs /payment-methods/create with
+ *    `payment_brand=unionpay`, prints the returned `enroll_url` for the user to
+ *    complete card binding in a browser, then polls until ACTIVE / FAILED.
+ *    Unchanged.
  */
 export function registerAddCommand(parent: Command, deps: AddDeps): void {
   const cmd = parent
     .command('add')
-    .description('Add a payment method (manual 3DS or Drop-in session)')
+    .description('Add a payment method via the hosted binding page (or UnionPay enrollment)')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--type <type>', 'Payment method type (default: card)', 'card')
     .option(
       '--payment-brand <brand>',
-      'Payment brand: "evo" (default; existing 3DS/Drop-in binding), "unionpay" (UPI Agent Pay enrollment), or "visa" (Visa Intelligent Commerce passkey enrollment)',
-      'evo',
+      'Payment brand: "visa", "mastercard", or omitted all open the SAME hosted binding page (same link_url) — the page detects the card brand and runs the matching rail (Visa VTS + passkey, or Mastercard EVO). Pass "unionpay" for UnionPay Agent Pay enrollment (separate flow).',
     )
     .option(
       '--member <id>',
-      'End-user member id this card belongs to. Required when --payment-brand unionpay; optional (but recommended) in dropin mode so the card is scoped to the member and surfaces in list --member <id>',
-    )
-    .option(
-      '--mode <mode>',
-      'Add mode: "manual" (default; CLI collects card details and polls 3DS) or "dropin" (mint a Drop-in session and poll until the user finishes adding the payment method in the browser)',
-      'manual',
+      'End-user member id this card belongs to. Required when --payment-brand unionpay; optional (but recommended) for hosted binding so the card is scoped to the member and surfaces in list --member <id>',
     )
     .option(
       '--email <email>',
-      'Manual mode: email for 3DS verification. Dropin mode: email used as the Drop-in session reference.',
-    )
-    .option('--card-number <number>', 'Card number (manual mode only)')
-    .option('--expiry <mmyy>', 'Expiry date (MMYY format) (manual mode only)')
-    .option('--cvv <cvv>', 'Card CVV (manual mode only)')
-    .option(
-      '--idempotency-key <key>',
-      'Idempotency key forwarded verbatim as the Idempotency-Key header (manual mode only)',
-    )
-    .option(
-      '--no-poll',
-      'Dropin mode: mint the session, print it, and exit immediately without polling verification status (for server/SDK-driven flows where the front-end completes the binding)',
+      'Cardholder email. Used as the hosted binding session reference (the hosted page emails the secure link there) and as the UnionPay enrollment email.',
     )
     .option(
       '--return-url <url>',
       'Optional front-end redirect URL after UPI enrollment completes. Only applicable to --payment-brand unionpay. If not provided, the caller determines post-enrollment navigation.',
-    )
-    .option(
-      '--client-reference-id <id>',
-      'Visa only (--payment-brand visa): resume an in-flight two-phase enrollment. Omit for phase 1 (submit card details); pass back the client_reference_id returned by phase 1 — after the Payment Passkey has been registered — to complete phase 2 (no card details needed).',
     );
 
   attachSchemaHelp(cmd, pmAddSchema);
@@ -116,13 +82,20 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
   cmd.action(async () => {
     const opts = cmd.optsWithGlobals();
     const format = resolveFormat(opts.format as string | undefined);
-    const isYes = Boolean(opts.yes);
 
-    const paymentBrand = String(opts.paymentBrand ?? 'evo').toLowerCase();
-    if (paymentBrand !== 'evo' && paymentBrand !== 'unionpay' && paymentBrand !== 'visa') {
+    // --payment-brand 取值：`visa` / `mastercard` / 省略 三者走**同一条**托管绑卡链路
+    // （同一个 /payment-methods/binding-session，同一 link_url）——托管页自己按 PAN 分流
+    // 走 Visa（VTS 自铸 + passkey）或万事达（EVO Drop-in），brand 只是可选提示、不改变 URL。
+    // `unionpay` 是独立入口（UPI Agent Pay 报名）。CLI 不再本地收卡、不再本地判品牌。
+    const rawBrand = opts.paymentBrand as string | undefined;
+    const paymentBrand = (rawBrand ?? '').toLowerCase();
+    const HOSTED_BRANDS = ['visa', 'mastercard'];
+    if (paymentBrand && paymentBrand !== 'unionpay' && !HOSTED_BRANDS.includes(paymentBrand)) {
       throw new CliError(
         'PARAM_INVALID',
-        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo", "unionpay", or "visa".`,
+        `Unknown --payment-brand "${rawBrand}". Use "visa" or "mastercard" (both open the ` +
+          `same hosted binding page), omit it (same page, auto-detects brand), or pass ` +
+          `"unionpay" for UnionPay enrollment.`,
       );
     }
 
@@ -131,179 +104,123 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
       return;
     }
 
-    if (paymentBrand === 'visa') {
-      await handleVisaPaymentBrand(deps, opts, format, isYes);
-      return;
-    }
-
-    const mode = String(opts.mode ?? 'manual').toLowerCase();
-    if (mode !== 'manual' && mode !== 'dropin') {
-      throw new CliError(
-        'PARAM_INVALID',
-        `Unknown --mode "${opts.mode}". Expected "manual" or "dropin".`,
-      );
-    }
-
-    if (mode === 'dropin') {
-      await handleDropinMode(deps, opts, format);
-      return;
-    }
-
-    await handleManualMode(deps, opts, format, isYes);
+    // visa / mastercard / 省略 → 同一条托管绑卡链路。
+    await handleHostedBinding(deps, opts, format);
   });
 }
 
 // ============================================================
-// Manual mode (collect card details + 3DS polling)
+// Hosted binding (default): open the hosted page, poll to terminal status
 // ============================================================
 
 /**
- * Manual mode: collect card details, POST /payment-methods/create, then poll
- * 3DS verification status until ACTIVE / FAILED / 15-minute timeout.
+ * 托管绑卡（默认路径，EVO + Visa 合一）。
+ *
+ * CLI 不再本地收卡：调 ``POST /payment-methods/binding-session`` 开一次托管会话，拿到一条
+ * ``link_url`` 打印给用户；持卡人在浏览器里打开、录卡号并完成验证。**托管页自己按卡号品牌
+ * 分流** —— Visa 走 VTS 自铸 + Payment Passkey，Mastercard 等走 EVO Drop-in —— 两条轨都落在
+ * 同一条 pm 上。CLI 随后按 ``verification/status`` 轮询这条 pm 到 ACTIVE / FAILED / 超时。
+ *
+ * 与 H5 完全一致：H5 也是一个统一收卡入口、页面内部按品牌分两条轨；CLI 把「录卡 + 分流」整个
+ * 交给同一个托管页，自己只负责发起会话与轮询终态。卡号从不经过 CLI 或调用方系统。
  */
-async function handleManualMode(
+async function handleHostedBinding(
   deps: AddDeps,
   opts: Record<string, unknown>,
   format: OutputFormat,
-  isYes: boolean,
 ): Promise<void> {
-  // --- Resolve API key ---
   const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
     message: 'API Key:',
     type: 'password',
   });
 
-  // --- Resolve payment method type ---
-  const type = (opts.type as string) || 'card';
+  const email = await PromptEngine.resolveInput(opts.email as string | undefined, {
+    message: 'Email (the hosted binding link is sent here):',
+  });
 
-  // --- Collect card params via PromptEngine ---
-  const flags: Record<string, string | undefined> = {
-    email: opts.email as string | undefined,
-    cardNumber: opts.cardNumber as string | undefined,
-    expiry: opts.expiry as string | undefined,
-    cvv: opts.cvv as string | undefined,
-  };
-  const params = await collectPaymentMethodParams(type, flags);
+  // --member 不在 CLI 侧强制：归属是否必需由服务端判定，CLI 只透传（与其余绑卡入口一致）。
+  const member = ((opts.member as string | undefined) ?? '').trim();
 
-  // --- Idempotency key (required for write, Requirement 6.3) ---
-  let idempotencyKey = opts.idempotencyKey as string | undefined;
-  if (!idempotencyKey) {
-    if (isYes) {
-      throw new IdempotencyKeyRequiredError('payment-methods add');
-    }
-    idempotencyKey = await PromptEngine.resolveInput(undefined, {
-      message: 'Idempotency key (unique per write, for safe retry):',
-      validate: (v) => v.trim().length > 0 || 'Idempotency key is required',
-    });
-  }
+  const configManager = new ConfigManager();
 
-  const extraHeaders: Record<string, string> = {
-    'Idempotency-Key': idempotencyKey,
-  };
-
-  // --- POST /payment-methods/create ---
-  const result = await deps.apiClient.post<PaymentMethod>(
-    '/payment-methods/create',
+  // 开托管绑卡会话。端点是品牌中立名 /payment-methods/binding-session（历史别名
+  // /payment-methods/visa/binding-session 仍可用，但 CLI 走中立名）。
+  const sessionResult = await deps.apiClient.post<PaymentMethod>(
+    '/payment-methods/binding-session',
     { type: 'api-key', key: apiKey },
-    params,
-    extraHeaders,
+    { email, ...(member ? { member_id: member } : {}) },
   );
 
-  if (!result.success) {
-    throw CliError.fromApi(result, { auth: 'api-key' });
+  if (!sessionResult.success) {
+    throw CliError.fromApi(sessionResult, { auth: 'api-key' });
   }
 
-  const pm = result.data;
+  const pm = sessionResult.data;
 
-  // --- Output: created state ---
-  notify(format, 'success', 'Payment method created');
+  notify(format, 'success', 'Hosted binding session created');
 
   const createdResult: CommandResult<PaymentMethod> = {
     data: pm,
-    text: () => {
-      const lines: [string, string][] = [
+    text: () =>
+      Formatter.keyValue([
         ['ID', pm.id],
-        ['Type', pm.type],
         ['Status', pm.status],
-      ];
-      if (pm.brand) lines.push(['Brand', pm.brand]);
-      if (pm.first6) lines.push(['First 6', pm.first6]);
-      if (pm.last4) lines.push(['Last 4', pm.last4]);
-      return Formatter.keyValue(lines);
-    },
+        ['Link URL', pm.link_url ?? '-'],
+      ]),
   };
-
-  const configManager = new ConfigManager();
   await renderWithContext(createdResult, { format }, configManager);
 
-  // Hint about 3DS (after keyValue output)
-  notify(format, 'info', 'Complete 3DS verification via email to activate');
+  notify(
+    format,
+    'info',
+    'Open the Link URL in a browser to enter the card and complete verification. Waiting for result...',
+  );
 
-  // --- 3DS polling (only for type=card and PENDING status) ---
-  if (type === 'card' && pm.status === 'PENDING') {
-    const finalStatus = await poll3dsVerification(deps.apiClient, apiKey, pm.id, format);
+  // 轮询到终态。托管页两条轨（Visa 自铸 / EVO Drop-in）都把结果落在这条 pm 上，
+  // 所以无论用户绑的是哪种卡，这一条 verification/status 都会收敛。
+  const finalPm = await pollVerificationStatus(deps.apiClient, apiKey, pm.id, {
+    intervalMs: DROPIN_POLL_INTERVAL_MS,
+    timeoutMs: DROPIN_POLL_TIMEOUT_MS,
+  });
 
-    if (finalStatus === 'ACTIVE') {
-      // Fetch the updated payment method for full details
-      const getResult = await deps.apiClient.get<PaymentMethod>(
-        `/payment-methods/${pm.id}`,
-        { type: 'api-key', key: apiKey },
-      );
-
-      if (getResult.success) {
-        const activatedPm = getResult.data;
-        notify(format, 'success', 'Payment method activated');
-
-        const activatedResult: CommandResult<PaymentMethod> = {
-          data: activatedPm,
-          text: () => {
-            const lines: [string, string][] = [
-              ['ID', activatedPm.id],
-              ['Type', activatedPm.type],
-              ['Status', activatedPm.status],
-            ];
-            if (activatedPm.brand) lines.push(['Brand', activatedPm.brand]);
-            if (activatedPm.first6) lines.push(['First 6', activatedPm.first6]);
-            if (activatedPm.last4) lines.push(['Last 4', activatedPm.last4]);
-            return Formatter.keyValue(lines);
-          },
-        };
-
-        await renderWithContext(activatedResult, { format }, configManager);
-      } else {
-        // 3DS already reported ACTIVE, but the follow-up detail GET failed.
-        // Emit a degraded terminal state from what we already know (the
-        // create response + known-ACTIVE status) rather than exiting silently.
-        notify(format, 'success', 'Payment method activated');
-
-        const degraded: PaymentMethod = { ...pm, status: 'ACTIVE' };
-        const degradedResult: CommandResult<PaymentMethod> = {
-          data: degraded,
-          text: () => {
-            const lines: [string, string][] = [
-              ['ID', degraded.id],
-              ['Type', degraded.type],
-              ['Status', degraded.status],
-            ];
-            if (degraded.brand) lines.push(['Brand', degraded.brand]);
-            if (degraded.first6) lines.push(['First 6', degraded.first6]);
-            if (degraded.last4) lines.push(['Last 4', degraded.last4]);
-            return Formatter.keyValue(lines);
-          },
-        };
-
-        await renderWithContext(degradedResult, { format }, configManager);
-      }
-    } else if (finalStatus === 'FAILED') {
-      notify(format, 'error', '3DS verification failed');
-    } else if (finalStatus === 'TIMEOUT') {
-      notify(
-        format,
-        'info',
-        `Verification timed out (15 min). Check status with: agenzo-token-cli payment-methods get ${pm.id} --api-key <your_key>`,
-      );
-    }
+  if (finalPm.status === 'ACTIVE') {
+    notify(format, 'success', 'Payment method activated');
+    const activated: CommandResult<PaymentMethod> = {
+      data: finalPm,
+      text: () =>
+        Formatter.keyValue([
+          ['PM ID', finalPm.id],
+          ['Brand', finalPm.brand ?? '-'],
+          ['First 6', finalPm.first6 ?? '-'],
+          ['Last 4', finalPm.last4 ?? '-'],
+          ['Status', finalPm.status],
+        ]),
+    };
+    await renderWithContext(activated, { format }, configManager);
+    return;
   }
+
+  if (finalPm.status === 'FAILED') {
+    notify(format, 'error', 'Failed to add payment method');
+    await renderPmId(finalPm.id, format, configManager);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (finalPm.status === 'EXPIRED') {
+    notify(format, 'error', 'The binding session expired before the card was added');
+    await renderPmId(finalPm.id, format, configManager);
+    process.exitCode = 1;
+    return;
+  }
+
+  notify(
+    format,
+    'info',
+    `Verification did not complete within 30 minutes. Check status with: agenzo-token-cli payment-methods get ${pm.id} --api-key <your_key>`,
+  );
+  await renderPmId(pm.id, format, configManager);
+  process.exitCode = 1;
 }
 
 // ============================================================
@@ -440,298 +357,6 @@ async function handleUnionpayPaymentBrand(
   spinner?.stop('info', 'Timed out waiting for card binding result. Check status later with: payment-methods get ' + pm.id);
 }
 
-// ============================================================
-// Visa payment brand (VIC passkey enrollment: POST create(payment_brand=visa))
-// ============================================================
-
-/**
- * Visa payment brand: POST /payment-methods/create with `payment_brand=visa`
- * against the platform's Visa Intelligent Commerce (VIC) two-phase passkey
- * enrollment (see platform `_create_visa_pm`).
- *
- *  - Phase 1 (no --client-reference-id): submit the card details
- *    (--card-number / --expiry / --cvv / --email). The platform provisions the
- *    VTS token and, if the device has no registered Payment Passkey yet, stops
- *    at PENDING and returns a `client_reference_id`.
- *  - Phase 2 (--client-reference-id from phase 1): after the Payment Passkey is
- *    registered, re-submit with the SAME client_reference_id (card details are
- *    NOT required) to resume the in-flight enrollment — VIC card enrollment
- *    completes and the PM turns ACTIVE.
- *
- * The request hits the same POST /payment-methods/create + 3DS-style
- * verification/status polling as manual evo mode; only the request body
- * (payment_brand=visa, optional client_reference_id) differs.
- */
-async function handleVisaPaymentBrand(
-  deps: AddDeps,
-  opts: Record<string, unknown>,
-  format: OutputFormat,
-  isYes: boolean,
-): Promise<void> {
-  const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
-    message: 'API Key:',
-    type: 'password',
-  });
-
-  const type = (opts.type as string) || 'card';
-  const clientReferenceId = ((opts.clientReferenceId as string | undefined) ?? '').trim();
-  const resuming = clientReferenceId.length > 0;
-
-  // Phase 1 needs the card triplet + email; phase 2 (resume) does not — the
-  // card was already provisioned, so only the client_reference_id is required.
-  // --member is optional and never enforced CLI-side (server owns attribution).
-  const member = ((opts.member as string | undefined) ?? '').trim();
-
-  const body: Record<string, unknown> = {
-    type,
-    payment_brand: 'visa',
-    ...(member ? { member_id: member } : {}),
-  };
-
-  if (resuming) {
-    body.client_reference_id = clientReferenceId;
-    // The platform still requires `email` on resume (it re-validates the full
-    // create body, not a partial resume payload). Collect it the same way phase
-    // 1 does: use --email when given, otherwise prompt; in --yes mode a missing
-    // email is a hard error rather than a silent 2101 from the server.
-    let email = (opts.email as string | undefined)?.trim();
-    if (!email) {
-      if (isYes) {
-        throw new CliError(
-          'PARAM_INVALID',
-          'Missing required --email for visa enrollment resume (required in --yes mode).',
-        );
-      }
-      email = (
-        await PromptEngine.resolveInput(undefined, {
-          message: 'Email (for 3DS/VIC verification):',
-          validate: (v) => v.trim().length > 0 || 'Email is required',
-        })
-      ).trim();
-    }
-    body.email = email;
-  } else {
-    const flags: Record<string, string | undefined> = {
-      email: opts.email as string | undefined,
-      cardNumber: opts.cardNumber as string | undefined,
-      expiry: opts.expiry as string | undefined,
-      cvv: opts.cvv as string | undefined,
-    };
-    const params = await collectPaymentMethodParams(type, flags);
-    Object.assign(body, params);
-    body.payment_brand = 'visa';
-  }
-
-  const result = await deps.apiClient.post<PaymentMethod>(
-    '/payment-methods/create',
-    { type: 'api-key', key: apiKey },
-    body,
-  );
-
-  if (!result.success) {
-    throw CliError.fromApi(result, { auth: 'api-key' });
-  }
-
-  const pm = result.data;
-  const configManager = new ConfigManager();
-
-  notify(format, 'success', resuming ? 'Visa enrollment resumed' : 'Visa enrollment initiated');
-
-  const createdResult: CommandResult<PaymentMethod> = {
-    data: pm,
-    text: () => {
-      const lines: [string, string][] = [
-        ['ID', pm.id],
-        ['Type', pm.type ?? 'card'],
-        ['Status', pm.status],
-      ];
-      if (pm.payment_brand) lines.push(['Payment Brand', pm.payment_brand]);
-      if (pm.client_reference_id) lines.push(['Client Reference ID', pm.client_reference_id]);
-      if (pm.vic_card_status) lines.push(['VIC Card Status', pm.vic_card_status]);
-      if (pm.passkey_registered !== undefined) {
-        lines.push(['Passkey Registered', String(pm.passkey_registered)]);
-      }
-      if (pm.brand) lines.push(['Brand', pm.brand]);
-      if (pm.last4) lines.push(['Last 4', pm.last4]);
-      return Formatter.keyValue(lines);
-    },
-  };
-  await renderWithContext(createdResult, { format }, configManager);
-
-  // Already terminal (ACTIVE after a resume, or a straight ACTIVE) — done.
-  if (pm.status === 'ACTIVE') {
-    return;
-  }
-
-  // PENDING: the device must register a Payment Passkey before enrollment can
-  // complete. Guide the caller to register the passkey, then resume with the
-  // returned client_reference_id.
-  if (pm.status === 'PENDING') {
-    notify(
-      format,
-      'info',
-      'Register the Payment Passkey, then resume with: ' +
-        `agenzo-token-cli payment-methods add --payment-brand visa --client-reference-id ${pm.client_reference_id ?? '<client_reference_id>'} --api-key <your_key>`,
-    );
-
-    // In --yes / automation mode, do not poll: the orchestrator drives the
-    // passkey registration + resume out of band. Print state and exit.
-    if (isYes) {
-      return;
-    }
-
-    const finalStatus = await poll3dsVerification(deps.apiClient, apiKey, pm.id, format);
-    if (finalStatus === 'ACTIVE') {
-      const getResult = await deps.apiClient.get<PaymentMethod>(
-        `/payment-methods/${pm.id}`,
-        { type: 'api-key', key: apiKey },
-      );
-      notify(format, 'success', 'Payment method activated');
-      const activatedPm = getResult.success ? getResult.data : { ...pm, status: 'ACTIVE' };
-      const activatedResult: CommandResult<PaymentMethod> = {
-        data: activatedPm,
-        text: () => {
-          const lines: [string, string][] = [
-            ['ID', activatedPm.id],
-            ['Type', activatedPm.type ?? 'card'],
-            ['Status', activatedPm.status],
-          ];
-          if (activatedPm.brand) lines.push(['Brand', activatedPm.brand]);
-          if (activatedPm.last4) lines.push(['Last 4', activatedPm.last4]);
-          return Formatter.keyValue(lines);
-        },
-      };
-      await renderWithContext(activatedResult, { format }, configManager);
-    } else if (finalStatus === 'FAILED') {
-      notify(format, 'error', 'Visa enrollment failed');
-    } else if (finalStatus === 'TIMEOUT') {
-      notify(
-        format,
-        'info',
-        `Verification timed out (15 min). Check status with: agenzo-token-cli payment-methods get ${pm.id} --api-key <your_key>`,
-      );
-    }
-  }
-}
-
-// ============================================================
-// Drop-in mode (mint Drop-in session + poll)
-// ============================================================
-
-/**
- * Drop-in mode: mint a Drop-in session and hand the add-payment-method UI off
- * to the developer's own front-end (which embeds the Drop-in SDK using the
- * session id). The CLI then polls the same verification/status endpoint manual
- * mode uses until the PM reaches a terminal status or the 30-minute timeout.
- */
-async function handleDropinMode(
-  deps: AddDeps,
-  opts: Record<string, unknown>,
-  format: OutputFormat,
-): Promise<void> {
-  const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
-    message: 'API Key:',
-    type: 'password',
-  });
-
-  const email = await PromptEngine.resolveInput(opts.email as string | undefined, {
-    message: 'Email:',
-  });
-
-  const configManager = new ConfigManager();
-
-  // 1) Create the Drop-in session (API Key auth). The backend creates a
-  // PENDING PM keyed by pm_id and mints the session for the front-end SDK.
-  // --member (optional) scopes the bound card to the end-user so a later
-  // `list --member <id>` finds it back and it can be charged for them; omitting
-  // it stores a developer-scoped card (member_id=null), usable only for bookings
-  // that pass no member. Never enforced CLI-side — the server owns that rule.
-  const member = ((opts.member as string | undefined) ?? '').trim();
-
-  const sessionResult = await deps.apiClient.post<DropinCreateResponse>(
-    '/payment-methods/dropin/create',
-    { type: 'api-key', key: apiKey },
-    { email, ...(member ? { member_id: member } : {}) },
-  );
-
-  if (!sessionResult.success) {
-    throw CliError.fromApi(sessionResult, { auth: 'api-key' });
-  }
-
-  const session = sessionResult.data;
-  const pmId = session.id;
-
-  // 2) Print the session id so the caller can initialise the front-end SDK.
-  notify(format, 'success', 'Drop-in session created');
-
-  const createdResult: CommandResult<DropinCreateResponse> = {
-    data: session,
-    text: () => Formatter.keyValue([['Session ID', session.session_id || '-']]),
-  };
-  await renderWithContext(createdResult, { format }, configManager);
-
-  notify(
-    format,
-    'info',
-    'Use the Session ID to add the payment method in the browser via the Drop-in SDK',
-  );
-
-  // --no-poll: server/SDK-driven flows finish the binding in the front-end, so
-  // the CLI mints + prints the session and exits immediately. The session id is
-  // already on stdout (clean JSON in --format json), so the caller can parse it.
-  if (opts.poll === false) {
-    return;
-  }
-
-  // 3) Poll verification/status (same endpoint manual mode uses) until the PM
-  // reaches a terminal status or we time out at 30 minutes.
-  const finalPm = await pollVerificationStatus(deps.apiClient, apiKey, pmId, {
-    intervalMs: DROPIN_POLL_INTERVAL_MS,
-    timeoutMs: DROPIN_POLL_TIMEOUT_MS,
-  });
-
-  if (finalPm.status === 'ACTIVE') {
-    notify(format, 'success', 'Payment method activated');
-    const activated: CommandResult<PaymentMethod> = {
-      data: finalPm,
-      text: () =>
-        Formatter.keyValue([
-          ['PM ID', finalPm.id],
-          ['Brand', finalPm.brand ?? '-'],
-          ['First 6', finalPm.first6 ?? '-'],
-          ['Last 4', finalPm.last4 ?? '-'],
-          ['Status', finalPm.status],
-        ]),
-    };
-    await renderWithContext(activated, { format }, configManager);
-    return;
-  }
-
-  if (finalPm.status === 'FAILED') {
-    notify(format, 'error', 'Failed to add payment method');
-    await renderPmId(finalPm.id, format, configManager);
-    process.exitCode = 1;
-    return;
-  }
-
-  if (finalPm.status === 'EXPIRED') {
-    notify(format, 'error', 'Session expired before the payment method was added');
-    await renderPmId(finalPm.id, format, configManager);
-    process.exitCode = 1;
-    return;
-  }
-
-  // Timed out without reaching a terminal status — PM is still PENDING
-  // server-side. The operator can re-run with the same email to resume
-  // (PENDING dropin PMs are overwritten/reused).
-  notify(
-    format,
-    'error',
-    'Adding payment method did not complete within 30 minutes. Re-run with the same email to resume.',
-  );
-  await renderPmId(pmId, format, configManager);
-  process.exitCode = 1;
-}
 
 /** Render `{ id }` as the terminal payload (PM ID line in table, JSON in json). */
 async function renderPmId(
@@ -749,48 +374,6 @@ async function renderPmId(
 // ============================================================
 // Polling helpers
 // ============================================================
-
-/**
- * Poll GET /payment-methods/verification/status?payment_method_id=<id> every
- * 3000ms until ACTIVE, FAILED, or 15-minute timeout (manual / 3DS mode).
- *
- * Returns the terminal status: 'ACTIVE' | 'FAILED' | 'TIMEOUT'.
- */
-async function poll3dsVerification(
-  apiClient: ApiClient,
-  apiKey: string,
-  paymentMethodId: string,
-  format: OutputFormat,
-): Promise<'ACTIVE' | 'FAILED' | 'TIMEOUT'> {
-  const startTime = Date.now();
-
-  notify(format, 'info', 'Waiting for 3DS verification...');
-
-  while (Date.now() - startTime < MANUAL_POLL_TIMEOUT_MS) {
-    await sleep(MANUAL_POLL_INTERVAL_MS);
-
-    const result = await apiClient.get<{ status: string }>(
-      '/payment-methods/verification/status',
-      { type: 'api-key', key: apiKey },
-      { payment_method_id: paymentMethodId },
-    );
-
-    if (result.success) {
-      const status = result.data.status;
-      if (status === 'ACTIVE') {
-        return 'ACTIVE';
-      }
-      if (status === 'FAILED') {
-        return 'FAILED';
-      }
-      // Still PENDING — continue polling
-    }
-    // On API error during polling, continue trying (transient failures)
-  }
-
-  return 'TIMEOUT';
-}
-
 interface PollOptions {
   intervalMs: number;
   timeoutMs: number;

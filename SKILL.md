@@ -28,8 +28,7 @@ Two paths for adding a payment method:
 
 | Payment brand | Command | Result |
 |---|---|---|
-| Evo (Visa/MC) | `payment-methods add --payment-brand evo` | 3DS inline → ACTIVE |
-| Evo Drop-in | `payment-methods add --mode dropin` | Session URL → poll |
+| Visa / Mastercard | `payment-methods add` | Hosted binding page (`link_url`) → cardholder enters card in browser, page splits by brand (Visa self-mint+passkey / Mastercard via EVO) → poll → ACTIVE |
 | UnionPay | `payment-methods add --payment-brand unionpay --member <id>` | `enroll_url` → user authenticates → ACTIVE |
 
 Three token types: `vcn` (single-use virtual card), `network-token` (tokenized credential + cryptogram), `x402` (HTTP 402 on-chain payment).

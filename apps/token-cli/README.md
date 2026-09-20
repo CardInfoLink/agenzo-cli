@@ -53,7 +53,7 @@ agenzo-admin-cli config show                                       # show curren
 
 | Noun | Verb | Purpose | Write/Read |
 |---|---|---|---|
-| `payment-methods` | `add` | Add a payment method via `--mode manual` (collect card + 3DS, default) or `--mode dropin` (Drop-in session), then auto-poll verification | W |
+| `payment-methods` | `add` | Add a payment method: default opens the hosted binding page (Visa + Mastercard, no card details at the CLI); `--payment-brand unionpay` for UnionPay enrollment. Auto-polls to a terminal status | W |
 | `payment-methods` | `list` | List payment methods under the current API Key | R |
 | `payment-methods` | `get <pm_id>` | Show details of a single payment method | R |
 | `payment-methods` | `disable <pm_id>` | Disable a payment method (cascades to revoke its issued tokens) | W |
@@ -66,35 +66,28 @@ agenzo-admin-cli config show                                       # show curren
 
 ### add — add a payment method
 
-Two modes, selected with `--mode`:
+Two paths, selected via `--payment-brand`:
 
-- **`manual`** (default): the CLI collects card details and polls 3DS verification.
-- **`dropin`**: the CLI mints a Drop-in session and polls until the user finishes adding the payment method in their browser — no card details are entered at the terminal.
+- **`visa` / `mastercard` / omitted (default): hosted binding.** All three open the **same** hosted binding session (identical `Link URL`). The CLI never collects card details — it prints a `Link URL` and polls until the cardholder finishes in the browser. The hosted page detects the card brand and runs the matching rail — Visa (VTS self-mint + Payment Passkey) or Mastercard (EVO Drop-in) — both landing on the same PM. Passing `visa` or `mastercard` is an optional hint only; it does not change the URL.
+- **`unionpay`**: UnionPay Agent Pay enrollment (returns an `Enroll URL`).
 
-#### Manual mode (default)
+#### Hosted binding (default)
 
 ```bash
 agenzo-token-cli payment-methods add \
   --api-key <api_key> \
-  --type card \
   --email user@example.com \
-  --card-number 4111111111111234 \
-  --expiry 1230 \
-  --cvv 123
+  --member <member_id>            # optional
 ```
 
 | Flag | Required | Description |
 |---|---|---|
 | `--api-key` | Yes | Prompted interactively when omitted |
-| `--mode` | No | `manual` (default) or `dropin` |
 | `--type` | No | Payment method type, defaults to `card` |
-| `--email` | Yes | Used to deliver the 3DS email challenge |
-| `--card-number` | Yes | Card number |
-| `--expiry` | Yes | Expiry date in `MMYY` format (note: not `MM/YY`) |
-| `--cvv` | Yes | CVV; piping via stdin is recommended to keep it out of shell history |
-| `--idempotency-key` | Yes (in `--yes`) | Forwarded verbatim as the `Idempotency-Key` header |
+| `--email` | Yes | The hosted binding link is emailed here. A session reference / cardholder identity — **not** a card credential; never used to authenticate the card to Visa or Mastercard |
+| `--member` | No | End-user this card belongs to. Optional at the CLI boundary; scopes the card so it appears under `list --member <id>` |
 
-Returns a `PM ID` with `PENDING` status immediately, then auto-polls 3DS verification (3s interval, 15 min timeout). On success it prints `ACTIVE` status plus card brand, first six and last four. On timeout it suggests continuing with `payment-methods get`.
+Returns a `PM ID` (PENDING) + `Link URL` immediately, then auto-polls verification (5s interval, 30 min timeout). The cardholder opens the Link URL, enters the card (Visa or Mastercard) and completes verification in the browser; card number / CVV / expiry never reach the CLI. On success prints `ACTIVE` + brand / first six / last four. On `FAILED` / `EXPIRED` / timeout it prints the `PM ID` and exits non-zero — re-run with the same `--email` to reuse the PENDING record.
 
 #### UnionPay enrollment mode
 
@@ -116,23 +109,6 @@ agenzo-token-cli payment-methods add \
 | `--return-url` | No | Front-end redirect URL returned alongside the terminal status. Only for `--payment-brand unionpay`. Not sent to UnionPay — used by the caller for post-enrollment navigation |
 
 Returns `Enroll URL` and polls for ACTIVE/FAILED (5s interval, 60s timeout). The user must open the Enroll URL in a browser to complete passkey authentication. Card details flags are not used.
-
-#### Drop-in mode
-
-```bash
-agenzo-token-cli payment-methods add \
-  --api-key <api_key> \
-  --mode dropin \
-  --email user@example.com
-```
-
-| Flag | Required | Description |
-|---|---|---|
-| `--api-key` | Yes | Prompted interactively when omitted |
-| `--mode` | Yes | Set to `dropin` |
-| `--email` | Yes | Reference for the Drop-in session |
-
-Mints a Drop-in session and prints a `Session ID`. Initialise the add-payment UI in your own front-end with that `Session ID` (the user enters card details and completes verification in the browser). The CLI then polls the same verification endpoint (5s interval, 30 min timeout) and prints `ACTIVE` with brand / first six / last four on success. If the payment method is not added it reports `FAILED` / `EXPIRED` (or a 30-minute timeout) with the `PM ID` and exits non-zero — re-run with the same email to resume. Card flags (`--card-number` / `--expiry` / `--cvv`) and `--idempotency-key` are not used in this mode.
 
 ### list
 

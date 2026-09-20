@@ -233,155 +233,123 @@ describe('payment-methods disable', () => {
 });
 
 // ============================================================
-// payment-methods add (§3.4.0.1)
+// payment-methods add — hosted binding (default; EVO + Visa merged)
 // ============================================================
 
-describe('payment-methods add', () => {
-  it('happy path: POST /payment-methods/create with created state output', async () => {
-    // Return status ACTIVE to skip 3DS polling in this test (3DS tested separately)
-    const createdPm = { id: 'pm_new', type: 'card', status: 'ACTIVE', brand: 'Visa', first6: '411111', last4: '4242' };
-    const apiClient = mockApiClient({ '/payment-methods/create': createdPm });
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    const err = captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--api-key', 'sk_key',
-      '--type', 'card',
-      '--email', 'test@example.com',
-      '--card-number', '4111111111111111',
-      '--expiry', '1228',
-      '--cvv', '123',
-      '--idempotency-key', 'idem_add',
-    ]);
-
-    // Verify POST call
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/create',
-      { type: 'api-key', key: 'sk_key' },
-      expect.objectContaining({ type: 'card', email: 'test@example.com' }),
-      { 'Idempotency-Key': 'idem_add' },
-    );
-
-    // Verify output messages
-    const stderrText = err.text();
-    expect(stderrText).toContain('Payment method created');
-    expect(stderrText).toContain('Complete 3DS verification via email to activate');
-
-    const output = out.text();
-    expect(output).toContain('pm_new');
-    expect(output).toContain('ACTIVE');
-  });
-
-  it('3DS polling: ACTIVE state outputs activation message', async () => {
-    const createdPm = { id: 'pm_3ds', type: 'card', status: 'PENDING', brand: 'Visa', first6: '411111', last4: '4242' };
-    const activatedPm = { ...createdPm, status: 'ACTIVE' };
+describe('payment-methods add (hosted binding, default)', () => {
+  it('opens a hosted binding session, prints link_url, polls to ACTIVE', async () => {
+    const sessionPm = { id: 'pm_hb', status: 'PENDING', link_url: 'https://app/payment/bind?pm=pm_hb&t=tok' };
+    const activePm = { id: 'pm_hb', type: 'card', status: 'ACTIVE', brand: 'Visa', first6: '411111', last4: '4242' };
 
     const apiClient = {
-      get: vi.fn()
-        // First GET: verification status → ACTIVE
-        .mockImplementation((path: string) => {
-          if (path === '/payment-methods/verification/status') {
-            return Promise.resolve({ success: true, data: { status: 'ACTIVE' } });
-          }
-          if (path === '/payment-methods/pm_3ds') {
-            return Promise.resolve({ success: true, data: activatedPm });
-          }
-          return Promise.resolve({ success: true, data: {} });
-        }),
-      post: vi.fn().mockResolvedValue({ success: true, data: createdPm }),
-    };
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    const err = captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--api-key', 'sk_key',
-      '--type', 'card',
-      '--email', 'test@example.com',
-      '--card-number', '4111111111111111',
-      '--expiry', '1228',
-      '--cvv', '123',
-      '--idempotency-key', 'idem_3ds',
-    ]);
-
-    const stderrText = err.text();
-    expect(stderrText).toContain('Payment method created');
-    expect(stderrText).toContain('Payment method activated');
-  });
-
-  it('3DS polling: FAILED state outputs failure message', async () => {
-    const createdPm = { id: 'pm_fail', type: 'card', status: 'PENDING' };
-
-    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
       get: vi.fn().mockImplementation((path: string) => {
         if (path === '/payment-methods/verification/status') {
-          return Promise.resolve({ success: true, data: { status: 'FAILED' } });
+          return Promise.resolve({ success: true, data: activePm });
         }
         return Promise.resolve({ success: true, data: {} });
       }),
-      post: vi.fn().mockResolvedValue({ success: true, data: createdPm }),
     };
 
     const program = buildProgram();
     const cmd = program.command('payment-methods');
     registerAddCommand(cmd, { apiClient } as any);
 
-    captureStdout();
+    const out = captureStdout();
     const err = captureStderr();
 
     await program.parseAsync([
       'node', 'cli', 'payment-methods', 'add',
       '--api-key', 'sk_key',
-      '--type', 'card',
       '--email', 'test@example.com',
-      '--card-number', '4111111111111111',
-      '--expiry', '1228',
-      '--cvv', '123',
-      '--idempotency-key', 'idem_fail',
     ]);
 
+    // 走品牌中立的托管绑卡端点，不再本地收卡。
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/binding-session',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'test@example.com' },
+    );
+    // 不碰任何本地收卡 / dropin/create / create 端点。
+    expect(apiClient.post).not.toHaveBeenCalledWith(
+      '/payment-methods/create',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+
     const stderrText = err.text();
-    expect(stderrText).toContain('3DS verification failed');
+    expect(stderrText).toContain('Hosted binding session created');
+    expect(stderrText).toContain('Payment method activated');
+    const output = out.text();
+    expect(output).toContain('pm_hb');
+    expect(output).toContain('https://app/payment/bind?pm=pm_hb&t=tok');
   });
 
-  it('requires --idempotency-key in --yes mode', async () => {
-    const apiClient = mockApiClient();
+  it('passes --member as member_id when given', async () => {
+    const sessionPm = { id: 'pm_hb2', status: 'PENDING', link_url: 'https://app/x' };
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_hb2', status: 'ACTIVE' } }),
+    };
     const program = buildProgram();
     const cmd = program.command('payment-methods');
     registerAddCommand(cmd, { apiClient } as any);
-
     captureStdout();
     captureStderr();
 
-    await expect(
-      program.parseAsync([
-        'node', 'cli', '--yes', 'payment-methods', 'add',
-        '--api-key', 'sk_key',
-        '--type', 'card',
-        '--email', 'test@example.com',
-        '--card-number', '4111111111111111',
-        '--expiry', '1228',
-        '--cvv', '123',
-      ]),
-    ).rejects.toThrow('--idempotency-key');
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--api-key', 'sk_key', '--email', 'u@e.com', '--member', 'user-42',
+    ]);
 
-    expect(apiClient.post).not.toHaveBeenCalled();
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/binding-session',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'u@e.com', member_id: 'user-42' },
+    );
+  });
+
+  it('FAILED terminal status: error message + exit code 1', async () => {
+    const sessionPm = { id: 'pm_hb3', status: 'PENDING', link_url: 'https://app/x' };
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_hb3', status: 'FAILED' } }),
+    };
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add', '--api-key', 'sk_key', '--email', 'u@e.com',
+    ]);
+
+    expect(err.text()).toContain('Failed to add payment method');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not require --idempotency-key even in --yes mode', async () => {
+    const sessionPm = { id: 'pm_hb4', status: 'PENDING', link_url: 'https://app/x' };
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_hb4', status: 'ACTIVE' } }),
+    };
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-methods', 'add', '--api-key', 'sk_key', '--email', 'u@e.com',
+    ]);
+
+    // hosted binding 是签发链接 + 轮询，非本地写卡，故不需要幂等键。
+    expect(apiClient.post).toHaveBeenCalledOnce();
   });
 });
-
-// ============================================================
-// payment-methods add --payment-brand unionpay (Requirement 1.x / 2.x)
-// ============================================================
 
 describe('payment-methods add --payment-brand unionpay', () => {
   it('rejects an unknown --payment-brand without calling the API', async () => {
@@ -592,372 +560,5 @@ describe('payment-methods add --payment-brand unionpay', () => {
         '--email', 'user@example.com',
       ]),
     ).rejects.toBeInstanceOf(CliError);
-  });
-});
-
-// ============================================================
-// payment-methods add --mode dropin (§3.4.0.1, Drop-in session)
-// ============================================================
-
-describe('payment-methods add --mode dropin', () => {
-  const SESSION = {
-    id: 'pm_dropin',
-    session_id: 'sess_abc123',
-    merchant_trans_id: 'T5060112345678',
-    status: 'PENDING',
-  };
-
-  /** apiClient mock: dropin/create returns a session; verification/status returns `statusData`. */
-  function dropinClient(statusData: Record<string, unknown>) {
-    return {
-      post: vi.fn().mockImplementation((path: string) => {
-        if (path === '/payment-methods/dropin/create') {
-          return Promise.resolve({ success: true, data: SESSION });
-        }
-        return Promise.resolve({ success: true, data: {} });
-      }),
-      get: vi.fn().mockImplementation((path: string) => {
-        if (path === '/payment-methods/verification/status') {
-          return Promise.resolve({ success: true, data: statusData });
-        }
-        return Promise.resolve({ success: true, data: {} });
-      }),
-    };
-  }
-
-  it('rejects an unknown --mode without calling the API', async () => {
-    const apiClient = mockApiClient();
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    captureStdout();
-    captureStderr();
-
-    await expect(
-      program.parseAsync([
-        'node', 'cli', 'payment-methods', 'add',
-        '--api-key', 'sk_key', '--mode', 'bogus',
-      ]),
-    ).rejects.toThrow(/Expected "manual" or "dropin"/);
-
-    expect(apiClient.post).not.toHaveBeenCalled();
-  });
-
-  it('happy path: POST /payment-methods/dropin/create with {email}, prints Session ID, polls to ACTIVE', async () => {
-    const apiClient = dropinClient({
-      id: 'pm_dropin',
-      status: 'ACTIVE',
-      brand: 'Visa',
-      first6: '411111',
-      last4: '4242',
-    });
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    const err = captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--mode', 'dropin',
-      '--api-key', 'sk_key',
-      '--member', 'usr_1',
-      '--email', 'user@example.com',
-    ]);
-
-    // dropin/create called with {email} only (no card details / idempotency key)
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/dropin/create',
-      { type: 'api-key', key: 'sk_key' },
-      { email: 'user@example.com', member_id: 'usr_1' },
-    );
-
-    // polls verification/status by the returned pm id
-    expect(apiClient.get).toHaveBeenCalledWith(
-      '/payment-methods/verification/status',
-      { type: 'api-key', key: 'sk_key' },
-      { payment_method_id: 'pm_dropin' },
-    );
-
-    const errText = err.text();
-    expect(errText).toContain('Drop-in session created');
-    expect(errText).toContain('Payment method activated');
-
-    const outText = out.text();
-    expect(outText).toContain('sess_abc123'); // Session ID printed
-    expect(outText).toContain('pm_dropin');
-    expect(outText).toContain('Visa');
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
-  });
-
-  it('does not require --idempotency-key even in --yes mode', async () => {
-    const apiClient = dropinClient({ id: 'pm_dropin', status: 'ACTIVE' });
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    captureStdout();
-    captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', '--yes', 'payment-methods', 'add',
-      '--mode', 'dropin',
-      '--api-key', 'sk_key',
-      '--member', 'usr_1',
-      '--email', 'user@example.com',
-    ]);
-
-    // Reached the API call instead of throwing IdempotencyKeyRequiredError.
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/dropin/create',
-      { type: 'api-key', key: 'sk_key' },
-      { email: 'user@example.com', member_id: 'usr_1' },
-    );
-  });
-
-  it('FAILED terminal status: error message + exit code 1', async () => {
-    const apiClient = dropinClient({ id: 'pm_dropin', status: 'FAILED' });
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    const err = captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--mode', 'dropin',
-      '--api-key', 'sk_key',
-      '--member', 'usr_1',
-      '--email', 'user@example.com',
-    ]);
-
-    expect(err.text()).toContain('Failed to add payment method');
-    expect(out.text()).toContain('pm_dropin'); // PM ID hint
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('EXPIRED terminal status: error message + exit code 1', async () => {
-    const apiClient = dropinClient({ id: 'pm_dropin', status: 'EXPIRED' });
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    const err = captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--mode', 'dropin',
-      '--api-key', 'sk_key',
-      '--member', 'usr_1',
-      '--email', 'user@example.com',
-    ]);
-
-    expect(err.text()).toContain('Session expired before the payment method was added');
-    expect(out.text()).toContain('pm_dropin');
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('--no-poll: mints + prints the session and exits immediately without polling', async () => {
-    const apiClient = dropinClient({ id: 'pm_dropin', status: 'PENDING' });
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    const err = captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', 'payment-methods', 'add',
-      '--mode', 'dropin',
-      '--no-poll',
-      '--api-key', 'sk_key',
-      '--member', 'usr_1',
-      '--email', 'user@example.com',
-    ]);
-
-    // Session minted and printed
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/dropin/create',
-      { type: 'api-key', key: 'sk_key' },
-      { email: 'user@example.com', member_id: 'usr_1' },
-    );
-    expect(out.text()).toContain('sess_abc123');
-    expect(err.text()).toContain('Drop-in session created');
-
-    // Crucially: no polling of verification/status
-    expect(apiClient.get).not.toHaveBeenCalled();
-
-    // Clean exit
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
-  });
-
-  it('--no-poll --format json: stdout is clean parseable JSON with session_id', async () => {
-    const apiClient = dropinClient({ id: 'pm_dropin', status: 'PENDING' });
-
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', '--format', 'json', 'payment-methods', 'add',
-      '--mode', 'dropin',
-      '--no-poll',
-      '--api-key', 'sk_key',
-      '--member', 'usr_1',
-      '--email', 'user@example.com',
-    ]);
-
-    // stdout must be parseable JSON carrying session_id (orchestrator parses it)
-    const parsed = parseJsonOutput(out.text()) as Record<string, unknown>;
-    expect(parsed.session_id).toBe('sess_abc123');
-
-    // no polling happened
-    expect(apiClient.get).not.toHaveBeenCalled();
-  });
-});
-
-// ============================================================
-// payment-methods add --payment-brand visa (VIC passkey two-phase enrollment)
-// ============================================================
-
-describe('payment-methods add --payment-brand visa', () => {
-  it('phase 1: POST create(payment_brand=visa) with card triplet, prints client_reference_id (no polling in --yes)', async () => {
-    const visaPm = {
-      id: 'pm_visa_1',
-      type: 'card',
-      status: 'PENDING',
-      payment_brand: 'visa',
-      client_reference_id: 'visa-enroll-abc123',
-      vic_card_status: 'PENDING',
-      passkey_registered: false,
-    };
-    const apiClient = mockApiClient({ '/payment-methods/create': visaPm });
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    const out = captureStdout();
-    captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', '--yes', 'payment-methods', 'add',
-      '--api-key', 'sk_key',
-      '--payment-brand', 'visa',
-      '--card-number', '4111111111111111',
-      '--expiry', '1230',
-      '--cvv', '123',
-      '--email', 'user@example.com',
-      '--member', 'mem_123',
-    ]);
-
-    // phase-1 body carries payment_brand=visa + card triplet + member_id, no client_reference_id
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/create',
-      { type: 'api-key', key: 'sk_key' },
-      expect.objectContaining({
-        type: 'card',
-        payment_brand: 'visa',
-        member_id: 'mem_123',
-        card_number: '4111111111111111',
-        cvv: '123',
-      }),
-    );
-    const body = (apiClient.post as any).mock.calls[0][2];
-    expect(body.client_reference_id).toBeUndefined();
-
-    const output = out.text();
-    expect(output).toContain('pm_visa_1');
-    expect(output).toContain('visa-enroll-abc123');
-
-    // --yes: no polling
-    expect(apiClient.get).not.toHaveBeenCalled();
-  });
-
-  it('phase 2 (resume): POST create with client_reference_id and no card details', async () => {
-    const activatedPm = {
-      id: 'pm_visa_1',
-      type: 'card',
-      status: 'ACTIVE',
-      payment_brand: 'visa',
-      vic_card_status: 'ACTIVE',
-      passkey_registered: true,
-    };
-    const apiClient = mockApiClient({ '/payment-methods/create': activatedPm });
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-
-    captureStdout();
-    captureStderr();
-
-    await program.parseAsync([
-      'node', 'cli', '--yes', 'payment-methods', 'add',
-      '--api-key', 'sk_key',
-      '--payment-brand', 'visa',
-      '--client-reference-id', 'visa-enroll-abc123',
-      '--email', 'user@example.com',
-    ]);
-
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/payment-methods/create',
-      { type: 'api-key', key: 'sk_key' },
-      { type: 'card', payment_brand: 'visa', client_reference_id: 'visa-enroll-abc123', email: 'user@example.com' },
-    );
-    // resume must NOT carry card fields
-    const body = (apiClient.post as any).mock.calls[0][2];
-    expect(body.card_number).toBeUndefined();
-    expect(body.cvv).toBeUndefined();
-
-    // Already ACTIVE — no polling needed
-    expect(apiClient.get).not.toHaveBeenCalled();
-  });
-
-  it('phase 2 (resume) in --yes mode rejects when --email is missing, without calling the API', async () => {
-    const apiClient = mockApiClient({});
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-    captureStdout();
-    captureStderr();
-
-    await expect(
-      program.parseAsync([
-        'node', 'cli', '--yes', 'payment-methods', 'add',
-        '--api-key', 'sk_key',
-        '--payment-brand', 'visa',
-        '--client-reference-id', 'visa-enroll-abc123',
-      ]),
-    ).rejects.toThrow(CliError);
-    // The missing-email guard fires before any request.
-    expect(apiClient.post).not.toHaveBeenCalled();
-  });
-
-  it('rejects an unknown --payment-brand without calling the API', async () => {
-    const apiClient = mockApiClient({});
-    const program = buildProgram();
-    const cmd = program.command('payment-methods');
-    registerAddCommand(cmd, { apiClient } as any);
-    captureStdout();
-    captureStderr();
-
-    await expect(
-      program.parseAsync([
-        'node', 'cli', '--yes', 'payment-methods', 'add',
-        '--api-key', 'sk_key', '--payment-brand', 'mastercard',
-      ]),
-    ).rejects.toThrow(CliError);
-    expect(apiClient.post).not.toHaveBeenCalled();
   });
 });

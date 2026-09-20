@@ -77,17 +77,27 @@ describe('emitSchema', () => {
 });
 
 describe('verb schema field alignment', () => {
-  it('pmAddSchema exposes mode (manual|dropin) and never card/CVV fields (PCI)', () => {
-    expect(pmAddSchema.flags.mode.default).toBe('manual');
-    // The schema surfaced to the LLM must never mention raw card fields —
-    // manual mode collects them CLI-side; dropin mode never touches them.
+  it('pmAddSchema exposes the hosted-binding contract and never card/CVV fields (PCI)', () => {
+    // Hosted binding: no --mode, and the CLI never surfaces raw card fields
+    // (the hosted page collects the card in the browser, split by brand).
+    expect(pmAddSchema.flags).not.toHaveProperty('mode');
     expect(pmAddSchema.flags).not.toHaveProperty('card-number');
     expect(pmAddSchema.flags).not.toHaveProperty('cvv');
     expect(pmAddSchema.flags).not.toHaveProperty('expiry');
-    expect(pmAddSchema.response).toHaveProperty('session_id');
+    // --payment-brand is optional and constrained to visa | mastercard | unionpay | (omitted).
+    // visa / mastercard / omitted all open the same hosted binding page (identical link_url);
+    // unionpay is a separate enrollment flow. No "evo" value.
+    expect(pmAddSchema.flags).toHaveProperty('payment-brand');
+    expect(pmAddSchema.flags['payment-brand'].required).toBe(false);
+    expect(pmAddSchema.flags['payment-brand'].constraints).toBe(
+      'visa | mastercard | unionpay | (omitted)',
+    );
+    // Response carries the hosted-binding link, not a session_id.
+    expect(pmAddSchema.response).toHaveProperty('link_url');
+    expect(pmAddSchema.response).not.toHaveProperty('session_id');
   });
 
-  it('write verbs (add manual mode is W/N; disable/create/revoke are W/Y) carry idempotency where required', () => {
+  it('write verbs (disable/create/revoke are W/Y) carry idempotency where required', () => {
     expect(pmDisableSchema.flags['idempotency-key'].required).toBe(true);
     expect(ptCreateSchema.flags['idempotency-key'].required).toBe(true);
     expect(ptRevokeSchema.flags['idempotency-key'].required).toBe(true);
