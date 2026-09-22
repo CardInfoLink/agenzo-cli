@@ -286,6 +286,74 @@ describe('payment-methods add (hosted binding, default)', () => {
     expect(output).toContain('https://app/payment/bind?pm=pm_hb&t=tok');
   });
 
+  it('--no-poll: prints the link and exits without polling verification/status', async () => {
+    const sessionPm = { id: 'pm_np', status: 'PENDING', link_url: 'https://plat/card/binding/page?t=tok' };
+
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_np', status: 'ACTIVE' } }),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+
+    const out = captureStdout();
+    const err = captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--api-key', 'sk_key', '--email', 'u@e.com', '--no-poll',
+    ]);
+
+    // 会话照常建立（与缺省路径同一个端点、同一 body）。不传 --hosted-page 时
+    // 报文里**不出现** hosted_page —— 平台缺省仍落前端页，既有调用方行为不变。
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/binding-session',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'u@e.com' },
+    );
+    // 关键：一次 verification/status 都不轮询 —— 程序化调用方自己按节奏轮。
+    expect(apiClient.get).not.toHaveBeenCalled();
+
+    // link_url + pm id 已在 stdout，调用方可直接解析（--format json 下是干净 JSON）。
+    const output = out.text();
+    expect(output).toContain('pm_np');
+    expect(output).toContain('https://plat/card/binding/page?t=tok');
+    // 不出现缺省路径那句等待文案，也不出现终态文案。
+    const stderrText = err.text();
+    expect(stderrText).toContain('Hosted binding session created');
+    expect(stderrText).not.toContain('Waiting for result');
+    expect(stderrText).not.toContain('Payment method activated');
+  });
+
+  it('--hosted-page platform: forwards hosted_page so link_url points at the platform page', async () => {
+    const sessionPm = { id: 'pm_hp', status: 'PENDING', link_url: 'https://plat/card/binding/page?t=tok' };
+
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_hp', status: 'ACTIVE' } }),
+    };
+
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--api-key', 'sk_key', '--email', 'u@e.com',
+      '--hosted-page', 'platform', '--member', 'user-7', '--no-poll',
+    ]);
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/binding-session',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'u@e.com', member_id: 'user-7', hosted_page: 'platform' },
+    );
+  });
+
   it('passes --member as member_id when given', async () => {
     const sessionPm = { id: 'pm_hb2', status: 'PENDING', link_url: 'https://app/x' };
     const apiClient = {

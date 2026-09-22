@@ -60,6 +60,8 @@ agenzo-token-cli payment-methods disable <pm_id> --api-key <key> --idempotency-k
 | `--payment-brand <brand>` | all | Omit (default) for the hosted binding page (supports Visa + Mastercard); `unionpay` for UnionPay enrollment. `evo` / `visa` are gone — the page splits by card brand. |
 | `--email <email>` | all | The address the hosted binding link is emailed to (and the UnionPay enrollment email). **Not** a card credential: it is a session reference / cardholder identity, never used to authenticate the card to Visa or Mastercard. |
 | `--member <id>` | all | End-user this card belongs to. Optional at the CLI boundary (server decides if mandatory per brand — UnionPay requires it). Omitting stores a developer-scoped card. |
+| `--no-poll` | hosted binding | Print `{ id, link_url }` and exit immediately instead of waiting for the cardholder. For programmatic callers (agent orchestrator / CI) that render the link and poll on their own cadence via `dropin-status` / `get`. Default polls to a terminal status. |
+| `--hosted-page <target>` | hosted binding | Which card-entry page `link_url` points at. Omit (default) for the **front-end app** page — unchanged behaviour. Pass `platform` for the **platform-hosted** page: use it when no front-end is deployed (headless / orchestrator). Both pages split Visa vs Mastercard by BIN internally. |
 | `--return-url <url>` | unionpay | Platform-side post-enrollment navigation hint; never sent to UnionPay |
 
 ### add (default) — hosted binding
@@ -75,7 +77,9 @@ longer exist on this path.
 
 1. `POST /payment-methods/binding-session` with `{ email, member_id? }` → prints
    `ID` (PENDING), `Status`, and **`Link URL`** (the hosted page). The link is
-   also emailed to `--email`.
+   also emailed to `--email`. With `--hosted-page platform` the body also carries
+   `hosted_page` so `link_url` points at the platform-hosted page instead of the
+   front-end one (for callers with no front-end deployed).
 2. The cardholder opens the Link URL in a browser, enters the card, and completes
    verification (passkey for Visa, 3DS for Mastercard via EVO Drop-in).
 3. The CLI polls `GET /payment-methods/verification/status` every **5s for up to
@@ -84,6 +88,12 @@ longer exist on this path.
 4. On ACTIVE the CLI prints brand / first6 / last4. `FAILED` / `EXPIRED` / a
    30-minute timeout print the `PM ID` and exit non-zero — re-run with the same
    `--email`; the PENDING record is reused.
+
+Steps 3–4 are skipped with `--no-poll`: the CLI stops after step 1 so a
+programmatic caller gets `link_url` **synchronously** and polls on its own cadence.
+That matters for hosts that read the CLI's stdout only after the process exits (the
+agent orchestrator does), where the default 30-minute block would time out before
+`link_url` was ever readable.
 
 The card number, CVV and expiry never reach the CLI, the calling system, or the
 CLI's argv — only the hosted page (and, downstream, the acquirer/VTS) sees them.

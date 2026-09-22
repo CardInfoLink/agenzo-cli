@@ -111,7 +111,10 @@ export function attachSchemaHelp(cmd: Command, schema: VerbSchema): Command {
 // payment-methods verb schemas
 // ============================================================
 
-/** `payment-methods add` schema. Non-blocking: returns a hosted link_url, then polls to terminal status. */
+/**
+ * `payment-methods add` schema. Returns a hosted link_url, then polls to terminal status —
+ * or with `--no-poll` returns right after the link so a programmatic caller can poll itself.
+ */
 export const pmAddSchema: VerbSchema = {
   cli: CLI_NAME,
   noun: PAYMENT_METHODS_NOUN,
@@ -131,6 +134,20 @@ export const pmAddSchema: VerbSchema = {
       required: 'conditional',
       description:
         "Cardholder email: the hosted binding link is sent here (and used as the UnionPay enrollment email). Use the user's login profile email — never ask in chat.",
+    },
+    'no-poll': {
+      type: 'bool',
+      required: false,
+      default: false,
+      description:
+        'Hosted binding only: print { id, link_url } and exit immediately instead of waiting for the cardholder to finish. Set this when integrating with a UI/card flow that renders the link and polls on its own cadence (dropin-status / get). Default polls to a terminal status.',
+    },
+    'hosted-page': {
+      type: 'string',
+      required: false,
+      description:
+        'Hosted binding only: which card-entry page link_url points at. Omit for the front-end app page (default, unchanged). Pass "platform" for the platform-hosted page when no front-end is deployed (headless / agent orchestrator). Both pages split Visa vs Mastercard internally.',
+      constraints: 'platform | (omitted)',
     },
     'return-url': {
       type: 'string',

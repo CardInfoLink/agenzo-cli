@@ -31,6 +31,8 @@ Two paths for adding a payment method:
 | Visa / Mastercard | `payment-methods add` | Hosted binding page (`link_url`) → cardholder enters card in browser, page splits by brand (Visa self-mint+passkey / Mastercard via EVO) → poll → ACTIVE |
 | UnionPay | `payment-methods add --payment-brand unionpay --member <id>` | `enroll_url` → user authenticates → ACTIVE |
 
+Add `--no-poll` when you need `link_url` synchronously and will poll yourself (`dropin-status` / `get`) — the default blocks up to 30 minutes waiting for the cardholder. Add `--hosted-page platform` when no front-end is deployed, so `link_url` points at the platform-hosted card page instead of the app's.
+
 Three token types: `vcn` (single-use virtual card), `network-token` (tokenized credential + cryptogram), `x402` (HTTP 402 on-chain payment).
 
 UnionPay network tokens require a separate checkout step (`payment-tokens unionpay-create`) that returns a `checkout_url` for user authentication.
