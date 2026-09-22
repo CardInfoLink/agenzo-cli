@@ -86,8 +86,12 @@ agenzo-token-cli payment-methods add \
 | `--type` | No | Payment method type, defaults to `card` |
 | `--email` | Yes | The hosted binding link is emailed here. A session reference / cardholder identity — **not** a card credential; never used to authenticate the card to Visa or Mastercard |
 | `--member` | No | End-user this card belongs to. Optional at the CLI boundary; scopes the card so it appears under `list --member <id>` |
+| `--no-poll` | No | Print `{ id, link_url }` and exit immediately instead of waiting for the cardholder. For programmatic callers that render the link and poll themselves (`dropin-status` / `get`) |
+| `--hosted-page` | No | Which card-entry page `link_url` points at. Omit for the front-end app page (default); pass `platform` for the platform-hosted page when no front-end is deployed |
 
 Returns a `PM ID` (PENDING) + `Link URL` immediately, then auto-polls verification (5s interval, 30 min timeout). The cardholder opens the Link URL, enters the card (Visa or Mastercard) and completes verification in the browser; card number / CVV / expiry never reach the CLI. On success prints `ACTIVE` + brand / first six / last four. On `FAILED` / `EXPIRED` / timeout it prints the `PM ID` and exits non-zero — re-run with the same `--email` to reuse the PENDING record.
+
+With `--no-poll` the CLI returns right after printing the link, leaving the polling to the caller — required for hosts that only read stdout once the process exits (e.g. the agent orchestrator), where the default 30-minute block would time out before `link_url` could be read.
 
 #### UnionPay enrollment mode
 

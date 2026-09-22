@@ -49,6 +49,10 @@ type AddDeps = { apiClient: ApiClient };
  *    Passkey) or Mastercard/others (EVO Drop-in) — with both landing on the same
  *    PM. This mirrors H5: one card-entry surface, brand split inside the page.
  *    EVO and Visa are no longer separate CLI brands.
+ *    With `--no-poll` the CLI stops right after printing `{ id, link_url }` —
+ *    for programmatic callers that need the link synchronously and poll on their
+ *    own cadence. Default (flag absent) still polls, so existing callers are
+ *    unaffected.
  *  - **`unionpay`: UPI Agent Pay enrollment.** POSTs /payment-methods/create with
  *    `payment_brand=unionpay`, prints the returned `enroll_url` for the user to
  *    complete card binding in a browser, then polls until ACTIVE / FAILED.
@@ -71,6 +75,14 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
     .option(
       '--email <email>',
       'Cardholder email. Used as the hosted binding session reference (the hosted page emails the secure link there) and as the UnionPay enrollment email.',
+    )
+    .option(
+      '--no-poll',
+      'Hosted binding only: open the session, print { id, link_url } and exit immediately without waiting for the cardholder. For programmatic callers (e.g. an agent orchestrator) that must render the link synchronously and poll on their own cadence via payment-methods dropin-status / get. Default is to poll until a terminal status.',
+    )
+    .option(
+      '--hosted-page <target>',
+      'Hosted binding only: which card-entry page link_url should point at. Omitted (default) = the front-end app page, unchanged. Pass "platform" for the platform-hosted page — use it when no front-end is deployed (headless / CI / agent orchestrator). Both pages collect the card and split Visa vs Mastercard internally.',
     )
     .option(
       '--return-url <url>',
@@ -143,12 +155,20 @@ async function handleHostedBinding(
 
   const configManager = new ConfigManager();
 
+  // --hosted-page：只在显式给值时才进请求体 —— 不传时报文与改动前逐字一致，平台侧缺省
+  // 仍落在前端绑卡页，既有调用方行为不变。传 "platform" 则落平台自托管收卡页（无前端可用时）。
+  const hostedPage = ((opts.hostedPage as string | undefined) ?? '').trim();
+
   // 开托管绑卡会话。端点是品牌中立名 /payment-methods/binding-session（历史别名
   // /payment-methods/visa/binding-session 仍可用，但 CLI 走中立名）。
   const sessionResult = await deps.apiClient.post<PaymentMethod>(
     '/payment-methods/binding-session',
     { type: 'api-key', key: apiKey },
-    { email, ...(member ? { member_id: member } : {}) },
+    {
+      email,
+      ...(member ? { member_id: member } : {}),
+      ...(hostedPage ? { hosted_page: hostedPage } : {}),
+    },
   );
 
   if (!sessionResult.success) {
@@ -169,6 +189,19 @@ async function handleHostedBinding(
       ]),
   };
   await renderWithContext(createdResult, { format }, configManager);
+
+  // --no-poll（Commander 可取反布尔：未传时 opts.poll 为 true）：程序化调用方（如编排层）
+  // 需要**同步**拿到 link_url 去渲染一张 open_url 卡，再按自己的节奏轮询，不能让 CLI 在这里
+  // 阻塞等持卡人。此时会话已建、link_url 已在 stdout（--format json 下是干净 JSON），直接退出。
+  // 缺省仍为轮询到终态 —— 上游既有调用方行为不变。
+  if (opts.poll === false) {
+    notify(
+      format,
+      'info',
+      `Open the Link URL in a browser to enter the card. Poll the result with: agenzo-token-cli payment-methods dropin-status ${pm.id} --api-key <your_key>`,
+    );
+    return;
+  }
 
   notify(
     format,
