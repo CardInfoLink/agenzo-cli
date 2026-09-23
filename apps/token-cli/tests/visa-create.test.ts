@@ -208,6 +208,113 @@ describe('payment-tokens visa-create — order-amount-cents validation', () => {
 });
 
 // ============================================================
+// payment-tokens visa-create — --no-poll / --no-notify
+//
+// Both exist for the same caller: an agent orchestrator that renders `payment_url`
+// itself as an open_url card. Neither test needs `runWithPoll` — not polling is
+// precisely what they assert.
+//
+// Why they are locked (2026-09-23 incident): the CLI blocked for up to 180s while the
+// calling gateway had a hard 60s timeout, so the already-printed payment_url was thrown
+// away and the caller saw a bogus "service unavailable"; meanwhile the platform emailed
+// the SAME one-time link, giving the cardholder a second entry point that revoked the
+// first on use.
+// ============================================================
+
+describe('payment-tokens visa-create — --no-poll', () => {
+  const ARGS = [
+    'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+    '--api-key', 'sk_key',
+    '--payment-method-id', 'pm_visa_1',
+    '--order-amount-cents', '12345',
+    '--idempotency-key', 'idem_np',
+  ];
+
+  it('returns right after the create call and never polls GET /payment-tokens/{id}', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    const stdout = captureStdout();
+    captureStderr();
+
+    // No fake timers, no runWithPoll: if the command still polled, the 5s sleep would
+    // really elapse and this would hang instead of returning.
+    await program.parseAsync([...ARGS, '--no-poll']);
+
+    expect(apiClient.post).toHaveBeenCalledTimes(1);
+    expect(apiClient.get).not.toHaveBeenCalled();
+    // The payment_url must be on stdout — it is the caller's only entry point.
+    expect(stdout.text()).toContain('https://checkout.visa.example/passkey/abc123');
+  });
+
+  it('still polls by default (flag absent) — existing callers are unaffected', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await runWithPoll(() => program.parseAsync(ARGS));
+
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/payment-tokens/ptk_visa_001',
+      { type: 'api-key', key: 'sk_key' },
+    );
+  });
+});
+
+describe('payment-tokens visa-create — --no-notify', () => {
+  const ARGS = [
+    'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+    '--api-key', 'sk_key',
+    '--payment-method-id', 'pm_visa_1',
+    '--order-amount-cents', '12345',
+    '--idempotency-key', 'idem_nn',
+    '--no-poll',
+  ];
+
+  it('sends notify_cardholder=false so the platform does not email the same one-time link', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([...ARGS, '--no-notify']);
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body).toHaveProperty('notify_cardholder', false);
+  });
+
+  it('omits the field entirely when the flag is absent — request body byte-identical for existing callers', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(ARGS);
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body).not.toHaveProperty('notify_cardholder');
+  });
+});
+
+// ============================================================
 // payment-tokens visa-create — idempotency-key guard (R6.4)
 // ============================================================
 
