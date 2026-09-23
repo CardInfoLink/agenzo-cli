@@ -61,6 +61,19 @@ function formatVisaPendingToken(data: Record<string, unknown>): string {
   if (data.payment_brand) {
     lines.push(['Payment Brand', String(data.payment_brand)]);
   }
+  // The payment_url is the whole point of a PENDING response — the cardholder cannot
+  // authorize without it. It was missing here while this function's own docstring, the
+  // command description AND the module docstring all said "print the payment_url":
+  // three declarations, no implementation. Under `--format json` the full object
+  // (including payment_url) is emitted by renderWithContext, which is why nobody
+  // noticed — but the text path is what a human reads when debugging, and it is also
+  // the path where `--no-poll` has to hand the link over.
+  if (data.payment_url) {
+    lines.push(['Payment URL', String(data.payment_url)]);
+  }
+  if (data.payment_url_expires_in) {
+    lines.push(['URL Expires In (s)', String(data.payment_url_expires_in)]);
+  }
   return Formatter.keyValue(lines);
 }
 
@@ -99,9 +112,16 @@ function formatVisaActiveToken(data: Record<string, unknown>): string {
  * (no webhook), so re-reading the token is the only way to observe activation;
  * the 180s cap is longer than UnionPay's 60s because completion is driven by a
  * human passkey action, not a backend event. On timeout the token stays PENDING
- * and the follow-up `payment-tokens get <id>` hint is printed. Polling runs
- * unconditionally (also under --yes): the internal orchestrator wants the
- * terminal state, not just the URL.
+ * and the follow-up `payment-tokens get <id>` hint is printed.
+ *
+ * `--no-poll` returns right after printing the URL. That is the mode a programmatic
+ * caller wants: it needs `payment_url` synchronously to render an open_url card, and it
+ * cannot afford a 180s block — an agent gateway runs this CLI under a hard timeout
+ * (Agenzo's orchestrator: `proc.communicate()` + CLI_TIMEOUT_SECONDS=60), so the poll can
+ * never complete inside it and the already-printed URL is thrown away with the killed
+ * read. The comment here previously claimed "the internal orchestrator wants the terminal
+ * state, not just the URL" — that was wrong: the orchestrator's schema renders an
+ * open_url card from `payment_url` and polls terminal state itself in a later step.
  *
  * Not advertised in the SKILL/README and does NOT register attachSchemaHelp
  * (mirrors unionpay-create / dropin-create).
@@ -112,7 +132,9 @@ export function registerVisaCreateCommand(
 ): void {
   const cmd = parent
     .command('visa-create')
-    .description('Start a Visa network-token creation, print the payment_url, then poll until ACTIVE/FAILED (up to 180s)')
+    .description(
+      'Start a Visa network-token creation, print the payment_url, then poll until ACTIVE/FAILED (up to 180s; --no-poll returns right after the URL)',
+    )
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-method-id <id>', 'Visa payment method ID to use (required)')
     .option(
@@ -129,6 +151,14 @@ export function registerVisaCreateCommand(
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
+    )
+    .option(
+      '--no-poll',
+      'Print { id, status, payment_url } and exit immediately without waiting for the cardholder passkey. For programmatic callers (e.g. an agent orchestrator) that must render the payment_url synchronously as an open_url card and poll on their own cadence via payment-tokens get. Default is to poll until ACTIVE/FAILED.',
+    )
+    .option(
+      '--no-notify',
+      "Do not also email the hosted payment link to the cardholder (sends notify_cardholder=false). Use it when you hand payment_url to the cardholder yourself: the emailed link is the SAME one-time link, so two entry points compete — whichever is used first revokes the session and the other one reports 'link no longer valid'. Default emails it, preserving existing behaviour.",
     );
 
   cmd.action(async () => {
@@ -202,11 +232,14 @@ export function registerVisaCreateCommand(
       });
     }
 
+    // --no-notify (negatable boolean: `opts.notify` is true when the flag is absent). Only sent
+    // when explicitly disabled, so the request body stays byte-identical for existing callers.
     const body: Record<string, unknown> = {
       type: 'network_token',
       payment_method_id: paymentMethodId,
       ...(currency ? { currency } : {}),
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
+      ...(opts.notify === false ? { notify_cardholder: false } : {}),
       visa: {
         order_amount_cents: orderAmountCents,
         ...(orderDescription ? { order_description: orderDescription } : {}),
@@ -258,6 +291,32 @@ export function registerVisaCreateCommand(
 
     const tokenId = tokenData.id as string;
 
+    // --no-poll (Commander negatable boolean: `opts.poll` is true when the flag is absent).
+    //
+    // A programmatic caller needs the `payment_url` SYNCHRONOUSLY so it can render an
+    // open_url card and let the cardholder authorize at their own pace. Blocking here is
+    // actively harmful for that caller: an agent gateway runs this CLI with a hard timeout
+    // (the Agenzo orchestrator uses `proc.communicate()` + CLI_TIMEOUT_SECONDS=60), so a
+    // 180s poll can NEVER finish inside it — the gateway kills the read, discards the
+    // stdout that already contained the payment_url, and reports a timeout instead. Real
+    // incident (2026-09-23): three attempts in a row, platform returned the token in 0.7s
+    // each time, the passkey was completed at +77s, and the gateway had already given up
+    // at +60s — one of those tokens reached ACTIVE with a live payment authorization that
+    // nobody collected.
+    //
+    // The token id and payment_url are already on stdout at this point (clean JSON under
+    // --format json), so returning here loses nothing; the caller polls with
+    // `payment-tokens get <id>`. Default (flag absent) still polls to a terminal status,
+    // so existing callers behave exactly as before.
+    if (opts.poll === false) {
+      notify(
+        format,
+        'info',
+        `Not waiting for the passkey (--no-poll). Open payment_url to authorize, then poll with: agenzo-token-cli payment-tokens get ${tokenId}`,
+      );
+      return;
+    }
+
     // Built-in polling: the payment_url is already printed above, so the user
     // can start the passkey verification in the browser now. The token's ACTIVE
     // is written synchronously by the browser's later `visa/payment/resolve`
@@ -265,8 +324,7 @@ export function registerVisaCreateCommand(
     // GET /payment-tokens/{id}. Poll every 5s up to 180s (longer than
     // UnionPay's 60s because completion is driven by a human passkey action,
     // not a backend event) waiting for ACTIVE/FAILED. On timeout the token
-    // stays PENDING — print the follow-up `get` hint. Poll unconditionally
-    // (also under --yes): the internal orchestrator wants the terminal state.
+    // stays PENDING — print the follow-up `get` hint.
     notify(
       format,
       'info',

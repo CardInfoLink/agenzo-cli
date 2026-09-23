@@ -58,6 +58,7 @@ agenzo-admin-cli config show                                       # show curren
 | `payment-methods` | `get <pm_id>` | Show details of a single payment method | R |
 | `payment-methods` | `disable <pm_id>` | Disable a payment method (cascades to revoke its issued tokens) | W |
 | `payment-tokens` | `create` | Issue a payment token (VCN / Network Token / X402, pick one) | W |
+| `payment-tokens` | `visa-create` | Mint a Visa network token: returns `payment_url` for the FIDO passkey, then polls to ACTIVE/FAILED (`--no-poll` returns right after the URL) | W |
 | `payment-tokens` | `list` | List payment tokens under the current API Key | R |
 | `payment-tokens` | `get <payment_token_id>` | Show details of a single payment token | R |
 | `payment-tokens` | `revoke <payment_token_id>` | Revoke a payment token (X402 uses delayed revocation) | W |

@@ -37,6 +37,8 @@ Three token types: `vcn` (single-use virtual card), `network-token` (tokenized c
 
 UnionPay network tokens require a separate checkout step (`payment-tokens unionpay-create`) that returns a `checkout_url` for user authentication.
 
+Visa network tokens work the same way via `payment-tokens visa-create`, which returns a `payment_url` for the FIDO passkey. Add `--no-poll` when you need that URL synchronously and will poll `payment-tokens get` yourself — the default blocks up to 180s waiting for a human passkey action, which is longer than most gateway timeouts. Add `--no-notify` when you hand the URL to the cardholder yourself: the platform otherwise **also** emails the same one-time link, and whichever entry point is used first revokes the other.
+
 ### Merchant Fulfillment (merchant-cli)
 
 | Service | Noun | Verbs | Typical Flow |

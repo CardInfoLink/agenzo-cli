@@ -23,7 +23,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 | `payment-tokens` | `get` | Read | View token details (`--reveal` for full VCN) |
 | `payment-tokens` | `revoke` | Write | Revoke a token |
 | `payment-tokens` | `unionpay-create` | Write | Start a UnionPay network-token checkout and return `checkout_url` — **no polling** |
-| `payment-tokens` | `visa-create` | Write | Mint a Visa network token: print `payment_url`, then **poll** GET `payment-tokens/{id}` up to 180s until ACTIVE/FAILED |
+| `payment-tokens` | `visa-create` | Write | Mint a Visa network token: print `payment_url`, then **poll** GET `payment-tokens/{id}` up to 180s until ACTIVE/FAILED — or return right after the URL with `--no-poll` |
 
 **Blocking vs non-blocking.** `add` and `create` are the operator-facing verbs: they start the flow *and* poll for the result, so the process must stay alive. The `dropin-*` / `unionpay-*` pairs are the non-blocking split for programmatic callers (e.g. the agent orchestrator): the `-create` / `-enroll` half returns the URL or session id synchronously, and the caller polls the `-status` half (or `payment-tokens get`) on its own cadence.
 
@@ -232,6 +232,37 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 - On ACTIVE the token renders `Token Number` (`value`), `Cryptogram`, `Expiry`, `Brand`, and `ECI` when present. On timeout the token stays PENDING — re-open the Checkout URL if it has not expired, or poll `get` later.
 
 **Payment fields:** `Token Number` (send as the card number to the acquirer), `Cryptogram` (one-time credential, required for verification), `Expiry` (MMYY). `ECI` is optional and may be absent in UPI mode.
+
+### Visa Network Token (async, via payment_url + FIDO passkey)
+
+`payment-tokens visa-create` mints on the native VTS/VIC rail. The initial response is
+`PENDING` and carries **`Payment URL`** — the platform-hosted page that runs the FIDO
+passkey. The token flips to ACTIVE synchronously when the browser posts the assertion
+back (no webhook), so the only way to observe activation is to re-read
+`GET /payment-tokens/{id}`.
+
+| Flag | Why |
+|---|---|
+| `--no-poll` | Return right after printing `payment_url` instead of polling up to 180s. **Required for any caller with a shorter timeout than that** — an agent gateway running the CLI as a subprocess (e.g. `CLI_TIMEOUT_SECONDS=60`) can never reach the end of the poll, and killing the read discards the URL that was already printed. The caller renders the URL and polls `payment-tokens get` on its own cadence. |
+| `--no-notify` | Sends `notify_cardholder=false` so the platform does **not** also email the link. Use it whenever you hand `payment_url` to the cardholder yourself: the emailed link is the **same one-time link**, so two entry points compete — whichever is used first revokes the session and the other reports "this payment link is no longer valid". |
+
+```bash
+# Blocking form: prints payment_url, then waits for the passkey (up to 180s)
+agenzo-token-cli payment-tokens visa-create --api-key <key> \
+  --payment-method-id <visa_pm_id> --order-amount-cents 12345 \
+  --idempotency-key idem_v1
+
+# Non-blocking form for programmatic callers: URL out, poll yourself, no email
+agenzo-token-cli payment-tokens visa-create --api-key <key> --format json \
+  --payment-method-id <visa_pm_id> --order-amount-cents 12345 \
+  --external-transaction-id <order_id> \
+  --no-poll --no-notify --idempotency-key idem_v2
+agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
+```
+
+- **Amount is integer cents** (`--order-amount-cents 12345` = $123.45), passed through with no unit conversion — unlike `--unionpay-amount`, which is a decimal string.
+- The 180s default poll window is longer than UnionPay's 60s because completion is driven by a **human passkey action**, not a backend event.
+- On timeout the token stays PENDING; re-open `payment_url` if the session has not expired, or poll `get` later.
 
 ### get / list / revoke
 
