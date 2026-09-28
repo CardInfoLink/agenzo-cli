@@ -31,6 +31,7 @@ import { registerServiceGetCommand } from './services/get.js';
 // orders commands (unified cross-provider order index — GET /orders)
 import { registerOrdersListCommand } from './orders/list.js';
 import { registerOrdersGetCommand } from './orders/get.js';
+import { registerOrdersPayBatchCommand } from './orders/pay-batch.js';
 
 // hotel-redaug commands (injection-style register, D6)
 import { registerHotelSearchCommand } from './hotel-redaug/search.js';
@@ -183,10 +184,13 @@ Key notes:
   // Spans ride + hotel + flight (+ future providers) in one call. Prefer a
   // domain-specific command only when provider-specific columns are needed.
   const ordersCmd = program.command('orders').description(
-    'Unified cross-provider order index (ride + hotel + flight). Use for order history, common filters, and stable pagination.',
+    'Unified cross-provider order index (spans ride + hotel + flight). Use list/get for generic "my orders" requests (use ride-elife/hotel-redaug/flight-flink commands once the business is known); pay-batch settles a batch of AWAITING_PAYMENT orders in one aggregate payment (trip checkout).',
   );
   registerOrdersListCommand(ordersCmd, deps);
   registerOrdersGetCommand(ordersCmd, deps);
+  // 行程聚合支付：orders pay-batch —— `orders__aggregate__pay-batch` 逻辑工具名的物理落点
+  // （供 trip-aggregate 的 pay-orders write verb 经 UniversalGateway 调用）。
+  registerOrdersPayBatchCommand(ordersCmd, deps);
 
   // hotel-redaug command group (Redaug hotel booking) — 13 verbs
   const hotelCmd = program.command('hotel-redaug').description(
