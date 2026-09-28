@@ -1559,6 +1559,120 @@ export const unifiedOrdersGetSchema: VerbSchema = {
   },
 };
 
+/**
+ * `orders pay-batch` schema — 行程聚合支付：以**一份支付凭证**对一批订单
+ * （`order_ids[]`，可混合 `hho_`/`ffo_`/`rio_` 三域）一次结算合计总额。Write op (W/Y)。
+ *
+ * 这是逻辑写工具名 `orders__aggregate__pay-batch` 的物理落点（`POST /orders/pay-batch`）：
+ * 编排层 trip-aggregate schema 的 `pay-orders` write verb 经 `UniversalGateway` 调用它，
+ * **只在唯一一次二次确认门通过后执行、绝不暴露给 LLM**。金额取各订单锁单落库的权威价、由
+ * 后端求和——**调用方不传各订单金额**。凭证按双轨二选一或都不带（月结 / 平台默认选卡）：
+ * 轨 A `--payment-token-id`（以合计总额created、`external_transaction_id` 绑定到本次
+ * payment_group 的网络令牌，银联/Visa 一次 passkey）；轨 B `--payment-method-id`（EVO
+ * 绑卡一次 3DS）。声明风格对齐既有写 verb（`hotel-redaug pay-order` / `ride-elife pay-order`）。
+ */
+export const ordersPayBatchSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: ORDERS_NOUN,
+  verb: 'pay-batch',
+  description:
+    'Settle a batch of orders (may mix ride/hotel/flight — hho_/ffo_/rio_) in ONE aggregate payment via a single payment credential. Physical landing point of the logical write tool orders__aggregate__pay-batch, invoked by the trip-aggregate pay-orders write verb through UniversalGateway (executed only after the single confirmation gate; never exposed to the LLM). Amounts are NOT passed here — the platform sums each order\'s locked authoritative price. Provide the aggregate total via one rail: --payment-token-id (轨A: network-token minted for the aggregate total, external_transaction_id bound to this payment_group — one UnionPay/Visa passkey) OR --payment-method-id (轨B: EVO bound card — one 3DS challenge); both may be omitted (monthly_settlement / platform default card). On EVO cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; finish it out-of-band, then an idempotent replay settles. On success the batch becomes settled / partially_settled (upstream-confirmation-failed orders are refunded). Supports --watch to poll until a terminal batch status.',
+  flags: {
+    'order-ids': {
+      type: 'string',
+      required: true,
+      description:
+        'Ordered order ids to settle together — comma-separated (hho_1,ffo_2,rio_3) or a JSON array (["hho_1","ffo_2"]). May mix hho_/ffo_/rio_ domains. Amounts come from each order\'s locked authoritative price (NOT passed here).',
+    },
+    'payment-token-id': {
+      type: 'string',
+      required: false,
+      description:
+        '[轨A] Network-token id (UnionPay/Visa) minted for the aggregate total with external_transaction_id bound to this payment_group (direct-charge main path). Mutually exclusive with --payment-method-id; both may be omitted for monthly_settlement / platform default.',
+    },
+    'payment-method-id': {
+      type: 'string',
+      required: false,
+      description:
+        '[轨B] EVO bound-card id to settle the aggregate total via one 3DS challenge (explicit/fallback rail). Mutually exclusive with --payment-token-id.',
+    },
+    'evo-explicit': {
+      type: 'bool',
+      required: false,
+      default: false,
+      description:
+        '[轨B 硬门槛] Explicit opt-in to settle via the EVO bound-card rail. Set true ONLY when the user explicitly chose EVO; forwarded to the body as evo_explicit=true. Omit on the payment-token-id direct-charge path.',
+    },
+    'payment-group-id': {
+      type: 'string',
+      required: false,
+      description:
+        'Optional caller-pre-generated payment group id; omit to let the platform generate one. The whole batch is associated with this group for cross-provider reconciliation.',
+    },
+    member: MEMBER_FLAG_SCHEMA,
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description:
+        'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. The SAME key + the SAME ordered order_ids replays as the same batch (dedup re-check, no double charge); any change to order_ids yields a new batch.',
+      constraints: '1-128 chars [A-Za-z0-9_-]',
+    },
+    watch: {
+      type: 'bool',
+      required: false,
+      default: false,
+      description:
+        'Poll until a terminal batch status (settled / partially_settled / failed) or timeout, emitting one NDJSON line per poll. Non-terminal states (authorizing/capturing, AUTHENTICATION_REQUIRED) keep polling — after the user finishes 3DS out-of-band, the next idempotent replay settles.',
+    },
+    // watch 默认值与 pay-batch.ts 的 DEFAULT_PAY_BATCH_WATCH_* 常量一致；此处内联字面量
+    // 以避免 verb-schema.ts ↔ pay-batch.ts 循环依赖（pay-batch.ts 反向依赖本模块的 schema）。
+    'watch-interval': {
+      type: 'int',
+      required: false,
+      default: 5,
+      description: 'Seconds between polls when --watch is set',
+    },
+    'watch-timeout': {
+      type: 'int',
+      required: false,
+      default: 300,
+      description: 'Max seconds to poll before giving up',
+    },
+  },
+  response: {
+    payment_group_id: { type: 'string', description: 'The payment group this batch settled under (echoes --payment-group-id when supplied, else server-generated).' },
+    status: { type: 'string', description: 'settled | partially_settled | failed | AUTHENTICATION_REQUIRED (3DS challenge body).' },
+    currency: { type: 'string', description: 'ISO 4217 currency of the aggregate settlement (all orders share one currency).' },
+    total_amount: { type: 'float', description: "Aggregate total in DECIMAL units = sum of each order's authoritative price (computed by the platform, NOT sent by the caller)." },
+    orders: {
+      type: 'array',
+      description: 'Per-order final result after upstream confirmation.',
+      items: {
+        order_id: { type: 'string', description: 'hho_/ffo_/rio_ order id.' },
+        status: { type: 'string', description: 'confirmed | refunded | failed.' },
+        amount: { type: 'float', description: "That order's authoritative amount." },
+        refunded_amount: { type: 'float', description: 'Amount refunded when upstream confirmation failed for this order.' },
+      },
+    },
+    three_ds_url: { type: 'string', description: '[AUTHENTICATION_REQUIRED only] EVO 3DS challenge URL — complete out-of-band, then replay to settle.' },
+    merchant_trans_id: { type: 'string', description: '[AUTHENTICATION_REQUIRED only] merchant trans id of the batch preauth.' },
+    amount: { type: 'float', description: '[AUTHENTICATION_REQUIRED only] challenge amount = aggregate total.' },
+  },
+  example: {
+    command:
+      'agenzo-merchant-cli orders pay-batch --order-ids hho_01K...,ffo_01K...,rio_01K... --payment-token-id ntk_01J2ABC --idempotency-key trip-pay-1',
+    output_summary:
+      'Settles all listed orders in one charge (banks/EVO see one transaction). Returns {payment_group_id, status, total_amount, currency, orders[]}. Use --watch to poll until settled / partially_settled / failed; upstream-confirmation-failed orders are refunded.',
+  },
+  error_recovery: {
+    PARAM_INVALID: 'Fix --order-ids (a non-empty comma-separated list or JSON array of order ids) and ensure --idempotency-key is present, then retry.',
+    ORDER_NOT_PAYABLE: 'One of the order_ids is not in AWAITING_PAYMENT (the error names the specific order_id). Remove/replace it and retry with a NEW idempotency-key.',
+    CURRENCY_MISMATCH: 'The batch mixes currencies — orders in one pay-batch must share a single currency. Split by currency and settle each group separately.',
+    TOKEN_ORDER_MISMATCH: 'The token external_transaction_id is not bound to this payment_group. Mint a token for the aggregate total bound to THIS payment_group_id and retry; no funds moved.',
+    AUTHENTICATION_REQUIRED: 'EVO requires cardholder 3DS: open three_ds_url, finish authentication, then replay pay-batch with the SAME idempotency-key (or use --watch to poll automatically).',
+  },
+};
+
 // ============================================================
 // flight-flink verb schemas (§4.4.1.3) — one per verb.
 // Amounts are integers (upstream convention). gender/id_type are STRINGS.

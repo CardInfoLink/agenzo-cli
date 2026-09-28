@@ -97,7 +97,7 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
 
     // --payment-brand 取值：`visa` / `mastercard` / 省略 三者走**同一条**托管绑卡链路
     // （同一个 /payment-methods/binding-session，同一 link_url）——托管页自己按 PAN 分流
-    // 走 Visa（VTS 自铸 + passkey）或万事达（EVO Drop-in），brand 只是可选提示、不改变 URL。
+    // 走 Visa（VTS 自create + passkey）或万事达（EVO Drop-in），brand 只是可选提示、不改变 URL。
     // `unionpay` 是独立入口（UPI Agent Pay 报名）。CLI 不再本地收卡、不再本地判品牌。
     const rawBrand = opts.paymentBrand as string | undefined;
     const paymentBrand = (rawBrand ?? '').toLowerCase();
@@ -130,7 +130,7 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
  *
  * CLI 不再本地收卡：调 ``POST /payment-methods/binding-session`` 开一次托管会话，拿到一条
  * ``link_url`` 打印给用户；持卡人在浏览器里打开、录卡号并完成验证。**托管页自己按卡号品牌
- * 分流** —— Visa 走 VTS 自铸 + Payment Passkey，Mastercard 等走 EVO Drop-in —— 两条轨都落在
+ * 分流** —— Visa 走 VTS 自create + Payment Passkey，Mastercard 等走 EVO Drop-in —— 两条轨都落在
  * 同一条 pm 上。CLI 随后按 ``verification/status`` 轮询这条 pm 到 ACTIVE / FAILED / 超时。
  *
  * 与 H5 完全一致：H5 也是一个统一收卡入口、页面内部按品牌分两条轨；CLI 把「录卡 + 分流」整个
@@ -209,7 +209,7 @@ async function handleHostedBinding(
     'Open the Link URL in a browser to enter the card and complete verification. Waiting for result...',
   );
 
-  // 轮询到终态。托管页两条轨（Visa 自铸 / EVO Drop-in）都把结果落在这条 pm 上，
+  // 轮询到终态。托管页两条轨（Visa 自create / EVO Drop-in）都把结果落在这条 pm 上，
   // 所以无论用户绑的是哪种卡，这一条 verification/status 都会收敛。
   const finalPm = await pollVerificationStatus(deps.apiClient, apiKey, pm.id, {
     intervalMs: DROPIN_POLL_INTERVAL_MS,
