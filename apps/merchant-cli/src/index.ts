@@ -248,7 +248,8 @@ Key notes:
 Workflow (typical order):
   1. find-airport      Resolve a place name → IATA city/airport codes
   2. search            Search flights (one-way/round-trip/multi-city). journeys carries ALL legs;
-                       relay --journey-id for round-trip/multi-city until price_key_ready is true
+                       round-trip/multi-city: relay the chosen offer's next_journey_ids into
+                       --journey-id until is_final_leg is true
   3. verify            Verify the fare → authoritative product_token + price_changed flag
   4. create-order      Create the order using verify's product_token (locks the fare, no charge)
   5. pay-order         Settle by --order-no (triggers ticketing); order → PAID

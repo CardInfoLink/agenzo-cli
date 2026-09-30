@@ -33,6 +33,12 @@ export interface PayHotelOrderResponse {
   billing_entry_id?: string;
   /** For the pay_per_call settlement path, this echoes the order_id (the EVO merchantTransID). */
   merchant_trans_id?: string;
+  /** AUTHENTICATION_REQUIRED when the network-token authenticate path needs a 3DS step-up. */
+  status?: string;
+  /** 3DS/passkey challenge URL (present with status=AUTHENTICATION_REQUIRED). */
+  three_ds_url?: string;
+  /** Resume handle for the network-token 3DS path (feed back as --authorized-charge-no). */
+  charge_no?: string;
   [key: string]: unknown;
 }
 
@@ -56,11 +62,15 @@ function formatPayOrder(data: PayHotelOrderResponse): string {
   ];
   if (data.settlement_path) lines.push(['Settlement path', String(data.settlement_path)]);
   if (data.pay_status) lines.push(['Pay status', String(data.pay_status)]);
+  if (data.status) lines.push(['Status', String(data.status)]);
   if (data.total_amount != null && data.currency) {
     lines.push(['Amount', `${data.total_amount} ${data.currency}`]);
   }
   if (data.billing_entry_id) lines.push(['Billing entry', String(data.billing_entry_id)]);
   if (data.merchant_trans_id) lines.push(['Merchant trans ID', String(data.merchant_trans_id)]);
+  // 网络令牌 3DS 挑战：透出续付句柄与挑战地址，供调用方打开认证页并回带续付。
+  if (data.charge_no) lines.push(['Charge no', String(data.charge_no)]);
+  if (data.three_ds_url) lines.push(['3DS URL', String(data.three_ds_url)]);
 
   return Formatter.keyValue(lines);
 }
@@ -117,7 +127,19 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     .option('--payment-token-id <id>', 'Optional network-token id (unionpay/visa charge path)')
     .option(
       '--authorized-merchant-trans-id <id>',
-      'Resume a 3DS challenge: merchant trans id of an already-authorised preauth',
+      'Resume an EVO-card 3DS challenge: merchant trans id of an already-authorised preauth',
+    )
+    .option(
+      '--authenticate',
+      'Opt-in to require cardholder 3DS on the network-token direct charge (--payment-token-id, EVO/Mastercard). When a step-up is needed the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume with --authorized-charge-no. Default off = frictionless.',
+    )
+    .option(
+      '--return-url <url>',
+      'Optional 3DS/passkey return URL for the network-token authenticate path (falls back to the platform EVO_3DS_RETURN_URL)',
+    )
+    .option(
+      '--authorized-charge-no <no>',
+      'Resume a network-token 3DS challenge: charge_no returned by a prior AUTHENTICATION_REQUIRED response (settled via ChargeService.resume_token)',
     )
     .option(
       '--evo-explicit',
@@ -176,6 +198,13 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
     if (opts.authorizedMerchantTransId !== undefined) {
       body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
+    }
+    // 网络令牌支付时 3DS（opt-in）：仅置位时透传 authenticate=true（平台默认 false=免摩擦）；
+    // return_url 可选（缺省平台回落 EVO_3DS_RETURN_URL）；authorized_charge_no 是续付句柄。
+    if (opts.authenticate) body.authenticate = true;
+    if (opts.returnUrl !== undefined) body.return_url = opts.returnUrl as string;
+    if (opts.authorizedChargeNo !== undefined) {
+      body.authorized_charge_no = opts.authorizedChargeNo as string;
     }
     // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
     if (opts.evoExplicit) body.evo_explicit = true;

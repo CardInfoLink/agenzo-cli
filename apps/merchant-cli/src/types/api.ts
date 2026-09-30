@@ -160,6 +160,10 @@ export interface PayRideOrderResponse {
   is_scheduled?: boolean;
   /** 'realtime' or 'airport'. */
   order_type?: string;
+  /** 3DS/passkey challenge URL (present with status=AUTHENTICATION_REQUIRED). */
+  three_ds_url?: string;
+  /** Resume handle for the network-token 3DS path (feed back as --authorized-charge-no). */
+  charge_no?: string;
 }
 
 // ---- Get status ----

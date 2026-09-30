@@ -400,6 +400,25 @@ export const ridePayOrderSchema: VerbSchema = {
       description:
         '[方案 B/R16] Explicit opt-in to settle this pay_per_call ride via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
     },
+    authenticate: {
+      type: 'bool',
+      required: false,
+      default: false,
+      description:
+        'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless. Ignored on the EVO preauth path and for UnionPay/Visa.',
+    },
+    'return-url': {
+      type: 'string',
+      required: false,
+      description:
+        'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.',
+    },
+    'authorized-charge-no': {
+      type: 'string',
+      required: false,
+      description:
+        'Resume a network-token 3DS challenge: charge_no from a prior AUTHENTICATION_REQUIRED response (settled via resume_token). Relaxes the exactly-one-credential rule (continuation, not a fresh charge).',
+    },
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -938,6 +957,22 @@ export const hotelPayOrderSchema: VerbSchema = {
       required: false,
       default: false,
       description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
+    },
+    authenticate: {
+      type: 'bool',
+      required: false,
+      default: false,
+      description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless. Ignored on the EVO preauth path and for UnionPay/Visa.',
+    },
+    'return-url': {
+      type: 'string',
+      required: false,
+      description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.',
+    },
+    'authorized-charge-no': {
+      type: 'string',
+      required: false,
+      description: 'Resume a network-token 3DS challenge: charge_no from a prior AUTHENTICATION_REQUIRED response (settled via resume_token), then triggers upstream payOrder on success (pay_per_call only).',
     },
     'idempotency-key': {
       type: 'string',
@@ -1732,31 +1767,39 @@ export const flightListNationalitiesSchema = flightSchema(
 
 export const flightSearchSchema = flightSchema(
   'search',
-  'Search flights (one-way/round-trip/multi-city). journeys always carries all legs; journey-id accumulates progress and only the final search returns a real priceKey (product_token).',
+  'Search flights (one-way/round-trip/multi-city). journeys always carries all legs; for round-trip/multi-city relay the CHOSEN candidate\'s next_journey_ids into --journey-id until is_final_leg is true — only then do offers carry a real priceKey (product_token).',
   {
     'trip-type': { type: 'int', required: true, description: '1=one-way, 2=round-trip, 3=multi-city.' },
-    journeys: { type: 'json', required: true, description: 'JSON array of {date, origin, destination, origin_type?, destination_type?}. origin/destination are IATA 3-letter codes; *_type 1=city, 2=airport.' },
+    journeys: { type: 'json', required: true, description: 'JSON array of {date, origin, destination, origin_type?, destination_type?}. origin/destination are IATA 3-letter codes; *_type 1=city, 2=airport. Carries ALL legs on every call, including relay calls.' },
     'cabin-class': { type: 'string', required: false, default: 'economy', description: 'economy | premium_economy | business | first.' },
     'adult-num': { type: 'int', required: false, default: 1, description: 'Adults (1-9).' },
     'child-num': { type: 'int', required: false, default: 0, description: 'Children (0-9).' },
     'infant-num': { type: 'int', required: false, default: 0, description: 'Infants (0-9).' },
     airline: { type: 'string', required: false, description: 'Airline 2-letter code filter.' },
     'transfer-number': { type: 'int', required: false, default: 0, description: '0=any,1=direct,2=1 stop,3=2 stops.' },
-    'journey-id': { type: 'json', required: false, description: 'JSON array of already-selected journey ids (relay for round-trip/multi-city).' },
+    'journey-id': { type: 'json', required: false, description: 'Relay key: copy offers[].next_journey_ids VERBATIM from the candidate the user chose in the previous search. Omit on the first search. Do not build it from the top-level journey_ids, and never send more ids than there are legs (rejected).' },
   },
   {
-    offers: { type: 'array', description: 'Offers; each has product_token (when price_key_ready), total_sale_price, currency.' },
+    offers: { type: 'array', description: 'Candidates for the current leg. Each has next_journey_ids (relay key), journey_id, segment_ids, paired_segment_ids, total_sale_price (WHOLE-TRIP total), currency, cabin_class, baggage/refund/change_rules, and product_token when price_key_ready.' },
     price_key_ready: { type: 'bool', description: 'True only when all legs are selected (final search).' },
-    journey_ids: { type: 'array', description: 'journeyId values to relay into the next search.' },
+    current_leg: { type: 'int', description: 'Which leg this result is choosing (1-based).' },
+    total_legs: { type: 'int', description: 'Total legs in the trip.' },
+    is_final_leg: { type: 'bool', description: 'True when these offers can be bookable. False means relay another round with the chosen candidate\'s next_journey_ids.' },
+    journey_ids: { type: 'array', description: 'DEPRECATED for relay: flattened across all candidates, so it cannot tell you which id belongs to which. Relay offers[].next_journey_ids instead.' },
   },
-  { command: "agenzo-merchant-cli flight-flink search --trip-type 1 --journeys '[{\"date\":\"2026-08-01\",\"origin\":\"PEK\",\"destination\":\"SHA\"}]'", output_summary: 'Returns offers[]; use a product_token where price_key_ready is true, then verify.' },
+  { command: "agenzo-merchant-cli flight-flink search --trip-type 1 --journeys '[{\"date\":\"2026-08-01\",\"origin\":\"PEK\",\"destination\":\"SHA\"}]'", output_summary: 'Returns offers[]; use a product_token where price_key_ready is true, then verify. Round-trip: the first search has is_final_leg=false and no product_token — relay the chosen candidate\'s next_journey_ids to get bookable offers.' },
 );
 
 export const flightMoreOffersSchema = flightSchema(
   'more-offers',
   'More fare offers for a priceKey (carried by product_token).',
   { 'product-token': { type: 'string', required: true, description: 'Opaque token from search.' } },
-  { offers: { type: 'array', description: 'Additional fare candidates.' } },
+  {
+    offers: { type: 'array', description: 'Additional fare candidates for the same flight (same shape as search offers[]); all are bookable.' },
+    current_leg: { type: 'int', description: 'Always 1 — alternative fares for one chosen flight, not a relay round.' },
+    total_legs: { type: 'int', description: 'Always 1.' },
+    is_final_leg: { type: 'bool', description: 'Always true.' },
+  },
   { command: 'agenzo-merchant-cli flight-flink more-offers --product-token pt_...', output_summary: 'Additional fare offers.' },
 );
 
@@ -1769,6 +1812,7 @@ export const flightVerifySchema = flightSchema(
     total_price: { type: 'int', description: 'Verified total price (integer).' },
     currency: { type: 'string', description: 'Currency code.' },
     price_changed: { type: 'bool', description: 'True if the price changed since search; re-confirm with the user.' },
+    journeys: { type: 'array', description: 'The COMPLETE itinerary being priced — every leg, not just the last one relayed. Use it to show the full trip on a confirmation screen.' },
   },
   { command: 'agenzo-merchant-cli flight-flink verify --product-token pt_...', output_summary: 'Returns the authoritative product_token + price_changed.' },
 );
@@ -1813,7 +1857,10 @@ export const flightPayOrderSchema = flightSchema(
     'order-no': { type: 'string', required: true, description: 'Our order reference from create-order.' },
     'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id to charge (pay_per_call only; omit to use the default card).' },
     'payment-token-id': { type: 'string', required: false, description: 'Optional network-token id; settles via direct charge instead of EVO preauth.' },
-    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with an already-authorised preauth trans id.' },
+    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume an EVO-card 3DS challenge with an already-authorised preauth trans id.' },
+    authenticate: { type: 'bool', required: false, default: false, description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless.' },
+    'return-url': { type: 'string', required: false, description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.' },
+    'authorized-charge-no': { type: 'string', required: false, description: 'Resume a network-token 3DS challenge: charge_no from a prior AUTHENTICATION_REQUIRED response (settled via resume_token), then triggers ticketing on success.' },
     'evo-explicit': { type: 'bool', required: false, default: false, description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
   },

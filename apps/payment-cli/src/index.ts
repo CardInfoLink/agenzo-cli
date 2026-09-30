@@ -14,6 +14,7 @@ import {
 } from '@agenzo/cli-core';
 
 import { registerPayCommand } from './payments/capture.js';
+import { registerCaptureResumeCommand } from './payments/capture-resume.js';
 import { registerChargeCardCommand } from './payments/charge-card.js';
 import { registerChargeCardResumeCommand } from './payments/charge-card-resume.js';
 import { registerRefundCommand } from './payments/refund.js';
@@ -61,6 +62,7 @@ async function main() {
     .command('payments')
     .description('Payment token capture, standalone card charge (EVO 3DS) and refund');
   registerPayCommand(paymentsCmd, deps); // payments capture      → POST /pay        (UnionPay/EVO token)
+  registerCaptureResumeCommand(paymentsCmd, deps); // payments capture-resume     → POST /pay/resume         (EVO token passkey/3DS settle)
   registerChargeCardCommand(paymentsCmd, deps); // payments charge-card         → POST /charge/card        (EVO authorize)
   registerChargeCardResumeCommand(paymentsCmd, deps); // payments charge-card-resume  → POST /charge/card/resume (EVO capture)
   registerRefundCommand(paymentsCmd, deps); // payments refund             → POST /refund
