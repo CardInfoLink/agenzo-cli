@@ -232,7 +232,7 @@ International flight booking via the Flink provider: two-step create-then-pay ti
 Booking workflow:
 
 ```
-find-airport → search (relay --journey-id per leg until price_key_ready)
+find-airport → search (relay --journey-id per leg until is_final_leg)
   → verify → create-order → pay-order → get-order (poll until TICKETED)
 ```
 
@@ -247,8 +247,11 @@ Refund workflow: `refund-apply → refund-detail → refund-confirm --confirm 1|
 
 Key rules:
 
-- **search**: `--journeys` always carries ALL legs. For round-trip / multi-city, feed `--journey-id` from the previous result to accumulate selections; only the final leg's offer has `price_key_ready: true`.
-- **verify**: returns the authoritative `product_token` (may differ from search's) — always pass verify's token to `create-order`. If `price_changed`, re-confirm the new price with the user.
+- **search**: `--journeys` always carries ALL legs, on every call including relay calls. For round-trip / multi-city, keep searching until `is_final_leg: true`; each round, pass the **chosen** offer's `next_journey_ids` verbatim as `--journey-id`. Only the final leg's offers have `price_key_ready: true` and a `product_token`.
+  - Do **not** build the relay list yourself: the top-level `journey_ids` is flattened across every candidate, so it cannot tell you which id belongs to which. And never send more ids than there are legs — the CLI rejects it, because upstream would otherwise answer with the **first** leg's candidates and still report success.
+  - Earlier-leg candidates are not bare flight rows: `total_sale_price` is already the **whole-trip** total and `paired_segment_ids` names the legs upstream paired with it (look both up in the response's `segments`), so you can show the full itinerary and the real total from the first round.
+  - A relay search that returns **zero** offers means the journey ids went stale or that leg sold out — upstream reports both the same way. Restart from leg 1 for fresh ids instead of retrying the same list.
+- **verify**: returns the authoritative `product_token` (may differ from search's) — always pass verify's token to `create-order`. If `price_changed`, re-confirm the new price with the user. Its `journeys` is the complete itinerary (every leg), which is what to show on a confirmation screen.
 - **create-order**: `--passengers` is a JSON array; `gender` / `id_type` are **strings** (`"1"` / `"2"`); child/infant entries need `adult_passenger_name`. Locks the fare without charging.
 - **`pay_time_limit` is a hard deadline, and it is short.** `create-order` returns it as a bare `YYYY-MM-DD HH:MM:SS` string in **Beijing time (Asia/Shanghai)** with no timezone marker — do not read it as UTC or as local time. The supplier decides the window and it is typically only minutes wide (observed ~10 minutes), so call `pay-order` immediately rather than pausing to ask the user another question. Past the deadline `pay-order` fails with `PAYMENT_REQUEST_EXPIRED` and the order is moved to `FAILED`, which is terminal: the fare is gone and you must start over from `search` / `verify` / `create-order` with a new `--idempotency-key`.
 - **Ticketing is asynchronous** — never claim "booked" until `get-order` returns `TICKETED`. Single-passenger ~100s, multi-passenger 150s+; use `--watch`.
@@ -271,7 +274,7 @@ Billing modes otherwise match hotel: `monthly_settlement` deducts from the settl
 | Verb | Must ask the user | Derived / defaulted |
 |---|---|---|
 | `find-airport` | keyword | — |
-| `search` | trip-type, journeys (origin/destination/date per leg) | `--journey-id` from the prior search |
+| `search` | trip-type, journeys (origin/destination/date per leg); **which candidate to relay** on each round-trip / multi-city round | `--journey-id` = the chosen offer's `next_journey_ids` |
 | `verify` | — | `product_token` from `search` |
 | `create-order` | contact-name, contact-phone, passengers (name/gender/id/birthday) | `total-amount` + `currency` from `verify`; idempotency-key |
 | `pay-order` / `cancel-order` | — | `order-no` from `create-order`; idempotency-key |

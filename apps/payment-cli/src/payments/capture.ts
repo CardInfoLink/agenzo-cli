@@ -22,7 +22,8 @@ interface ChargeResult {
   fee_cents: number;
   total_cents: number;
   currency: string;
-  pay_status: string;
+  pay_status: string; // success | failed | pending | requires_action
+  three_ds_url?: string;
   merchant_trans_id?: string;
   evo_trans_id?: string;
   result_code?: string | null;
@@ -60,6 +61,20 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
       'Payment brand override (optional; auto-detected from token). "evo" or "unionpay".',
     )
     .option('--description <text>', 'Optional payment description')
+    .option(
+      '--authenticate',
+      'Require cardholder passkey/3DS on this charge (EVO/Mastercard network token only). ' +
+        'When the gateway needs authentication the response returns pay_status=requires_action ' +
+        '+ three_ds_url; open it, complete the passkey, then run `payments capture-resume`.',
+    )
+    .option(
+      '--return-url <url>',
+      'Return URL for the passkey/3DS redirect (used with --authenticate; server falls back to its configured EVO 3DS return URL).',
+    )
+    .option(
+      '--cardholder-phone <phone>',
+      'Cardholder phone in E.164 (e.g. +14155551234). Required by FIDOPage when --authenticate is set.',
+    )
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header (required; not auto-generated)',
@@ -122,6 +137,15 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     if (opts.description) {
       body.description = opts.description as string;
     }
+    if (opts.authenticate) {
+      body.authenticate = true;
+    }
+    if (opts.returnUrl) {
+      body.return_url = opts.returnUrl as string;
+    }
+    if (opts.cardholderPhone) {
+      body.cardholder_phone = opts.cardholderPhone as string;
+    }
 
     const extraHeaders: Record<string, string> = {
       'Idempotency-Key': idempotencyKey,
@@ -139,7 +163,13 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     }
 
     const charge = result.data;
-    notify(format, 'success', 'Payment charged');
+    notify(
+      format,
+      'success',
+      charge.pay_status === 'requires_action'
+        ? 'Authentication required — open the 3DS/passkey URL, then run capture-resume'
+        : 'Payment charged',
+    );
 
     const commandResult: CommandResult<ChargeResult> = {
       data: charge,
@@ -151,6 +181,7 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
           ['Amount', `${formatCents(charge.amount_cents)} ${charge.currency}`],
           ['Fee', `${formatCents(charge.fee_cents)} ${charge.currency}`],
           ['Total', `${formatCents(charge.total_cents)} ${charge.currency}`],
+          ...(charge.three_ds_url ? [['3DS URL', charge.three_ds_url] as [string, string]] : []),
           ['Merchant Trans ID', charge.merchant_trans_id ?? '-'],
           ['EVO Trans ID', charge.evo_trans_id ?? '-'],
         ]),

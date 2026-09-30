@@ -19,10 +19,18 @@ verbs and pass data between them. For exact flags and field types, read the sche
 ## Workflow (book)
 1. find-airport --keyword "<place>"    → resolve to IATA city/airport codes
 2. search --trip-type <1|2|3> --journeys '<json>'
-   - journeys ALWAYS carries ALL legs. For round-trip/multi-city, relay journey-id
-     from the previous search into the next until price_key_ready is true.
-   - Only offers where price_key_ready is true carry a real product_token; earlier-leg
-     offers carry only an identifier (product_token null).
+   - journeys ALWAYS carries ALL legs, on every call including relay calls.
+   - Round-trip/multi-city: keep searching until is_final_leg is true. Each round, present the
+     candidates, let the USER pick one, and pass THAT candidate's next_journey_ids verbatim as
+     --journey-id on the next search. Never assemble the list yourself (the top-level journey_ids
+     is flattened across all candidates) and never send more ids than there are legs — it is
+     rejected, because upstream would otherwise silently answer with the FIRST leg's candidates.
+   - Only offers where price_key_ready is true carry a real product_token. Earlier-leg candidates
+     are NOT bare flight rows: total_sale_price is already the WHOLE-TRIP total and
+     paired_segment_ids names the legs upstream paired with it, so you can show the full
+     itinerary and real total from the first round — they just are not bookable yet.
+   - A relay search returning ZERO offers means the journey ids went stale OR that leg sold out
+     (upstream reports both as an empty list). Restart from leg 1 for fresh ids.
    - Code<->type consistency: tag each code with its matching type — an AIRPORT code (e.g. NRT)
      uses type 2, a CITY code (e.g. TYO) uses type 1. Mislabeling (e.g. NRT with type 1, since NRT
      is an airport whose city is TYO) is rejected with code 400 "destination not exist".
@@ -58,7 +66,7 @@ verbs and pass data between them. For exact flags and field types, read the sche
 ## Data passing
 - product_token : search → verify → create-order (opaque; never fabricate or edit; verify's token wins)
 - order_no      : create-order → pay-order / get-order / cancel-order
-- journey_id    : search → next search (relay for round-trip/multi-city)
+- next_journey_ids : chosen offer → next search's --journey-id (relay for round-trip/multi-city)
 - change_order_no / refund_order_no : *-apply → *-detail / *-confirm / pay-order (change)
 
 ## Invariants

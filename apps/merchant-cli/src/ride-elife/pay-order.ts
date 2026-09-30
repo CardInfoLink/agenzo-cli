@@ -86,6 +86,21 @@ function formatPayOrder(data: PayRideOrderResponse): string {
     lines.push(['Amount', `${data.price.amount} ${data.price.currency}`]);
     if (data.price.quote_id) lines.push(['Quote ID', String(data.price.quote_id)]);
   }
+  // 网络令牌 3DS 挑战（status=AUTHENTICATION_REQUIRED）：透出续付句柄与挑战地址。
+  if (data.charge_no) lines.push(['Charge no', String(data.charge_no)]);
+  if (data.three_ds_url) lines.push(['3DS URL', String(data.three_ds_url)]);
+
+  // 挑战态不是终态成功：状态行按 AUTHENTICATION_REQUIRED 提示需完成认证，否则报结算成功。
+  if (String(data.status) === 'AUTHENTICATION_REQUIRED') {
+    return [
+      Formatter.keyValue(lines),
+      Formatter.status(
+        'warning',
+        `Order ${orderRef} needs cardholder 3DS — open the 3DS URL, then resume pay-order with `
+          + `--authorized-charge-no ${data.charge_no ?? ''}.`,
+      ),
+    ].join('\n\n');
+  }
 
   return [
     Formatter.keyValue(lines),
@@ -144,7 +159,19 @@ export function registerRidePayOrderCommand(
     )
     .option(
       '--authorized-merchant-trans-id <id>',
-      'Resume a 3DS challenge: merchant trans id of an already-authorised preauth',
+      'Resume an EVO-card 3DS challenge: merchant trans id of an already-authorised preauth',
+    )
+    .option(
+      '--authenticate',
+      'Opt-in to require cardholder 3DS on the network-token direct charge (--payment-token-id, EVO/Mastercard). When a step-up is needed the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume with --authorized-charge-no. Default off = frictionless.',
+    )
+    .option(
+      '--return-url <url>',
+      'Optional 3DS/passkey return URL for the network-token authenticate path (falls back to the platform EVO_3DS_RETURN_URL)',
+    )
+    .option(
+      '--authorized-charge-no <no>',
+      'Resume a network-token 3DS challenge: charge_no returned by a prior AUTHENTICATION_REQUIRED response (settled via ChargeService.resume_token). When set, the exactly-one-credential rule is relaxed (this is a continuation, not a fresh charge).',
     )
     .option(
       '--evo-explicit',
@@ -168,7 +195,12 @@ export function registerRidePayOrderCommand(
     const orderId = need(opts.orderId as string | undefined, 'order-id');
     const paymentTokenId = opts.paymentTokenId as string | undefined;
     const paymentMethodId = opts.paymentMethodId as string | undefined;
-    assertExactlyOneCredential(paymentTokenId, paymentMethodId);
+    const authorizedChargeNo = opts.authorizedChargeNo as string | undefined;
+    // 3DS 续付（--authorized-charge-no）是已放行网络令牌扣款的收尾，本身即凭证，不再要求
+    // token/method 二选一（首扣时已校验过）；仅首扣路径强制 exactly-one。
+    if (authorizedChargeNo === undefined) {
+      assertExactlyOneCredential(paymentTokenId, paymentMethodId);
+    }
 
     const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
       message: 'API Key:',
@@ -185,6 +217,11 @@ export function registerRidePayOrderCommand(
     if (opts.authorizedMerchantTransId !== undefined) {
       body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
     }
+    // 网络令牌支付时 3DS（opt-in）：仅置位时透传 authenticate=true；return_url 可选（缺省平台
+    // 回落 EVO_3DS_RETURN_URL）；authorized_charge_no 是续付句柄。
+    if (opts.authenticate) body.authenticate = true;
+    if (opts.returnUrl !== undefined) body.return_url = opts.returnUrl as string;
+    if (authorizedChargeNo !== undefined) body.authorized_charge_no = authorizedChargeNo;
     // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
     if (opts.evoExplicit) body.evo_explicit = true;
 

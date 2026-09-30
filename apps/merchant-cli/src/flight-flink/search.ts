@@ -18,7 +18,7 @@ export function registerSearchCommand(parent: Command, deps: Deps): void {
     .option('--infant-num <n>', 'Infants (0-9)', '0')
     .option('--airline <code>', 'Airline 2-letter code filter')
     .option('--transfer-number <n>', '0=any,1=direct,2=1 stop,3=2 stops', '0')
-    .option('--journey-id <json>', 'JSON array of already-selected journey ids (relay)');
+    .option('--journey-id <json>', "Relay: the chosen offer's next_journey_ids, verbatim (round-trip/multi-city)");
   attachSchemaHelp(cmd, flightSearchSchema);
 
   cmd.action(async () => {
