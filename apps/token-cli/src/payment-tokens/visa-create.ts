@@ -51,6 +51,30 @@ function parseOrderAmountCents(amountStr: string): number {
   return Number(amountStr.trim());
 }
 
+/** 订阅扣款周期，与平台 `visa.mandate.recurring_frequency` 枚举一致。 */
+const RECURRING_FREQUENCIES = ['WEEKLY', 'MONTHLY', 'YEARLY'] as const;
+type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
+/**
+ * 解析 JSON 对象型参数（`--order` / `--mandate`）。
+ *
+ * 只校验"是一个 JSON 对象"，其内部字段的含义和取值范围由平台校验并以 422/1001 返回，
+ * CLI 不重复实现，也就不会和平台规则漂移。解析结果原样透传。
+ */
+function parseJsonObjectFlag(flag: string, raw: string): Record<string, unknown> {
+  const invalid = `${flag} must be a JSON object.`;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError('PARAM_INVALID', invalid);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new CliError('PARAM_INVALID', invalid);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 /** Format a Visa network token PENDING response for output (payment_url for the passkey page). */
 function formatVisaPendingToken(data: Record<string, unknown>): string {
   const lines: [string, string][] = [
@@ -145,6 +169,22 @@ export function registerVisaCreateCommand(
     .option('--order-description <text>', 'Order description (optional)')
     .option('--merchant-order-id <id>', 'Merchant order id (optional)')
     .option(
+      '--consumer-prompt <text>',
+      'One-line purchase intent, e.g. "Subscribe to Pro monthly plan" (optional)',
+    )
+    .option(
+      '--order <json>',
+      'Order details as ONE JSON object: subtotal_cents / tax_cents / discount_cents / shipping_cents / products[] / shipping_address (optional, all amounts in cents)',
+    )
+    .option(
+      '--recurring <frequency>',
+      'Mark this as a subscription first charge: WEEKLY | MONTHLY | YEARLY. Requires --mandate (optional)',
+    )
+    .option(
+      '--mandate <json>',
+      'Authorization boundary as ONE JSON object: mandate_id / decline_threshold_cents / effective_until_time / preferred_merchant_name / merchant_category_code / description. Required with --recurring; recurring_frequency is filled in from --recurring (optional)',
+    )
+    .option(
       '--external-transaction-id <id>',
       'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
     )
@@ -221,6 +261,42 @@ export function registerVisaCreateCommand(
     // nested `visa.merchant_order_id` is a separate, Visa-specific field.
     const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
 
+    // 订阅 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何交互提示校验，
+    // 坏参数不会走到发请求。
+    const consumerPrompt = (opts.consumerPrompt as string | undefined)?.trim() || undefined;
+    const orderDetail =
+      opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
+    let mandate =
+      opts.mandate !== undefined ? parseJsonObjectFlag('--mandate', String(opts.mandate)) : undefined;
+
+    let recurring: RecurringFrequency | undefined;
+    const recurringRaw = (opts.recurring as string | undefined)?.trim();
+    if (recurringRaw) {
+      const freq = recurringRaw.toUpperCase();
+      if (!(RECURRING_FREQUENCIES as readonly string[]).includes(freq)) {
+        throw new CliError(
+          'PARAM_INVALID',
+          `Invalid --recurring "${recurringRaw}". Expected one of: ${RECURRING_FREQUENCIES.join(', ')}.`,
+        );
+      }
+      recurring = freq as RecurringFrequency;
+      // 平台规则：订阅必须自带 mandate（自动生成的有效期只覆盖单笔订单，不适合周期授权）。
+      if (!mandate) {
+        throw new CliError(
+          'PARAM_INVALID',
+          '--recurring requires --mandate (a JSON object with mandate_id, decline_threshold_cents, effective_until_time, preferred_merchant_name, merchant_category_code, description).',
+        );
+      }
+      const inlineFreq = mandate.recurring_frequency;
+      if (inlineFreq !== undefined && inlineFreq !== recurring) {
+        throw new CliError(
+          'PARAM_INVALID',
+          `--mandate.recurring_frequency "${String(inlineFreq)}" conflicts with --recurring ${recurring}. Drop it from --mandate; the CLI fills it in.`,
+        );
+      }
+      mandate = { ...mandate, recurring_frequency: recurring };
+    }
+
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
       if (isYes) {
@@ -244,6 +320,10 @@ export function registerVisaCreateCommand(
         order_amount_cents: orderAmountCents,
         ...(orderDescription ? { order_description: orderDescription } : {}),
         ...(merchantOrderId ? { merchant_order_id: merchantOrderId } : {}),
+        ...(recurring ? { is_recurring: true } : {}),
+        ...(consumerPrompt ? { consumer_prompt: consumerPrompt } : {}),
+        ...(mandate ? { mandate } : {}),
+        ...(orderDetail ? { order: orderDetail } : {}),
       },
     };
 

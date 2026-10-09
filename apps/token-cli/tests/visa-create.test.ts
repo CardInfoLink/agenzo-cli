@@ -315,6 +315,112 @@ describe('payment-tokens visa-create — --no-notify', () => {
 });
 
 // ============================================================
+// payment-tokens visa-create — 订阅 / 订单明细（--recurring / --mandate / --order / --consumer-prompt）
+// ============================================================
+
+describe('payment-tokens visa-create — subscription & order details', () => {
+  const BASE = [
+    'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+    '--api-key', 'sk_key',
+    '--payment-method-id', 'pm_visa_1',
+    '--order-amount-cents', '999',
+    '--idempotency-key', 'idem_sub',
+    '--no-poll',
+  ];
+  const MANDATE = {
+    mandate_id: 'sub-1',
+    decline_threshold_cents: 999,
+    effective_until_time: '1822980034',
+    preferred_merchant_name: 'Example Store',
+    merchant_category_code: '7372',
+    description: 'Pro plan monthly subscription',
+  };
+  const ORDER = {
+    subtotal_cents: 999,
+    products: [{ product_name: 'Pro Plan', quantity: 1, unit_price_cents: 999 }],
+    shipping_address: { country_code: 'US', city: 'San Francisco' },
+  };
+
+  async function run(extra: string[]) {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    registerVisaCreateCommand(program.command('payment-tokens'), { apiClient } as any);
+    captureStdout();
+    captureStderr();
+    await program.parseAsync([...BASE, ...extra]);
+    return apiClient.post.mock.calls[0][2] as Record<string, any>;
+  }
+
+  async function runRejected(extra: string[], pattern: RegExp) {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    registerVisaCreateCommand(program.command('payment-tokens'), { apiClient } as any);
+    captureStdout();
+    captureStderr();
+    await expect(program.parseAsync([...BASE, ...extra])).rejects.toThrow(pattern);
+    expect(apiClient.post).not.toHaveBeenCalled();
+  }
+
+  it('--recurring + --mandate: sets is_recurring and fills mandate.recurring_frequency', async () => {
+    const body = await run(['--recurring', 'MONTHLY', '--mandate', JSON.stringify(MANDATE)]);
+    expect(body.visa.is_recurring).toBe(true);
+    expect(body.visa.mandate).toEqual({ ...MANDATE, recurring_frequency: 'MONTHLY' });
+  });
+
+  it('--recurring is case-insensitive', async () => {
+    const body = await run(['--recurring', 'yearly', '--mandate', JSON.stringify(MANDATE)]);
+    expect(body.visa.mandate.recurring_frequency).toBe('YEARLY');
+  });
+
+  it('--order and --consumer-prompt are forwarded verbatim under visa', async () => {
+    const body = await run(['--order', JSON.stringify(ORDER), '--consumer-prompt', ' Buy a plan ']);
+    expect(body.visa.order).toEqual(ORDER);
+    expect(body.visa.consumer_prompt).toBe('Buy a plan');
+    // 非订阅：不带 is_recurring / mandate
+    expect(body.visa).not.toHaveProperty('is_recurring');
+    expect(body.visa).not.toHaveProperty('mandate');
+  });
+
+  it('--mandate alone (no --recurring) is forwarded as a one-off mandate', async () => {
+    const body = await run(['--mandate', JSON.stringify(MANDATE)]);
+    expect(body.visa.mandate).toEqual(MANDATE);
+    expect(body.visa).not.toHaveProperty('is_recurring');
+  });
+
+  it('adds none of the new fields when no new flag is given — body unchanged for existing callers', async () => {
+    const body = await run([]);
+    expect(Object.keys(body.visa)).toEqual(['order_amount_cents']);
+  });
+
+  it('rejects --recurring without --mandate before sending anything', async () => {
+    await runRejected(['--recurring', 'MONTHLY'], /--recurring requires --mandate/);
+  });
+
+  it('rejects an unknown --recurring frequency', async () => {
+    await runRejected(
+      ['--recurring', 'DAILY', '--mandate', JSON.stringify(MANDATE)],
+      /Invalid --recurring/,
+    );
+  });
+
+  it('rejects a mandate.recurring_frequency that conflicts with --recurring', async () => {
+    await runRejected(
+      ['--recurring', 'MONTHLY', '--mandate', JSON.stringify({ ...MANDATE, recurring_frequency: 'WEEKLY' })],
+      /conflicts with --recurring/,
+    );
+  });
+
+  it.each([
+    ['--order', 'not json'],
+    ['--order', '[1,2]'],
+    ['--mandate', '"str"'],
+    ['--mandate', 'null'],
+  ])('rejects %s %s as not a JSON object', async (flag, value) => {
+    await runRejected([flag, value], new RegExp(`${flag} must be a JSON object`));
+  });
+});
+
+// ============================================================
 // payment-tokens visa-create — idempotency-key guard (R6.4)
 // ============================================================
 

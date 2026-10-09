@@ -264,6 +264,28 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 - The 180s default poll window is longer than UnionPay's 60s because completion is driven by a **human passkey action**, not a backend event.
 - On timeout the token stays PENDING; re-open `payment_url` if the session has not expired, or poll `get` later.
 
+**Subscription & order details (all optional).** Four flags; the two structured ones are each **one JSON object**, passed through to the platform's `visa.order` / `visa.mandate` as-is (the CLI only checks it is a JSON object — field rules are enforced by the platform, which answers `422 / 1001` with the offending field):
+
+| Flag | Maps to | Notes |
+|---|---|---|
+| `--consumer-prompt <text>` | `visa.consumer_prompt` | One-line purchase intent |
+| `--order <json>` | `visa.order` | `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
+| `--recurring <WEEKLY\|MONTHLY\|YEARLY>` | `visa.is_recurring=true` + `mandate.recurring_frequency` | Subscription first charge. **Requires `--mandate`**; the frequency is filled in for you, don't repeat it in the JSON |
+| `--mandate <json>` | `visa.mandate` | `mandate_id` / `decline_threshold_cents` / `effective_until_time` / `preferred_merchant_name` / `merchant_category_code` / `description` |
+
+```bash
+# Monthly subscription first charge, with order details
+agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-poll \
+  --payment-method-id <visa_pm_id> --order-amount-cents 999 --currency USD \
+  --consumer-prompt "Subscribe to Pro monthly plan" \
+  --recurring MONTHLY \
+  --mandate '{"mandate_id":"sub-1","decline_threshold_cents":999,"effective_until_time":"1822980034","preferred_merchant_name":"Example Store","merchant_category_code":"7372","description":"Pro plan monthly"}' \
+  --order '{"subtotal_cents":999,"products":[{"product_name":"Pro Plan","quantity":1,"unit_price_cents":999}]}' \
+  --idempotency-key idem_sub1
+```
+
+Only the first charge is authorised; later automatic debits are not supported yet. Without any of these flags the request body is unchanged.
+
 ### get / list / revoke
 
 - `get` masks VCN PAN and CVC by default; `--reveal` prints them in full — only use it when a payment flow actually needs the credential.
