@@ -325,10 +325,10 @@ describe('payment-tokens visa-create — --no-notify', () => {
 });
 
 // ============================================================
-// payment-tokens visa-create — 订阅 / 订单明细（--recurring / --mandate / --order / --consumer-prompt）
+// payment-tokens visa-create — 授权额度 / 到期时间 / 订单明细（--max-amount-cents / --expires-at / --order / --consumer-prompt）
 // ============================================================
 
-describe('payment-tokens visa-create — subscription & order details', () => {
+describe('payment-tokens visa-create — mandate limit, expiry & order details', () => {
   const BASE = [
     'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
     '--api-key', 'sk_key',
@@ -337,14 +337,6 @@ describe('payment-tokens visa-create — subscription & order details', () => {
     '--idempotency-key', 'idem_sub',
     '--no-poll',
   ];
-  const MANDATE = {
-    mandate_id: 'sub-1',
-    decline_threshold_cents: 999,
-    effective_until_time: '1822980034',
-    preferred_merchant_name: 'Example Store',
-    merchant_category_code: '7372',
-    description: 'Pro plan monthly subscription',
-  };
   const ORDER = {
     subtotal_cents: 999,
     products: [{ product_name: 'Pro Plan', quantity: 1, unit_price_cents: 999 }],
@@ -371,30 +363,39 @@ describe('payment-tokens visa-create — subscription & order details', () => {
     expect(apiClient.post).not.toHaveBeenCalled();
   }
 
-  it('--recurring + --mandate: sets is_recurring and fills mandate.recurring_frequency', async () => {
-    const body = await run(['--recurring', 'MONTHLY', '--mandate', JSON.stringify(MANDATE)]);
-    expect(body.visa.is_recurring).toBe(true);
-    expect(body.visa.mandate).toEqual({ ...MANDATE, recurring_frequency: 'MONTHLY' });
+  it('--max-amount-cents and --expires-at are forwarded under visa', async () => {
+    const body = await run([
+      '--max-amount-cents', '50000',
+      '--expires-at', '2027-12-31T00:00:00Z',
+    ]);
+    expect(body.visa.max_amount_cents).toBe(50000);
+    expect(body.visa.expires_at).toBe('2027-12-31T00:00:00Z');
   });
 
-  it('--recurring is case-insensitive', async () => {
-    const body = await run(['--recurring', 'yearly', '--mandate', JSON.stringify(MANDATE)]);
-    expect(body.visa.mandate.recurring_frequency).toBe('YEARLY');
+  it('accepts an offset timezone and passes the string through untouched', async () => {
+    const body = await run(['--expires-at', '2027-12-31T08:00:00+08:00']);
+    expect(body.visa.expires_at).toBe('2027-12-31T08:00:00+08:00');
+  });
+
+  it('each of the two can be given alone — the other stays out of the body (platform default applies)', async () => {
+    const limitOnly = await run(['--max-amount-cents', '30000']);
+    expect(limitOnly.visa).not.toHaveProperty('expires_at');
+    const expiryOnly = await run(['--expires-at', '2027-12-31T00:00:00Z']);
+    expect(expiryOnly.visa).not.toHaveProperty('max_amount_cents');
+  });
+
+  it('--max-amount-cents equal to the order amount is allowed', async () => {
+    const body = await run(['--max-amount-cents', '999']);
+    expect(body.visa.max_amount_cents).toBe(999);
   });
 
   it('--order and --consumer-prompt are forwarded verbatim under visa', async () => {
     const body = await run(['--order', JSON.stringify(ORDER), '--consumer-prompt', ' Buy a plan ']);
     expect(body.visa.order).toEqual(ORDER);
     expect(body.visa.consumer_prompt).toBe('Buy a plan');
-    // 非订阅：不带 is_recurring / mandate
-    expect(body.visa).not.toHaveProperty('is_recurring');
-    expect(body.visa).not.toHaveProperty('mandate');
-  });
-
-  it('--mandate alone (no --recurring) is forwarded as a one-off mandate', async () => {
-    const body = await run(['--mandate', JSON.stringify(MANDATE)]);
-    expect(body.visa.mandate).toEqual(MANDATE);
-    expect(body.visa).not.toHaveProperty('is_recurring');
+    // 默认额度 / 到期时间由平台决定，CLI 不替它填
+    expect(body.visa).not.toHaveProperty('max_amount_cents');
+    expect(body.visa).not.toHaveProperty('expires_at');
   });
 
   it('adds none of the new fields when no new flag is given — body unchanged for existing callers', async () => {
@@ -402,29 +403,36 @@ describe('payment-tokens visa-create — subscription & order details', () => {
     expect(Object.keys(body.visa)).toEqual(['order_amount_cents']);
   });
 
-  it('rejects --recurring without --mandate before sending anything', async () => {
-    await runRejected(['--recurring', 'MONTHLY'], /--recurring requires --mandate/);
+  it.each([['0'], ['-5'], ['12.5'], ['abc'], ['1e3']])(
+    'rejects --max-amount-cents %s before sending anything',
+    async (value) => {
+      await runRejected(['--max-amount-cents', value], /Invalid --max-amount-cents/);
+    },
+  );
+
+  it('rejects --max-amount-cents below the order amount', async () => {
+    await runRejected(['--max-amount-cents', '998'], /must not be less than --order-amount-cents/);
   });
 
-  it('rejects an unknown --recurring frequency', async () => {
-    await runRejected(
-      ['--recurring', 'DAILY', '--mandate', JSON.stringify(MANDATE)],
-      /Invalid --recurring/,
-    );
+  it.each([
+    ['2027-12-31'],
+    ['2027-12-31T00:00:00'],
+    ['2027-12-31 00:00:00Z'],
+    ['2027-13-45T00:00:00Z'],
+    ['next year'],
+  ])('rejects --expires-at %s (needs ISO 8601 with a timezone)', async (value) => {
+    await runRejected(['--expires-at', value], /Invalid --expires-at/);
   });
 
-  it('rejects a mandate.recurring_frequency that conflicts with --recurring', async () => {
-    await runRejected(
-      ['--recurring', 'MONTHLY', '--mandate', JSON.stringify({ ...MANDATE, recurring_frequency: 'WEEKLY' })],
-      /conflicts with --recurring/,
-    );
+  it('no longer offers the subscription flags', async () => {
+    await runRejected(['--recurring', 'MONTHLY'], /unknown option/i);
+    await runRejected(['--mandate', '{}'], /unknown option/i);
   });
 
   it.each([
     ['--order', 'not json'],
     ['--order', '[1,2]'],
-    ['--mandate', '"str"'],
-    ['--mandate', 'null'],
+    ['--order', 'null'],
   ])('rejects %s %s as not a JSON object', async (flag, value) => {
     await runRejected([flag, value], new RegExp(`${flag} must be a JSON object`));
   });

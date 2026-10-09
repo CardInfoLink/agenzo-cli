@@ -51,12 +51,32 @@ function parseOrderAmountCents(amountStr: string): number {
   return Number(amountStr.trim());
 }
 
-/** 订阅扣款周期，与平台 `visa.mandate.recurring_frequency` 枚举一致。 */
-const RECURRING_FREQUENCIES = ['WEEKLY', 'MONTHLY', 'YEARLY'] as const;
-type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+/**
+ * `--max-amount-cents`：授权额度（分），正整数。上限不设：平台只要求不小于订单金额，
+ * 这一点 CLI 在下面和订单金额一起比对。
+ */
+function isValidMaxAmountCents(value: string): boolean {
+  const trimmed = value.trim();
+  if (!INTEGER_CENTS_RE.test(trimmed)) return false;
+  const n = Number(trimmed);
+  return Number.isSafeInteger(n) && n > 0;
+}
 
 /**
- * 解析 JSON 对象型参数（`--order` / `--mandate`）。
+ * `--expires-at`：授权到期时间，ISO 8601 且必须带时区（`Z` 或 `+08:00`）。
+ *
+ * 不带时区的本地时间在平台会被拒（无法判断是哪个时区），这是最常见的输入错误，所以在
+ * CLI 先拦下并给出可直接照抄的格式。"是否晚于当前时间"由平台判断（以服务器时钟为准）。
+ */
+const ISO_WITH_TZ_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+function isValidExpiresAt(value: string): boolean {
+  const trimmed = value.trim();
+  return ISO_WITH_TZ_RE.test(trimmed) && !Number.isNaN(Date.parse(trimmed));
+}
+
+/**
+ * 解析 JSON 对象型参数（`--order`）。
  *
  * 只校验"是一个 JSON 对象"，其内部字段的含义和取值范围由平台校验并以 422/1001 返回，
  * CLI 不重复实现，也就不会和平台规则漂移。解析结果原样透传。
@@ -170,19 +190,19 @@ export function registerVisaCreateCommand(
     .option('--merchant-order-id <id>', 'Merchant order id (optional)')
     .option(
       '--consumer-prompt <text>',
-      'One-line purchase intent, e.g. "Subscribe to Pro monthly plan" (optional)',
+      'One-line purchase intent, e.g. "Buy a Pro plan" (optional)',
+    )
+    .option(
+      '--max-amount-cents <cents>',
+      'Authorization limit in integer cents: the total that may be drawn under this one passkey approval before it expires. Default 10000 (= 100.00); must be >= --order-amount-cents (optional)',
+    )
+    .option(
+      '--expires-at <iso8601>',
+      'When the authorization expires, ISO 8601 WITH timezone, e.g. 2027-12-31T00:00:00Z or 2027-12-31T08:00:00+08:00. Default: 1 year from now (optional)',
     )
     .option(
       '--order <json>',
       'Order details as ONE JSON object: subtotal_cents / tax_cents / discount_cents / shipping_cents / products[] / shipping_address (optional, all amounts in cents)',
-    )
-    .option(
-      '--recurring <frequency>',
-      'Mark this as a subscription first charge: WEEKLY | MONTHLY | YEARLY. Requires --mandate (optional)',
-    )
-    .option(
-      '--mandate <json>',
-      'Authorization boundary as ONE JSON object: mandate_id / decline_threshold_cents / effective_until_time / preferred_merchant_name / merchant_category_code / description. Required with --recurring; recurring_frequency is filled in from --recurring (optional)',
     )
     .option(
       '--external-transaction-id <id>',
@@ -261,40 +281,40 @@ export function registerVisaCreateCommand(
     // nested `visa.merchant_order_id` is a separate, Visa-specific field.
     const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
 
-    // 订阅 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何交互提示校验，
-    // 坏参数不会走到发请求。
+    // 授权额度 / 到期时间 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何
+    // 交互提示校验，坏参数不会走到发请求。
     const consumerPrompt = (opts.consumerPrompt as string | undefined)?.trim() || undefined;
     const orderDetail =
       opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
-    let mandate =
-      opts.mandate !== undefined ? parseJsonObjectFlag('--mandate', String(opts.mandate)) : undefined;
 
-    let recurring: RecurringFrequency | undefined;
-    const recurringRaw = (opts.recurring as string | undefined)?.trim();
-    if (recurringRaw) {
-      const freq = recurringRaw.toUpperCase();
-      if (!(RECURRING_FREQUENCIES as readonly string[]).includes(freq)) {
+    let maxAmountCents: number | undefined;
+    const maxAmountRaw = (opts.maxAmountCents as string | undefined)?.trim();
+    if (maxAmountRaw) {
+      if (!isValidMaxAmountCents(maxAmountRaw)) {
         throw new CliError(
           'PARAM_INVALID',
-          `Invalid --recurring "${recurringRaw}". Expected one of: ${RECURRING_FREQUENCIES.join(', ')}.`,
+          `Invalid --max-amount-cents "${maxAmountRaw}". Expected a positive integer in cents, no decimals.`,
         );
       }
-      recurring = freq as RecurringFrequency;
-      // 平台规则：订阅必须自带 mandate（自动生成的有效期只覆盖单笔订单，不适合周期授权）。
-      if (!mandate) {
+      maxAmountCents = Number(maxAmountRaw);
+      if (maxAmountCents < orderAmountCents) {
         throw new CliError(
           'PARAM_INVALID',
-          '--recurring requires --mandate (a JSON object with mandate_id, decline_threshold_cents, effective_until_time, preferred_merchant_name, merchant_category_code, description).',
+          `--max-amount-cents (${maxAmountCents}) must not be less than --order-amount-cents (${orderAmountCents}).`,
         );
       }
-      const inlineFreq = mandate.recurring_frequency;
-      if (inlineFreq !== undefined && inlineFreq !== recurring) {
+    }
+
+    let expiresAt: string | undefined;
+    const expiresAtRaw = (opts.expiresAt as string | undefined)?.trim();
+    if (expiresAtRaw) {
+      if (!isValidExpiresAt(expiresAtRaw)) {
         throw new CliError(
           'PARAM_INVALID',
-          `--mandate.recurring_frequency "${String(inlineFreq)}" conflicts with --recurring ${recurring}. Drop it from --mandate; the CLI fills it in.`,
+          `Invalid --expires-at "${expiresAtRaw}". Expected ISO 8601 with a timezone, e.g. 2027-12-31T00:00:00Z or 2027-12-31T08:00:00+08:00.`,
         );
       }
-      mandate = { ...mandate, recurring_frequency: recurring };
+      expiresAt = expiresAtRaw;
     }
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
@@ -320,9 +340,9 @@ export function registerVisaCreateCommand(
         order_amount_cents: orderAmountCents,
         ...(orderDescription ? { order_description: orderDescription } : {}),
         ...(merchantOrderId ? { merchant_order_id: merchantOrderId } : {}),
-        ...(recurring ? { is_recurring: true } : {}),
+        ...(maxAmountCents !== undefined ? { max_amount_cents: maxAmountCents } : {}),
+        ...(expiresAt ? { expires_at: expiresAt } : {}),
         ...(consumerPrompt ? { consumer_prompt: consumerPrompt } : {}),
-        ...(mandate ? { mandate } : {}),
         ...(orderDetail ? { order: orderDetail } : {}),
       },
     };
