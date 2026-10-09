@@ -14,17 +14,30 @@ import type { CommandResult, DisableResult } from '@agenzo/cli-core';
 import { attachSchemaHelp, pmDisableSchema } from '../verb-schema.js';
 
 /**
- * `payment-methods disable <pm_id>` — disable a payment method (§3.4.0.4).
+ * `payment-methods disable [pm_id]` — disable a payment method (§3.4.0.4).
  *
- * POST /payment-methods/<pm_id>/disable (no body).
+ * POST /payment-methods/<pm_id>/disable (no body; optional ?member_id=).
+ * The id may be supplied as the positional `[pm_id]` or via `--id <id>` (for
+ * programmatic callers like the agent orchestrator, whose CLI gateway passes only
+ * `--flag value` pairs and cannot send positional arguments — mirrors get /
+ * dropin-status). `--member` scopes the disable to an end user: the card must
+ * belong to that member (platform returns NOT_FOUND otherwise).
  * Output: `✓ Payment method <id> disabled` + Status + Revoked tokens.
  * Idempotency: --idempotency-key required in --yes mode (Requirement 6.3).
  */
 export function registerDisableCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
-    .command('disable <pm_id>')
+    .command('disable [pm_id]')
     .description('Disable a payment method')
     .option('--api-key <key>', 'API key for authentication')
+    .option(
+      '--id <id>',
+      'Payment method id to disable (alternative to the positional <pm_id>, for programmatic callers that pass flags only)',
+    )
+    .option(
+      '--member <member_id>',
+      "Scope the disable to this member — the card must belong to the member (guards against disabling another member's card by id)",
+    )
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -32,9 +45,13 @@ export function registerDisableCommand(parent: Command, deps: { apiClient: ApiCl
 
   attachSchemaHelp(cmd, pmDisableSchema);
 
-  cmd.action(async (pmId: string) => {
+  cmd.action(async (pmIdArg: string | undefined) => {
     const opts = cmd.optsWithGlobals();
     const format = resolveFormat(opts.format as string | undefined);
+
+    const pmId = await PromptEngine.resolveInput(pmIdArg ?? (opts.id as string | undefined), {
+      message: 'Payment method id:',
+    });
 
     const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
       message: 'API Key:',
@@ -59,8 +76,11 @@ export function registerDisableCommand(parent: Command, deps: { apiClient: ApiCl
       'Idempotency-Key': idempotencyKey,
     };
 
+    const member = opts.member as string | undefined;
+    const query = member ? `?member_id=${encodeURIComponent(member)}` : '';
+
     const result = await deps.apiClient.post<DisableResult>(
-      `/payment-methods/${pmId}/disable`,
+      `/payment-methods/${pmId}/disable${query}`,
       { type: 'api-key', key: apiKey },
       undefined,
       extraHeaders,

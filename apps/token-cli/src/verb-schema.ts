@@ -197,11 +197,16 @@ export const pmListSchema: VerbSchema = {
   description: 'List payment methods',
   flags: {
     member: { type: 'string', required: false, source: 'session', description: 'Filter by member ID' },
+    status: {
+      type: 'string',
+      required: false,
+      description: 'Filter by status (comma-separated, e.g. ACTIVE or ACTIVE,DISABLED,PENDING); omit for all statuses',
+    },
   },
   response: {
     payment_methods: {
       type: 'array',
-      description: 'Payment methods for the developer (optionally scoped to --member)',
+      description: 'Payment methods for the developer (optionally scoped to --member and/or --status)',
       items: {
         id: { type: 'string', description: 'Payment method id' },
         type: { type: 'string', description: 'Payment method type (e.g. card)' },
@@ -249,7 +254,9 @@ export const pmDisableSchema: VerbSchema = {
   verb: 'disable',
   description: 'Disable a payment method',
   flags: {
-    pm_id: { type: 'string', required: true, description: 'Payment method id (positional argument)' },
+    pm_id: { type: 'string', required: 'conditional', description: 'Payment method id — positional, or pass --id for flag-only callers' },
+    id: { type: 'string', required: 'conditional', description: 'Payment method id (alternative to the positional pm_id, for programmatic callers)' },
+    member: { type: 'string', required: false, description: 'Scope the disable to this member — the card must belong to the member' },
     'idempotency-key': {
       type: 'string',
       required: true,
