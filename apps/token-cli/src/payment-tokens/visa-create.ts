@@ -52,27 +52,18 @@ function parseOrderAmountCents(amountStr: string): number {
 }
 
 /**
- * `--max-amount-cents`：授权额度（分），正整数。上限不设：平台只要求不小于订单金额，
- * 这一点 CLI 在下面和订单金额一起比对。
+ * `--max-amount-cents`：授权额度（分），正整数，不超过 Visa 金额字段的 12 位上限
+ * （99,999,999,999 分）。平台还要求不小于订单金额，CLI 在下面和订单金额一起比对。
+ *
+ * 授权有效期不由调用方指定：平台固定取 Visa 允许的最长时间，所以 CLI 没有对应参数。
  */
+const MAX_AMOUNT_CENTS_CEILING = 99_999_999_999;
+
 function isValidMaxAmountCents(value: string): boolean {
   const trimmed = value.trim();
   if (!INTEGER_CENTS_RE.test(trimmed)) return false;
   const n = Number(trimmed);
-  return Number.isSafeInteger(n) && n > 0;
-}
-
-/**
- * `--expires-at`：授权到期时间，ISO 8601 且必须带时区（`Z` 或 `+08:00`）。
- *
- * 不带时区的本地时间在平台会被拒（无法判断是哪个时区），这是最常见的输入错误，所以在
- * CLI 先拦下并给出可直接照抄的格式。"是否晚于当前时间"由平台判断（以服务器时钟为准）。
- */
-const ISO_WITH_TZ_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
-
-function isValidExpiresAt(value: string): boolean {
-  const trimmed = value.trim();
-  return ISO_WITH_TZ_RE.test(trimmed) && !Number.isNaN(Date.parse(trimmed));
+  return Number.isSafeInteger(n) && n > 0 && n <= MAX_AMOUNT_CENTS_CEILING;
 }
 
 /**
@@ -194,11 +185,7 @@ export function registerVisaCreateCommand(
     )
     .option(
       '--max-amount-cents <cents>',
-      'Authorization limit in integer cents: the total that may be drawn under this one passkey approval before it expires. Default 10000 (= 100.00); must be >= --order-amount-cents (optional)',
-    )
-    .option(
-      '--expires-at <iso8601>',
-      'When the authorization expires, ISO 8601 WITH timezone, e.g. 2027-12-31T00:00:00Z or 2027-12-31T08:00:00+08:00. Default: 1 year from now (optional)',
+      'Authorization limit in integer cents: the total that may be drawn under this one passkey approval before it expires. Omit to use the platform default (configured server-side, currently 100000 = 1000.00); must be >= --order-amount-cents. The authorization lasts as long as Visa allows (currently 30 days) and cannot be set here (optional)',
     )
     .option(
       '--order <json>',
@@ -281,8 +268,8 @@ export function registerVisaCreateCommand(
     // nested `visa.merchant_order_id` is a separate, Visa-specific field.
     const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
 
-    // 授权额度 / 到期时间 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何
-    // 交互提示校验，坏参数不会走到发请求。
+    // 授权额度 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何交互提示
+    // 校验，坏参数不会走到发请求。
     const consumerPrompt = (opts.consumerPrompt as string | undefined)?.trim() || undefined;
     const orderDetail =
       opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
@@ -293,7 +280,7 @@ export function registerVisaCreateCommand(
       if (!isValidMaxAmountCents(maxAmountRaw)) {
         throw new CliError(
           'PARAM_INVALID',
-          `Invalid --max-amount-cents "${maxAmountRaw}". Expected a positive integer in cents, no decimals.`,
+          `Invalid --max-amount-cents "${maxAmountRaw}". Expected a positive integer in cents (max ${MAX_AMOUNT_CENTS_CEILING}), no decimals.`,
         );
       }
       maxAmountCents = Number(maxAmountRaw);
@@ -303,18 +290,6 @@ export function registerVisaCreateCommand(
           `--max-amount-cents (${maxAmountCents}) must not be less than --order-amount-cents (${orderAmountCents}).`,
         );
       }
-    }
-
-    let expiresAt: string | undefined;
-    const expiresAtRaw = (opts.expiresAt as string | undefined)?.trim();
-    if (expiresAtRaw) {
-      if (!isValidExpiresAt(expiresAtRaw)) {
-        throw new CliError(
-          'PARAM_INVALID',
-          `Invalid --expires-at "${expiresAtRaw}". Expected ISO 8601 with a timezone, e.g. 2027-12-31T00:00:00Z or 2027-12-31T08:00:00+08:00.`,
-        );
-      }
-      expiresAt = expiresAtRaw;
     }
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
@@ -341,7 +316,6 @@ export function registerVisaCreateCommand(
         ...(orderDescription ? { order_description: orderDescription } : {}),
         ...(merchantOrderId ? { merchant_order_id: merchantOrderId } : {}),
         ...(maxAmountCents !== undefined ? { max_amount_cents: maxAmountCents } : {}),
-        ...(expiresAt ? { expires_at: expiresAt } : {}),
         ...(consumerPrompt ? { consumer_prompt: consumerPrompt } : {}),
         ...(orderDetail ? { order: orderDetail } : {}),
       },

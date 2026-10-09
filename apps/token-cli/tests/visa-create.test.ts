@@ -325,10 +325,10 @@ describe('payment-tokens visa-create — --no-notify', () => {
 });
 
 // ============================================================
-// payment-tokens visa-create — 授权额度 / 到期时间 / 订单明细（--max-amount-cents / --expires-at / --order / --consumer-prompt）
+// payment-tokens visa-create — 授权额度 / 订单明细（--max-amount-cents / --order / --consumer-prompt）
 // ============================================================
 
-describe('payment-tokens visa-create — mandate limit, expiry & order details', () => {
+describe('payment-tokens visa-create — mandate limit & order details', () => {
   const BASE = [
     'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
     '--api-key', 'sk_key',
@@ -363,25 +363,9 @@ describe('payment-tokens visa-create — mandate limit, expiry & order details',
     expect(apiClient.post).not.toHaveBeenCalled();
   }
 
-  it('--max-amount-cents and --expires-at are forwarded under visa', async () => {
-    const body = await run([
-      '--max-amount-cents', '50000',
-      '--expires-at', '2027-12-31T00:00:00Z',
-    ]);
+  it('--max-amount-cents is forwarded under visa as an integer', async () => {
+    const body = await run(['--max-amount-cents', '50000']);
     expect(body.visa.max_amount_cents).toBe(50000);
-    expect(body.visa.expires_at).toBe('2027-12-31T00:00:00Z');
-  });
-
-  it('accepts an offset timezone and passes the string through untouched', async () => {
-    const body = await run(['--expires-at', '2027-12-31T08:00:00+08:00']);
-    expect(body.visa.expires_at).toBe('2027-12-31T08:00:00+08:00');
-  });
-
-  it('each of the two can be given alone — the other stays out of the body (platform default applies)', async () => {
-    const limitOnly = await run(['--max-amount-cents', '30000']);
-    expect(limitOnly.visa).not.toHaveProperty('expires_at');
-    const expiryOnly = await run(['--expires-at', '2027-12-31T00:00:00Z']);
-    expect(expiryOnly.visa).not.toHaveProperty('max_amount_cents');
   });
 
   it('--max-amount-cents equal to the order amount is allowed', async () => {
@@ -393,9 +377,8 @@ describe('payment-tokens visa-create — mandate limit, expiry & order details',
     const body = await run(['--order', JSON.stringify(ORDER), '--consumer-prompt', ' Buy a plan ']);
     expect(body.visa.order).toEqual(ORDER);
     expect(body.visa.consumer_prompt).toBe('Buy a plan');
-    // 默认额度 / 到期时间由平台决定，CLI 不替它填
+    // 默认额度由平台配置决定，CLI 不替它填
     expect(body.visa).not.toHaveProperty('max_amount_cents');
-    expect(body.visa).not.toHaveProperty('expires_at');
   });
 
   it('adds none of the new fields when no new flag is given — body unchanged for existing callers', async () => {
@@ -403,25 +386,24 @@ describe('payment-tokens visa-create — mandate limit, expiry & order details',
     expect(Object.keys(body.visa)).toEqual(['order_amount_cents']);
   });
 
-  it.each([['0'], ['-5'], ['12.5'], ['abc'], ['1e3']])(
+  it.each([['0'], ['-5'], ['12.5'], ['abc'], ['1e3'], ['100000000000']])(
     'rejects --max-amount-cents %s before sending anything',
     async (value) => {
       await runRejected(['--max-amount-cents', value], /Invalid --max-amount-cents/);
     },
   );
 
+  it('accepts --max-amount-cents at the 12-character Visa ceiling', async () => {
+    const body = await run(['--max-amount-cents', '99999999999']);
+    expect(body.visa.max_amount_cents).toBe(99_999_999_999);
+  });
+
   it('rejects --max-amount-cents below the order amount', async () => {
     await runRejected(['--max-amount-cents', '998'], /must not be less than --order-amount-cents/);
   });
 
-  it.each([
-    ['2027-12-31'],
-    ['2027-12-31T00:00:00'],
-    ['2027-12-31 00:00:00Z'],
-    ['2027-13-45T00:00:00Z'],
-    ['next year'],
-  ])('rejects --expires-at %s (needs ISO 8601 with a timezone)', async (value) => {
-    await runRejected(['--expires-at', value], /Invalid --expires-at/);
+  it('has no --expires-at: the authorization lasts as long as Visa allows and is not caller-set', async () => {
+    await runRejected(['--expires-at', '2027-12-31T00:00:00Z'], /unknown option/i);
   });
 
   it('no longer offers the subscription flags', async () => {

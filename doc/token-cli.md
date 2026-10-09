@@ -264,26 +264,25 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 - The 180s default poll window is longer than UnionPay's 60s because completion is driven by a **human passkey action**, not a backend event.
 - On timeout the token stays PENDING; re-open `payment_url` if the session has not expired, or poll `get` later.
 
-**Authorization limit, expiry & order details (all optional).** One passkey approval authorises a spending limit until an expiry date; credentials drawn later under it stay within that limit and need no further passkey. This is **not** a subscription — there is no billing cycle. `--order` is **one JSON object** passed through to the platform's `visa.order` as-is (the CLI only checks it is a JSON object — field rules are enforced by the platform, which answers `422 / 1001` with the offending field):
+**Authorization limit & order details (all optional).** One passkey approval authorises a spending limit; credentials drawn later under it stay within that limit and need no further passkey. This is **not** a subscription — there is no billing cycle. The authorization's validity is fixed by the platform at the longest Visa allows (currently 30 days) and **cannot be set from the CLI**. `--order` is **one JSON object** passed through to the platform's `visa.order` as-is (the CLI only checks it is a JSON object — field rules are enforced by the platform, which answers `422 / 1001` with the offending field):
 
 | Flag | Maps to | Notes |
 |---|---|---|
-| `--max-amount-cents <cents>` | `visa.max_amount_cents` | Authorization limit in integer cents. Default **10000** (100.00) when omitted; must be >= `--order-amount-cents` |
-| `--expires-at <iso8601>` | `visa.expires_at` | ISO 8601 **with timezone**, e.g. `2027-12-31T00:00:00Z` or `2027-12-31T08:00:00+08:00`. Default **1 year** from creation when omitted |
+| `--max-amount-cents <cents>` | `visa.max_amount_cents` | Authorization limit in integer cents (1 to 99,999,999,999). When omitted the platform uses its configured default (currently **100000** = 1000.00; raised to the order amount if the order is larger). Must be >= `--order-amount-cents` |
 | `--consumer-prompt <text>` | `visa.consumer_prompt` | One-line purchase intent |
 | `--order <json>` | `visa.order` | `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
 
 ```bash
-# 9.99 order; authorise up to 500.00 until end of 2027
+# 9.99 order; authorise up to 500.00 (50000 cents)
 agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-poll \
   --payment-method-id <visa_pm_id> --order-amount-cents 999 --currency USD \
-  --max-amount-cents 50000 --expires-at 2027-12-31T00:00:00Z \
+  --max-amount-cents 50000 \
   --consumer-prompt "Buy a Pro plan" \
   --order '{"subtotal_cents":999,"products":[{"product_name":"Pro Plan","quantity":1,"unit_price_cents":999}]}' \
   --idempotency-key idem_1
 ```
 
-Without any of these flags the request body is unchanged and the platform applies the defaults above. This flag set only creates the authorisation: the platform's `/pay` still charges just the one credential issued at creation, so a second charge under the same approval is not available yet.
+Without any of these flags the request body is unchanged and the platform applies its default limit. This flag set only creates the authorisation: the platform's `/pay` still charges just the one credential issued at creation, so a second charge under the same approval is not available yet.
 
 ### get / list / revoke
 
