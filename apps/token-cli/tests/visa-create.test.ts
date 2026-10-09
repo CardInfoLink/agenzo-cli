@@ -51,15 +51,25 @@ const VISA_ACTIVE = {
  * rather than running the full 180s window.
  */
 async function runWithPoll(action: () => Promise<void>): Promise<void> {
-  vi.useFakeTimers();
+  // 只伪造 setTimeout / Date：setImmediate 保持真实，用来在每轮之间让出一次真实宏任务。
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   try {
-    const done = action();
-    // Flush a bounded number of poll ticks (each `advanceTimersByTimeAsync`
-    // also drains the microtask queue, so the awaited GET resolves).
-    for (let i = 0; i < 40; i += 1) {
+    // 命令在走到第一个 sleep 之前有真实异步（读配置、渲染输出）。全量并行跑测试时机器负载高，
+    // 这段真实异步可能比固定 40 轮快进更慢——快进先结束、sleep 才登记，`await done` 就永远等不到，
+    // 15s 超时后还会把假时钟状态漏给下一个用例。所以按"命令是否结束"来循环，不按固定轮数。
+    let outcome: { ok: true } | { ok: false; err: unknown } | undefined;
+    action().then(
+      () => { outcome = { ok: true }; },
+      (err: unknown) => { outcome = { ok: false, err }; },
+    );
+    for (let i = 0; i < 2000 && outcome === undefined; i += 1) {
       await vi.advanceTimersByTimeAsync(5000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await done;
+    if (outcome === undefined) {
+      throw new Error('runWithPoll: the command did not settle after 2000 poll ticks');
+    }
+    if (!outcome.ok) throw outcome.err;
   } finally {
     vi.useRealTimers();
   }
