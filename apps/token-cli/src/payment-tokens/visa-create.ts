@@ -180,16 +180,12 @@ export function registerVisaCreateCommand(
     .option('--order-description <text>', 'Order description (optional)')
     .option('--merchant-order-id <id>', 'Merchant order id (optional)')
     .option(
-      '--consumer-prompt <text>',
-      'One-line purchase intent, e.g. "Buy a Pro plan" (optional)',
-    )
-    .option(
       '--max-amount-cents <cents>',
       'Authorization limit in integer cents: the total that may be drawn under this one passkey approval before it expires. Omit to use the platform default (configured server-side, currently 100000 = 1000.00); must be >= --order-amount-cents. The authorization lasts as long as Visa allows (currently 30 days) and cannot be set here (optional)',
     )
     .option(
       '--order <json>',
-      'Order details as ONE JSON object: subtotal_cents / tax_cents / discount_cents / shipping_cents / products[] / shipping_address (optional, all amounts in cents)',
+      'Order details as ONE JSON object: description (one line, <=255 chars: what is being bought) / subtotal_cents / tax_cents / discount_cents / shipping_cents / products[] / shipping_address (optional, all amounts in cents)',
     )
     .option(
       '--external-transaction-id <id>',
@@ -270,7 +266,6 @@ export function registerVisaCreateCommand(
 
     // 授权额度 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何交互提示
     // 校验，坏参数不会走到发请求。
-    const consumerPrompt = (opts.consumerPrompt as string | undefined)?.trim() || undefined;
     const orderDetail =
       opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
 
@@ -316,7 +311,6 @@ export function registerVisaCreateCommand(
         ...(orderDescription ? { order_description: orderDescription } : {}),
         ...(merchantOrderId ? { merchant_order_id: merchantOrderId } : {}),
         ...(maxAmountCents !== undefined ? { max_amount_cents: maxAmountCents } : {}),
-        ...(consumerPrompt ? { consumer_prompt: consumerPrompt } : {}),
         ...(orderDetail ? { order: orderDetail } : {}),
       },
     };

@@ -325,7 +325,7 @@ describe('payment-tokens visa-create — --no-notify', () => {
 });
 
 // ============================================================
-// payment-tokens visa-create — 授权额度 / 订单明细（--max-amount-cents / --order / --consumer-prompt）
+// payment-tokens visa-create — 授权额度 / 订单明细（--max-amount-cents / --order）
 // ============================================================
 
 describe('payment-tokens visa-create — mandate limit & order details', () => {
@@ -373,10 +373,12 @@ describe('payment-tokens visa-create — mandate limit & order details', () => {
     expect(body.visa.max_amount_cents).toBe(999);
   });
 
-  it('--order and --consumer-prompt are forwarded verbatim under visa', async () => {
-    const body = await run(['--order', JSON.stringify(ORDER), '--consumer-prompt', ' Buy a plan ']);
-    expect(body.visa.order).toEqual(ORDER);
-    expect(body.visa.consumer_prompt).toBe('Buy a plan');
+  it('--order is forwarded verbatim under visa, description included', async () => {
+    const order = { ...ORDER, description: 'Buy a Pro plan' };
+    const body = await run(['--order', JSON.stringify(order)]);
+    expect(body.visa.order).toEqual(order);
+    // 描述只在 order 里：不再有独立的顶层字段
+    expect(body.visa).not.toHaveProperty('consumer_prompt');
     // 默认额度由平台配置决定，CLI 不替它填
     expect(body.visa).not.toHaveProperty('max_amount_cents');
   });
@@ -400,6 +402,10 @@ describe('payment-tokens visa-create — mandate limit & order details', () => {
 
   it('rejects --max-amount-cents below the order amount', async () => {
     await runRejected(['--max-amount-cents', '998'], /must not be less than --order-amount-cents/);
+  });
+
+  it('has no --consumer-prompt: the description now lives in --order', async () => {
+    await runRejected(['--consumer-prompt', 'x'], /unknown option/i);
   });
 
   it('has no --expires-at: the authorization lasts as long as Visa allows and is not caller-set', async () => {

@@ -269,16 +269,14 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 | Flag | Maps to | Notes |
 |---|---|---|
 | `--max-amount-cents <cents>` | `visa.max_amount_cents` | Authorization limit in integer cents (1 to 99,999,999,999). When omitted the platform uses its configured default (currently **100000** = 1000.00; raised to the order amount if the order is larger). Must be >= `--order-amount-cents` |
-| `--consumer-prompt <text>` | `visa.consumer_prompt` | One-line purchase intent |
-| `--order <json>` | `visa.order` | `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
+| `--order <json>` | `visa.order` | `description` (one line, ≤255 chars: what is being bought — the platform also uses it as Visa's purchase-intent summary and as the authorization description) / `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
 
 ```bash
 # 9.99 order; authorise up to 500.00 (50000 cents)
 agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-poll \
   --payment-method-id <visa_pm_id> --order-amount-cents 999 --currency USD \
   --max-amount-cents 50000 \
-  --consumer-prompt "Buy a Pro plan" \
-  --order '{"subtotal_cents":999,"products":[{"product_name":"Pro Plan","quantity":1,"unit_price_cents":999}]}' \
+  --order '{"description":"Buy a Pro plan","subtotal_cents":999,"products":[{"product_name":"Pro Plan","quantity":1,"unit_price_cents":999}]}' \
   --idempotency-key idem_1
 ```
 
