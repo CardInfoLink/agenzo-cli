@@ -25,7 +25,11 @@ export function registerListCommand(parent: Command, deps: { apiClient: ApiClien
     .command('list')
     .description('List payment methods')
     .option('--api-key <key>', 'API Key for authentication')
-    .option('--member <member_id>', 'Filter by member ID');
+    .option('--member <member_id>', 'Filter by member ID')
+    .option(
+      '--status <status>',
+      'Filter by status (comma-separated, e.g. ACTIVE or ACTIVE,DISABLED,PENDING); omit for all statuses',
+    );
 
   attachSchemaHelp(cmd, pmListSchema);
 
@@ -42,6 +46,9 @@ export function registerListCommand(parent: Command, deps: { apiClient: ApiClien
     const params: Record<string, string> = {};
     if (opts.member) {
       params.member_id = opts.member as string;
+    }
+    if (opts.status) {
+      params.status = opts.status as string;
     }
 
     const result = await deps.apiClient.get<PaymentMethod[]>(
