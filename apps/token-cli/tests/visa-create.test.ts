@@ -51,15 +51,25 @@ const VISA_ACTIVE = {
  * rather than running the full 180s window.
  */
 async function runWithPoll(action: () => Promise<void>): Promise<void> {
-  vi.useFakeTimers();
+  // 只伪造 setTimeout / Date：setImmediate 保持真实，用来在每轮之间让出一次真实宏任务。
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   try {
-    const done = action();
-    // Flush a bounded number of poll ticks (each `advanceTimersByTimeAsync`
-    // also drains the microtask queue, so the awaited GET resolves).
-    for (let i = 0; i < 40; i += 1) {
+    // 命令在走到第一个 sleep 之前有真实异步（读配置、渲染输出）。全量并行跑测试时机器负载高，
+    // 这段真实异步可能比固定 40 轮快进更慢——快进先结束、sleep 才登记，`await done` 就永远等不到，
+    // 15s 超时后还会把假时钟状态漏给下一个用例。所以按"命令是否结束"来循环，不按固定轮数。
+    let outcome: { ok: true } | { ok: false; err: unknown } | undefined;
+    action().then(
+      () => { outcome = { ok: true }; },
+      (err: unknown) => { outcome = { ok: false, err }; },
+    );
+    for (let i = 0; i < 2000 && outcome === undefined; i += 1) {
       await vi.advanceTimersByTimeAsync(5000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await done;
+    if (outcome === undefined) {
+      throw new Error('runWithPoll: the command did not settle after 2000 poll ticks');
+    }
+    if (!outcome.ok) throw outcome.err;
   } finally {
     vi.useRealTimers();
   }
@@ -311,6 +321,108 @@ describe('payment-tokens visa-create — --no-notify', () => {
 
     const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
     expect(body).not.toHaveProperty('notify_cardholder');
+  });
+});
+
+// ============================================================
+// payment-tokens visa-create — 授权额度 / 订单明细（--max-amount-cents / --order）
+// ============================================================
+
+describe('payment-tokens visa-create — mandate limit & order details', () => {
+  const BASE = [
+    'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+    '--api-key', 'sk_key',
+    '--payment-method-id', 'pm_visa_1',
+    '--order-amount-cents', '999',
+    '--idempotency-key', 'idem_sub',
+    '--no-poll',
+  ];
+  const ORDER = {
+    subtotal_cents: 999,
+    products: [{ product_name: 'Pro Plan', quantity: 1, unit_price_cents: 999 }],
+    shipping_address: { country_code: 'US', city: 'San Francisco' },
+  };
+
+  async function run(extra: string[]) {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    registerVisaCreateCommand(program.command('payment-tokens'), { apiClient } as any);
+    captureStdout();
+    captureStderr();
+    await program.parseAsync([...BASE, ...extra]);
+    return apiClient.post.mock.calls[0][2] as Record<string, any>;
+  }
+
+  async function runRejected(extra: string[], pattern: RegExp) {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    registerVisaCreateCommand(program.command('payment-tokens'), { apiClient } as any);
+    captureStdout();
+    captureStderr();
+    await expect(program.parseAsync([...BASE, ...extra])).rejects.toThrow(pattern);
+    expect(apiClient.post).not.toHaveBeenCalled();
+  }
+
+  it('--max-amount-cents is forwarded under visa as an integer', async () => {
+    const body = await run(['--max-amount-cents', '50000']);
+    expect(body.visa.max_amount_cents).toBe(50000);
+  });
+
+  it('--max-amount-cents equal to the order amount is allowed', async () => {
+    const body = await run(['--max-amount-cents', '999']);
+    expect(body.visa.max_amount_cents).toBe(999);
+  });
+
+  it('--order is forwarded verbatim under visa, description included', async () => {
+    const order = { ...ORDER, description: 'Buy a Pro plan' };
+    const body = await run(['--order', JSON.stringify(order)]);
+    expect(body.visa.order).toEqual(order);
+    // 描述只在 order 里：不再有独立的顶层字段
+    expect(body.visa).not.toHaveProperty('consumer_prompt');
+    // 默认额度由平台配置决定，CLI 不替它填
+    expect(body.visa).not.toHaveProperty('max_amount_cents');
+  });
+
+  it('adds none of the new fields when no new flag is given — body unchanged for existing callers', async () => {
+    const body = await run([]);
+    expect(Object.keys(body.visa)).toEqual(['order_amount_cents']);
+  });
+
+  it.each([['0'], ['-5'], ['12.5'], ['abc'], ['1e3'], ['100000000000']])(
+    'rejects --max-amount-cents %s before sending anything',
+    async (value) => {
+      await runRejected(['--max-amount-cents', value], /Invalid --max-amount-cents/);
+    },
+  );
+
+  it('accepts --max-amount-cents at the 12-character Visa ceiling', async () => {
+    const body = await run(['--max-amount-cents', '99999999999']);
+    expect(body.visa.max_amount_cents).toBe(99_999_999_999);
+  });
+
+  it('rejects --max-amount-cents below the order amount', async () => {
+    await runRejected(['--max-amount-cents', '998'], /must not be less than --order-amount-cents/);
+  });
+
+  it('has no --consumer-prompt: the description now lives in --order', async () => {
+    await runRejected(['--consumer-prompt', 'x'], /unknown option/i);
+  });
+
+  it('has no --expires-at: the authorization lasts as long as Visa allows and is not caller-set', async () => {
+    await runRejected(['--expires-at', '2027-12-31T00:00:00Z'], /unknown option/i);
+  });
+
+  it('no longer offers the subscription flags', async () => {
+    await runRejected(['--recurring', 'MONTHLY'], /unknown option/i);
+    await runRejected(['--mandate', '{}'], /unknown option/i);
+  });
+
+  it.each([
+    ['--order', 'not json'],
+    ['--order', '[1,2]'],
+    ['--order', 'null'],
+  ])('rejects %s %s as not a JSON object', async (flag, value) => {
+    await runRejected([flag, value], new RegExp(`${flag} must be a JSON object`));
   });
 });
 

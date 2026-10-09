@@ -264,6 +264,24 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 - The 180s default poll window is longer than UnionPay's 60s because completion is driven by a **human passkey action**, not a backend event.
 - On timeout the token stays PENDING; re-open `payment_url` if the session has not expired, or poll `get` later.
 
+**Authorization limit & order details (all optional).** One passkey approval authorises a spending limit; credentials drawn later under it stay within that limit and need no further passkey. This is **not** a subscription — there is no billing cycle. The authorization's validity is fixed by the platform at the longest Visa allows (currently 30 days) and **cannot be set from the CLI**. `--order` is **one JSON object** passed through to the platform's `visa.order` as-is (the CLI only checks it is a JSON object — field rules are enforced by the platform, which answers `422 / 1001` with the offending field):
+
+| Flag | Maps to | Notes |
+|---|---|---|
+| `--max-amount-cents <cents>` | `visa.max_amount_cents` | Authorization limit in integer cents (1 to 99,999,999,999). When omitted the platform uses its configured default (currently **100000** = 1000.00; raised to the order amount if the order is larger). Must be >= `--order-amount-cents` |
+| `--order <json>` | `visa.order` | `description` (one line, ≤255 chars: what is being bought — the platform also uses it as Visa's purchase-intent summary and as the authorization description) / `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
+
+```bash
+# 9.99 order; authorise up to 500.00 (50000 cents)
+agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-poll \
+  --payment-method-id <visa_pm_id> --order-amount-cents 999 --currency USD \
+  --max-amount-cents 50000 \
+  --order '{"description":"Buy a Pro plan","subtotal_cents":999,"products":[{"product_name":"Pro Plan","quantity":1,"unit_price_cents":999}]}' \
+  --idempotency-key idem_1
+```
+
+Without any of these flags the request body is unchanged and the platform applies its default limit. This flag set only creates the authorisation: the platform's `/pay` still charges just the one credential issued at creation, so a second charge under the same approval is not available yet.
+
 ### get / list / revoke
 
 - `get` masks VCN PAN and CVC by default; `--reveal` prints them in full — only use it when a payment flow actually needs the credential.
