@@ -759,3 +759,92 @@ describe('payment-tokens visa-create — Property 1: amount-unit round-trip (R13
     },
   );
 });
+
+// ============================================================
+// payment-tokens visa-create — --member pass-through
+// ============================================================
+//
+// 为什么锁这个契约：`--member` 原先只有 `payment-tokens create` / `list` 与全部
+// `payment-methods` 子命令有，evo-create / visa-create 这两个后加的专用快捷命令漏了。
+// 而编排器对所有 token mint 统一从已认证会话注入 member（schema 侧
+// `"identity": { "require": true, "inject": "member" }`），于是实测里一张往返机票订单
+// 创建成功后，支付环节连败：`agenzo-token-cli payment-tokens visa-create … --member test-user-036`
+// 直接被 commander 判 `error: unknown option '--member'`，EVO 与 Visa 两条轨全挂。
+//
+// 透传规则与 `member-optional.test.ts` 一致：给了非空值就带 `member_id`，空/空白整个字段不发
+// （不发 `""`——归属是否必需由服务端判定，CLI 只负责透传）。member_id 位于请求体 TOP level，
+// 与嵌套的 `visa` 子对象并列。
+
+describe('payment-tokens visa-create — --member', () => {
+  it('给了就作为 member_id 进请求体顶层', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+      '--api-key', 'sk_key',
+      '--payment-method-id', 'pm_visa_1',
+      '--order-amount-cents', '12345',
+      '--member', 'test-user-036',
+      '--no-poll',
+      '--idempotency-key', 'idem_visa',
+    ]);
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-tokens/create',
+      expect.anything(),
+      expect.objectContaining({ member_id: 'test-user-036' }),
+      expect.anything(),
+    );
+  });
+
+  it('没给则整个 member_id 字段不发', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+      '--api-key', 'sk_key',
+      '--payment-method-id', 'pm_visa_1',
+      '--order-amount-cents', '12345',
+      '--no-poll',
+      '--idempotency-key', 'idem_visa',
+    ]);
+
+    const body = (apiClient.post as any).mock.calls[0][2] as Record<string, unknown>;
+    expect('member_id' in body).toBe(false);
+  });
+
+  it('空白值等同于没给（不发 member_id: ""）', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': VISA_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerVisaCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+      '--api-key', 'sk_key',
+      '--payment-method-id', 'pm_visa_1',
+      '--order-amount-cents', '12345',
+      '--member', '   ',
+      '--no-poll',
+      '--idempotency-key', 'idem_visa',
+    ]);
+
+    const body = (apiClient.post as any).mock.calls[0][2] as Record<string, unknown>;
+    expect('member_id' in body).toBe(false);
+  });
+});
