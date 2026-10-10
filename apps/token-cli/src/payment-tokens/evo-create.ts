@@ -116,6 +116,10 @@ export function registerEvoCreateCommand(
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-method-id <id>', 'EVO payment method ID to use (required)')
     .option(
+      '--member <member_id>',
+      "End-user member id this token is minted for; forwarded to the request body as member_id (optional). Programmatic callers (the agent orchestrator) inject it from the authenticated session, never from the model — see verb-schema's 'session' source. Omit it and the token is developer-scoped.",
+    )
+    .option(
       '--amount-cents <cents>',
       'Charge amount in integer cents, e.g. 12345 for $123.45 (required)',
     )
@@ -185,6 +189,12 @@ export function registerEvoCreateCommand(
     const amountCents = parseAmountCents(amountCentsStr);
 
     const currency = (opts.currency as string | undefined)?.trim() || undefined;
+    // Scope the token to an end-user when supplied (body field `member_id`,
+    // same contract as `payment-tokens create`). Deliberately NOT prompted for
+    // when absent: this is a lean programmatic mint, and its callers inject the
+    // member from the authenticated session — an interactive prompt here would
+    // only matter to operators, who have `create` for that.
+    const member = (opts.member as string | undefined)?.trim() || undefined;
     // Bind the token to a merchant order (order_id) when supplied. Maps to the
     // platform create_token request body field `external_transaction_id`
     // (distinct from the generic `payment-tokens create --external-tx-id`,
@@ -211,6 +221,7 @@ export function registerEvoCreateCommand(
       payment_method_id: paymentMethodId,
       amount: amountCents,
       ...(currency ? { currency } : {}),
+      ...(member ? { member_id: member } : {}),
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
     };
 

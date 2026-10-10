@@ -173,6 +173,10 @@ export function registerVisaCreateCommand(
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-method-id <id>', 'Visa payment method ID to use (required)')
     .option(
+      '--member <member_id>',
+      "End-user member id this token is minted for; forwarded to the request body as member_id (optional). Programmatic callers (the agent orchestrator) inject it from the authenticated session, never from the model — see verb-schema's 'session' source. Omit it and the token is developer-scoped.",
+    )
+    .option(
       '--order-amount-cents <cents>',
       'Order amount in integer cents, e.g. 12345 for $123.45 (required)',
     )
@@ -255,6 +259,12 @@ export function registerVisaCreateCommand(
     const orderAmountCents = parseOrderAmountCents(orderAmountCentsStr);
 
     const currency = (opts.currency as string | undefined)?.trim() || undefined;
+    // Scope the token to an end-user when supplied (body field `member_id`,
+    // same contract as `payment-tokens create`). Deliberately NOT prompted for
+    // when absent: this is a lean programmatic mint, and its callers inject the
+    // member from the authenticated session — an interactive prompt here would
+    // only matter to operators, who have `create` for that.
+    const member = (opts.member as string | undefined)?.trim() || undefined;
     const orderDescription = (opts.orderDescription as string | undefined) || undefined;
     const merchantOrderId = (opts.merchantOrderId as string | undefined) || undefined;
     // Bind the token to a merchant order (order_id) when supplied. Maps to the
@@ -304,6 +314,7 @@ export function registerVisaCreateCommand(
       type: 'network_token',
       payment_method_id: paymentMethodId,
       ...(currency ? { currency } : {}),
+      ...(member ? { member_id: member } : {}),
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
       ...(opts.notify === false ? { notify_cardholder: false } : {}),
       visa: {
