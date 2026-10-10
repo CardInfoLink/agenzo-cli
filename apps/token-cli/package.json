@@ -1,6 +1,6 @@
 {
   "name": "@agenzo/token-cli",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "Payment token CLI for the Agenzo platform",
   "type": "module",
   "engines": {

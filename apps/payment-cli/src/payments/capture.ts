@@ -57,6 +57,13 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-token-id <id>', 'Payment token ID to charge (ptk_...)')
     .option(
+      '--member <member_id>',
+      'End-user member id this token belongs to; forwarded to the request body as member_id ' +
+        '(optional). The platform only verifies token ownership when it is present, so ' +
+        'programmatic callers (the agent orchestrator) inject it from the authenticated ' +
+        'session — never from the model. Omit it and no ownership check is performed.',
+    )
+    .option(
       '--payment-brand <brand>',
       'Payment brand override (optional; auto-detected from token). "evo" or "unionpay".',
     )
@@ -131,6 +138,14 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     const body: Record<string, unknown> = {
       payment_token_id: paymentTokenId,
     };
+    // Ownership scoping (same body field as `payments charge-card`): the platform only
+    // verifies that the token belongs to this member when member_id is present — absent it,
+    // anyone holding a token id could charge someone else's card. Non-empty values only;
+    // blank is omitted entirely rather than sent as "".
+    const member = ((opts.member as string | undefined) ?? '').trim();
+    if (member) {
+      body.member_id = member;
+    }
     if (paymentBrand) {
       body.payment_brand = paymentBrand;
     }

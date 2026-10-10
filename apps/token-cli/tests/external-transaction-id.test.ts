@@ -247,3 +247,79 @@ describe('payment-tokens evo-create — --external-transaction-id passthrough (R
     expect(body).not.toHaveProperty('external_transaction_id');
   });
 });
+
+// ------------------------------------------------------------
+// unionpay-create — --member (归属校验)
+// ------------------------------------------------------------
+//
+// 为什么锁这个契约：平台的 `POST /payment-tokens/create` **只在请求带了 member_id 时才核对卡的
+// 归属**，不带则沿用老行为。所以编排器一侧不带 member 等于没核 —— 知道别人卡 id 的人就能铸别人
+// 卡的令牌。编排器因此对所有铸令牌的 verb 统一从已认证会话注入它（-base schema 的
+// `identity.inject: member`，覆盖 network-token / visa-network-token / evo-network-token）。
+//
+// 本命令此前**没有** `--member`（同仓 `payment-tokens create` / `list` 与全部 `payment-methods`
+// 子命令都有），编排器发来的 `--member` 会被 commander 判 `error: unknown option '--member'`，
+// 整条 UnionPay 铸令牌轨直接失败——与 evo-create / visa-create 同一类遗漏（2026-10-10）。
+//
+// UnionPay 的 PM 本就有 member_id 在档（绑卡时 `payment-methods add --payment-brand unionpay
+// --member` 落的，驱动 UPI consumer identity），故此处**不提示**；调用方传了就原样转发，由服务端
+// 校验与 PM 自身的 member_id 是否一致（不一致即报错）。透传规则同其它命令：非空才带，空白不发。
+
+describe('payment-tokens unionpay-create — --member', () => {
+  const memberArgs = (extra: string[]) => [
+    'node', 'cli', '--yes', 'payment-tokens', 'unionpay-create',
+    '--api-key', 'sk_key',
+    '--payment-method-id', 'pm_up_1',
+    '--unionpay-amount', '174.58',
+    '--recipient-first-name', 'Ada',
+    '--recipient-last-name', 'Lovelace',
+    '--recipient-email', 'ada@example.com',
+    '--idempotency-key', 'idem_up',
+    ...extra,
+  ];
+
+  it('给了就作为 member_id 进请求体', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': UNIONPAY_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerUnionpayCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(memberArgs(['--member', 'test-user-036']));
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body.member_id).toBe('test-user-036');
+  });
+
+  it('没给则整个 member_id 字段不发', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': UNIONPAY_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerUnionpayCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(memberArgs([]));
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body).not.toHaveProperty('member_id');
+  });
+
+  it('空白值等同于没给（不发 member_id: ""）', async () => {
+    const apiClient = mockApiClient({ '/payment-tokens/create': UNIONPAY_PENDING });
+    const program = buildProgram();
+    const cmd = program.command('payment-tokens');
+    registerUnionpayCreateCommand(cmd, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync(memberArgs(['--member', '   ']));
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body).not.toHaveProperty('member_id');
+  });
+});
