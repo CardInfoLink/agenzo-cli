@@ -73,6 +73,13 @@ export function registerUnionpayCreateCommand(
     .description('Start a UnionPay network-token checkout and return the checkout_url (no polling)')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--payment-method-id <id>', 'UnionPay payment method ID to use (required)')
+    .option(
+      '--member <member_id>',
+      'End-user member id this token is minted for; forwarded to the request body as member_id ' +
+        '(optional). The platform only verifies that the card belongs to this member when it is ' +
+        'present, so programmatic callers (the agent orchestrator) inject it from the ' +
+        'authenticated session — never from the model.',
+    )
     .option('--recipient-first-name <name>', 'Recipient first name (order delivery details)')
     .option('--recipient-last-name <name>', 'Recipient last name (order delivery details)')
     .option('--recipient-email <email>', 'Recipient email (recipient-email or recipient-phone required)')
@@ -198,9 +205,18 @@ export function registerUnionpayCreateCommand(
     // which maps to `external_tx_id`).
     const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
 
+    // Ownership scoping (same body field as `payment-tokens create`): the platform only verifies
+    // that the card belongs to this member when member_id is present. For UnionPay the PM already
+    // has a member_id on file (captured at `payment-methods add --payment-brand unionpay --member`,
+    // it drives the UPI consumer identity server-side), so this is never prompted for — but when a
+    // caller does pass it, forward it verbatim and let the server validate it against the PM's own
+    // member_id (mismatch → error). Non-empty values only; blank is omitted rather than sent as "".
+    const member = ((opts.member as string | undefined) ?? '').trim();
+
     const body: Record<string, unknown> = {
       type: 'network_token',
       payment_method_id: paymentMethodId,
+      ...(member ? { member_id: member } : {}),
       unionpay_amount: unionpayAmountStr.trim(),
       recipient_first_name: recipientFirstName,
       recipient_last_name: recipientLastName,
