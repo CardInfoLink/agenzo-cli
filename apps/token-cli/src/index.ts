@@ -30,6 +30,7 @@ import { registerGetCommand as registerPtGetCommand } from './payment-tokens/get
 import { registerRevokeCommand } from './payment-tokens/revoke.js';
 import { registerUnionpayCreateCommand } from './payment-tokens/unionpay-create.js';
 import { registerVisaCreateCommand } from './payment-tokens/visa-create.js';
+import { registerVisaDrawCommand } from './payment-tokens/visa-draw.js';
 import { registerEvoCreateCommand } from './payment-tokens/evo-create.js';
 
 // visa commands
@@ -100,6 +101,8 @@ async function main() {
   registerUnionpayCreateCommand(ptCmd, deps);
   // Visa non-blocking command (programmatic callers; not in SKILL/README).
   registerVisaCreateCommand(ptCmd, deps);
+  // Visa 在已有授权下再取凭证（同一次 passkey 授权下重复扣款）。
+  registerVisaDrawCommand(ptCmd, deps);
   // EVO non-blocking command (programmatic callers; not in SKILL/README).
   registerEvoCreateCommand(ptCmd, deps);
 
