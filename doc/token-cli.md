@@ -24,6 +24,7 @@ See [SKILL.md](../SKILL.md) for shared conventions (behavior rules, `--yes`, exi
 | `payment-tokens` | `revoke` | Write | Revoke a token |
 | `payment-tokens` | `unionpay-create` | Write | Start a UnionPay network-token checkout and return `checkout_url` — **no polling** |
 | `payment-tokens` | `visa-create` | Write | Mint a Visa network token: print `payment_url`, then **poll** GET `payment-tokens/{id}` up to 180s until ACTIVE/FAILED — or return right after the URL with `--no-poll` |
+| `payment-tokens` | `visa-draw` | Write | Draw another credential under an existing Visa authorization (no passkey, synchronous). Returns a new ACTIVE child token (the credential for that order) |
 
 **Blocking vs non-blocking.** `add` and `create` are the operator-facing verbs: they start the flow *and* poll for the result, so the process must stay alive. The `dropin-*` / `unionpay-*` pairs are the non-blocking split for programmatic callers (e.g. the agent orchestrator): the `-create` / `-enroll` half returns the URL or session id synchronously, and the caller polls the `-status` half (or `payment-tokens get`) on its own cadence.
 
@@ -280,7 +281,30 @@ agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-p
   --idempotency-key idem_1
 ```
 
-Without any of these flags the request body is unchanged and the platform applies its default limit. This flag set only creates the authorisation: the platform's `/pay` still charges just the one credential issued at creation, so a second charge under the same approval is not available yet.
+Without any of these flags the request body is unchanged and the platform applies its default limit. `visa-create` only creates the authorisation (and issues the first credential); to keep drawing credentials under the same approval use `visa-draw` below.
+
+**Flow in short.** (1) `visa-create` — the cardholder approves once with a passkey; the resulting ACTIVE token is the *authorization token*, note its `ptk_…` id. (2) For every further order, `visa-draw <authorization_ptk_id>` with a new `--idempotency-key` returns a fresh ACTIVE child token synchronously — no passkey, no polling — until the limit or the validity period runs out. (3) Then run `visa-create` again for a new approval.
+
+**Drawing again under the same authorization — `visa-draw`.** After the cardholder has approved once, each further order draws its own credential from that authorization, with no passkey. This is **not** a subscription: there is no billing cycle and no flag to declare one. Draw at the moment you need the credential for an order; the returned child token carries it.
+
+```bash
+agenzo-token-cli payment-tokens visa-draw <authorization_ptk_id> --api-key <key> --format json \
+  --order-amount-cents 2500 --external-transaction-id <order_id> \
+  --order '{"description":"Extra seats","products":[{"product_name":"Seat","quantity":5,"unit_price_cents":500}]}' \
+  --idempotency-key idem_draw_1
+```
+
+| Flag | Maps to | Notes |
+|---|---|---|
+| `<payment_token_id>` | URL path | The authorization token (the one created with `visa-create`, or a child drawn from it) |
+| `--order-amount-cents` | `order_amount_cents` | Required, integer cents. The credential is issued for exactly this amount — charge the same amount; it counts against the authorization limit |
+| `--currency` | `currency` | Optional; must equal the authorization's currency |
+| `--external-transaction-id` | `external_transaction_id` | Optional; your order id, also Visa `merchantOrderId`. Defaults to the idempotency key |
+| `--order <json>` | `order` | Optional; one JSON object, same shape as `visa-create --order` |
+| `--member` | `member_id` | Optional; cross-checked against the token owner by the platform |
+| `--idempotency-key` | `Idempotency-Key` header | Required in `--yes` mode. One per order; a retry with the same key never double-counts the limit |
+
+There are deliberately no limit / expiry / card flags: the boundary comes from the existing authorization. The response is a new ACTIVE child token. The platform links it to the authorization server-side but does **not** echo `parent_payment_token_id` in the response, so keep the authorization id yourself. Platform rejections are `1403` with `data.reason`: `authorization_limit_exceeded`, `authorization_expired`, `authorization_closed`, `authorization_not_active`, `authorization_missing`, `authorization_invalid`, `not_visa`, `card_unavailable`, `draw_declined` (use a new idempotency key to retry); `1001` with `currency_mismatch` / `intent_reuse_disabled`; or `1501` (token not found, not owned by this API key, or `--member` does not match — the platform does not say which). When the limit or the 30 days run out, create a new authorization with `visa-create`.
 
 ### get / list / revoke
 

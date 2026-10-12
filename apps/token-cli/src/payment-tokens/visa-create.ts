@@ -35,7 +35,7 @@ const ORDER_AMOUNT_CENTS_MIN = 1;
 const ORDER_AMOUNT_CENTS_MAX = 99_999_999;
 
 /** True when `amountStr` is a positive integer in [1, 99,999,999] cents. */
-function isValidOrderAmountCents(amountStr: string): boolean {
+export function isValidOrderAmountCents(amountStr: string): boolean {
   const trimmed = amountStr.trim();
   if (!INTEGER_CENTS_RE.test(trimmed)) return false;
   const n = Number(trimmed);
@@ -47,7 +47,7 @@ function isValidOrderAmountCents(amountStr: string): boolean {
  * body requires — pass-through, no unit conversion (amount_cents=12345 →
  * order_amount_cents=12345). Callers MUST run `isValidOrderAmountCents` first.
  */
-function parseOrderAmountCents(amountStr: string): number {
+export function parseOrderAmountCents(amountStr: string): number {
   return Number(amountStr.trim());
 }
 
@@ -72,7 +72,7 @@ function isValidMaxAmountCents(value: string): boolean {
  * 只校验"是一个 JSON 对象"，其内部字段的含义和取值范围由平台校验并以 422/1001 返回，
  * CLI 不重复实现，也就不会和平台规则漂移。解析结果原样透传。
  */
-function parseJsonObjectFlag(flag: string, raw: string): Record<string, unknown> {
+export function parseJsonObjectFlag(flag: string, raw: string): Record<string, unknown> {
   const invalid = `${flag} must be a JSON object.`;
   let parsed: unknown;
   try {
