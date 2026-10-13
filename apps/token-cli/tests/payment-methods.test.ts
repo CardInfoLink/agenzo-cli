@@ -354,6 +354,51 @@ describe('payment-methods add (hosted binding, default)', () => {
     );
   });
 
+  it('--mobile-phone: forwards mobile_phone verbatim and keeps email', async () => {
+    const sessionPm = { id: 'pm_mp', status: 'PENDING', link_url: 'https://app/x' };
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_mp', status: 'ACTIVE' } }),
+    };
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--api-key', 'sk_key', '--email', 'u@e.com', '--mobile-phone', ' +15551234567 ', '--no-poll',
+    ]);
+
+    // 去首尾空白后原样透传；email 仍在（VTS 要用），格式由平台校验。
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/payment-methods/binding-session',
+      { type: 'api-key', key: 'sk_key' },
+      { email: 'u@e.com', mobile_phone: '+15551234567' },
+    );
+  });
+
+  it('omits mobile_phone from the body when --mobile-phone is not given', async () => {
+    const sessionPm = { id: 'pm_nomp', status: 'PENDING', link_url: 'https://app/x' };
+    const apiClient = {
+      post: vi.fn().mockResolvedValue({ success: true, data: sessionPm }),
+      get: vi.fn().mockResolvedValue({ success: true, data: { id: 'pm_nomp', status: 'ACTIVE' } }),
+    };
+    const program = buildProgram();
+    const cmd = program.command('payment-methods');
+    registerAddCommand(cmd, { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'payment-methods', 'add',
+      '--api-key', 'sk_key', '--email', 'u@e.com', '--no-poll',
+    ]);
+
+    expect(apiClient.post.mock.calls[0][2]).toEqual({ email: 'u@e.com' });
+  });
+
   it('passes --member as member_id when given', async () => {
     const sessionPm = { id: 'pm_hb2', status: 'PENDING', link_url: 'https://app/x' };
     const apiClient = {

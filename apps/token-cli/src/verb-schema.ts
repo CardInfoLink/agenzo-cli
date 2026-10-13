@@ -135,6 +135,12 @@ export const pmAddSchema: VerbSchema = {
       description:
         "Cardholder email: the hosted binding link is sent here (and used as the UnionPay enrollment email). Use the user's login profile email — never ask in chat.",
     },
+    'mobile-phone': {
+      type: 'string',
+      required: false,
+      description:
+        'OPTIONAL, Visa only: when given, use this mobile number (E.164, e.g. +15551234567) as the VIC consumer identity instead of the email. Not required — omit it and VIC uses the email as before. --email is still required either way (Visa token provisioning uses it).',
+    },
     'no-poll': {
       type: 'bool',
       required: false,

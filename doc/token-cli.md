@@ -60,6 +60,7 @@ agenzo-token-cli payment-methods disable <pm_id> --api-key <key> --idempotency-k
 | `--type <type>` | all | Default `card` |
 | `--payment-brand <brand>` | all | Omit (default) for the hosted binding page (supports Visa + Mastercard); `unionpay` for UnionPay enrollment. `evo` / `visa` are gone — the page splits by card brand. |
 | `--email <email>` | all | The address the hosted binding link is emailed to (and the UnionPay enrollment email). **Not** a card credential: it is a session reference / cardholder identity, never used to authenticate the card to Visa or Mastercard. |
+| `--mobile-phone <e164>` | hosted binding (Visa) | **Optional, not required.** When given, use this mobile number (E.164, e.g. `+15551234567`) as the **VIC consumer identity instead of the email** (`MOBILE_PHONE_NUMBER` rather than `EMAIL_ADDRESS`). Omit it and VIC uses the email as before. Pass-through, the platform validates the format. `--email` is still required either way: Visa token provisioning (VTS) uses it. |
 | `--member <id>` | all | End-user this card belongs to. Optional at the CLI boundary (server decides if mandatory per brand — UnionPay requires it). Omitting stores a developer-scoped card. |
 | `--no-poll` | hosted binding | Print `{ id, link_url }` and exit immediately instead of waiting for the cardholder. For programmatic callers (agent orchestrator / CI) that render the link and poll on their own cadence via `dropin-status` / `get`. Default polls to a terminal status. |
 | `--hosted-page <target>` | hosted binding | Which card-entry page `link_url` points at. Omit (default) for the **front-end app** page — unchanged behaviour. Pass `platform` for the **platform-hosted** page: use it when no front-end is deployed (headless / orchestrator). Both pages split Visa vs Mastercard by BIN internally. |
@@ -76,7 +77,7 @@ split inside the page. `--mode`, `--card-number`, `--cvv`, `--expiry`,
 `--client-reference-id`, `--idempotency-key`, and `--payment-brand evo|visa` no
 longer exist on this path.
 
-1. `POST /payment-methods/binding-session` with `{ email, member_id? }` → prints
+1. `POST /payment-methods/binding-session` with `{ email, member_id?, mobile_phone? }` → prints
    `ID` (PENDING), `Status`, and **`Link URL`** (the hosted page). The link is
    also emailed to `--email`. With `--hosted-page platform` the body also carries
    `hosted_page` so `link_url` points at the platform-hosted page instead of the

@@ -77,6 +77,10 @@ export function registerAddCommand(parent: Command, deps: AddDeps): void {
       'Cardholder email. Used as the hosted binding session reference (the hosted page emails the secure link there) and as the UnionPay enrollment email.',
     )
     .option(
+      '--mobile-phone <e164>',
+      'OPTIONAL, Visa only: when given, use this mobile number (E.164, e.g. +15551234567) as the VIC consumer identity INSTEAD of the email. Not required — omit it and VIC uses the email as before. Pass-through — the platform validates the format. --email is still required either way (Visa token provisioning uses it).',
+    )
+    .option(
       '--no-poll',
       'Hosted binding only: open the session, print { id, link_url } and exit immediately without waiting for the cardholder. For programmatic callers (e.g. an agent orchestrator) that must render the link synchronously and poll on their own cadence via payment-methods dropin-status / get. Default is to poll until a terminal status.',
     )
@@ -153,6 +157,10 @@ async function handleHostedBinding(
   // --member 不在 CLI 侧强制：归属是否必需由服务端判定，CLI 只透传（与其余绑卡入口一致）。
   const member = ((opts.member as string | undefined) ?? '').trim();
 
+  // --mobile-phone：只在显式给值时才进请求体（不传则报文与改动前逐字一致）。CLI 不校验
+  // E.164 格式，由平台判定；它只改 VIC consumerIdentity，不替代 --email（VTS 仍用邮箱）。
+  const mobilePhone = ((opts.mobilePhone as string | undefined) ?? '').trim();
+
   const configManager = new ConfigManager();
 
   // --hosted-page：只在显式给值时才进请求体 —— 不传时报文与改动前逐字一致，平台侧缺省
@@ -167,6 +175,7 @@ async function handleHostedBinding(
     {
       email,
       ...(member ? { member_id: member } : {}),
+      ...(mobilePhone ? { mobile_phone: mobilePhone } : {}),
       ...(hostedPage ? { hosted_page: hostedPage } : {}),
     },
   );
