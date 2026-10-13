@@ -88,6 +88,7 @@ agenzo-token-cli payment-methods add \
 | `--type` | No | Payment method type, defaults to `card` |
 | `--email` | Yes | The hosted binding link is emailed here. A session reference / cardholder identity — **not** a card credential; never used to authenticate the card to Visa or Mastercard |
 | `--member` | No | End-user this card belongs to. Optional at the CLI boundary; scopes the card so it appears under `list --member <id>` |
+| `--mobile-phone` | No (optional) | Visa only: when given, use this mobile number (E.164, e.g. `+15551234567`) as the VIC consumer identity instead of the email. Not required — omit it and VIC uses the email as before. `--email` is still required either way (Visa token provisioning uses it) |
 | `--no-poll` | No | Print `{ id, link_url }` and exit immediately instead of waiting for the cardholder. For programmatic callers that render the link and poll themselves (`dropin-status` / `get`) |
 | `--hosted-page` | No | Which card-entry page `link_url` points at. Omit for the front-end app page (default); pass `platform` for the platform-hosted page when no front-end is deployed |
 
