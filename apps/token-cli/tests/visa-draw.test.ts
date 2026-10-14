@@ -77,6 +77,22 @@ describe('payment-tokens visa-draw — request', () => {
     });
   });
 
+  it('--last sends is_last: true; omitting it leaves the body unchanged', async () => {
+    const { apiClient, program } = setup();
+    await program.parseAsync([...BASE, '--last']);
+    expect(apiClient.post.mock.calls[0][2]).toEqual({ order_amount_cents: 2500, is_last: true });
+
+    const again = setup();
+    await again.program.parseAsync(BASE);
+    expect(again.apiClient.post.mock.calls[0][2]).not.toHaveProperty('is_last');
+  });
+
+  it('marks the last draw in text output', async () => {
+    const { program, out } = setup();
+    await program.parseAsync([...BASE, '--last']);
+    expect(out.text()).toContain('Last Draw');
+  });
+
   it('exposes no limit / expiry / subscription / card flags — the authorization owns those', async () => {
     const help = (() => {
       const program = buildProgram();

@@ -30,6 +30,9 @@ import {
  * 超出由平台以 1403 / `data.reason=authorization_limit_exceeded` 拒绝。
  *
  * `--member` 只是归属交叉校验，选填；CLI 不做任何强制，对不上由平台按"找不到"处理。
+ *
+ * `--last` 声明这是该授权下的最后一次取凭证（`is_last: true`）：平台随即拒绝之后的取凭证，
+ * 这一笔扣款成功时通知 Visa 授权已完成。已经取到的其他凭证不受影响，照常可扣。
  */
 export function registerVisaDrawCommand(
   parent: Command,
@@ -57,6 +60,10 @@ export function registerVisaDrawCommand(
     .option(
       '--member <member_id>',
       'Member ID; cross-checked against the token owner by the platform (optional)',
+    )
+    .option(
+      '--last',
+      'This is the LAST draw under the authorization: no further draws are accepted, and the authorization is closed at Visa once this credential is charged. Credentials already drawn can still be charged (optional)',
     )
     .option(
       '--idempotency-key <key>',
@@ -121,6 +128,7 @@ export function registerVisaDrawCommand(
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
       ...(orderDetail ? { order: orderDetail } : {}),
       ...(member ? { member_id: member } : {}),
+      ...(opts.last ? { is_last: true } : {}),
     };
 
     const result = await deps.apiClient.post<Record<string, unknown>>(
@@ -157,6 +165,7 @@ export function registerVisaDrawCommand(
         const lines: [string, string][] = [
           ['Payment Token ID', String(tokenData.id || '')],
           ['Authorization Token ID', paymentTokenId],
+          ...(opts.last ? ([['Last Draw', 'yes (no further draws)']] as [string, string][]) : []),
           ['Type', 'Network Token'],
           ['Status', String(tokenData.status || 'ACTIVE')],
           ['Network Token (DPAN)', String(nt.value || '')],
