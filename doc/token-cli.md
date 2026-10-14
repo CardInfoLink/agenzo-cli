@@ -266,25 +266,26 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 - The 180s default poll window is longer than UnionPay's 60s because completion is driven by a **human passkey action**, not a backend event.
 - On timeout the token stays PENDING; re-open `payment_url` if the session has not expired, or poll `get` later.
 
-**Authorization limit & order details (all optional).** One passkey approval authorises a spending limit; credentials drawn later under it stay within that limit and need no further passkey. This is **not** a subscription — there is no billing cycle. The authorization's validity is fixed by the platform at the longest Visa allows (currently 30 days) and **cannot be set from the CLI**. `--order` is **one JSON object** passed through to the platform's `visa.order` as-is (the CLI only checks it is a JSON object — field rules are enforced by the platform, which answers `422 / 1001` with the offending field):
+**Single-use by default; reuse is opt-in (all flags optional).** By default one passkey approval authorises **this one order only**: the limit is the order amount and `visa-draw` is rejected for it. Add `--reusable` (sends `visa.usage: "reusable"`) to authorise a spending limit instead; credentials drawn later under it stay within that limit and need no further passkey. This is **not** a subscription — there is no billing cycle. The authorization's validity is fixed by the platform at the longest Visa allows (currently 30 days) and **cannot be set from the CLI**. `--order` is **one JSON object** passed through to the platform's `visa.order` as-is (the CLI only checks it is a JSON object — field rules are enforced by the platform, which answers `422 / 1001` with the offending field):
 
 | Flag | Maps to | Notes |
 |---|---|---|
-| `--max-amount-cents <cents>` | `visa.max_amount_cents` | Authorization limit in integer cents (1 to 99,999,999,999). When omitted the platform uses its configured default (currently **100000** = 1000.00; raised to the order amount if the order is larger). Must be >= `--order-amount-cents` |
+| `--reusable` | `visa.usage: "reusable"` | Makes the authorization reusable with `visa-draw`. Without it the authorization is single-use |
+| `--max-amount-cents <cents>` | `visa.max_amount_cents` | Requires `--reusable`. Authorization limit in integer cents (1 to 99,999,999,999). When omitted the platform uses its configured default (currently **100000** = 1000.00; raised to the order amount if the order is larger). Must be >= `--order-amount-cents` |
 | `--order <json>` | `visa.order` | `description` (one line, ≤255 chars: what is being bought — the platform also uses it as Visa's purchase-intent summary and as the authorization description) / `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
 
 ```bash
-# 9.99 order; authorise up to 500.00 (50000 cents)
+# 9.99 order; reusable, authorise up to 500.00 (50000 cents)
 agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-poll \
   --payment-method-id <visa_pm_id> --order-amount-cents 999 --currency USD \
-  --max-amount-cents 50000 \
+  --reusable --max-amount-cents 50000 \
   --order '{"description":"Buy a Pro plan","subtotal_cents":999,"products":[{"product_name":"Pro Plan","quantity":1,"unit_price_cents":999}]}' \
   --idempotency-key idem_1
 ```
 
-Add `--last` (sends `visa.is_last: true`) when this authorization should issue only this one credential: `visa-draw` is then rejected for it, and it completes once this credential is charged. Without any of these flags the request body is unchanged and the platform applies its default limit. `visa-create` only creates the authorisation (and issues the first credential); to keep drawing credentials under the same approval use `visa-draw` below.
+`--last` on `visa-create` is deprecated and ignored (single-use is the default; it cannot be combined with `--reusable`). Without any of these flags the authorization is single-use. `visa-create` only creates the authorisation (and issues the first credential); to keep drawing credentials under the same approval use `visa-draw` below.
 
-**Flow in short.** (1) `visa-create` — the cardholder approves once with a passkey; the resulting ACTIVE token is the *authorization token*, note its `ptk_…` id. (2) For every further order, `visa-draw <authorization_ptk_id>` with a new `--idempotency-key` returns a fresh ACTIVE child token synchronously — no passkey, no polling — until the limit or the validity period runs out. Add `--last` to the final draw when you know no more orders will follow. (3) Then run `visa-create` again for a new approval. Every charge, refund and revoke is reported to Visa by the platform; nothing extra is needed from the CLI.
+**Flow in short.** (1) `visa-create --reusable` — the cardholder approves once with a passkey; the resulting ACTIVE token is the *authorization token*, note its `ptk_…` id. (2) For every further order, `visa-draw <authorization_ptk_id>` with a new `--idempotency-key` returns a fresh ACTIVE child token synchronously — no passkey, no polling — until the limit or the validity period runs out. Add `--last` to the final draw when you know no more orders will follow. (3) Then run `visa-create` again for a new approval. Every charge, refund and revoke is reported to Visa by the platform; nothing extra is needed from the CLI.
 
 **Drawing again under the same authorization — `visa-draw`.** After the cardholder has approved once, each further order draws its own credential from that authorization, with no passkey. This is **not** a subscription: there is no billing cycle and no flag to declare one. Draw at the moment you need the credential for an order; the returned child token carries it.
 

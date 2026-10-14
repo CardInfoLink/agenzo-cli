@@ -185,15 +185,19 @@ export function registerVisaCreateCommand(
     .option('--merchant-order-id <id>', 'Merchant order id (optional)')
     .option(
       '--max-amount-cents <cents>',
-      'Authorization limit in integer cents: the total that may be drawn under this one passkey approval before it expires. Omit to use the platform default (configured server-side, currently 100000 = 1000.00); must be >= --order-amount-cents. The authorization lasts as long as Visa allows (currently 30 days) and cannot be set here (optional)',
+      'Authorization limit in integer cents for a --reusable authorization: the total that may be drawn under this one passkey approval before it expires. Omit to use the platform default (configured server-side, currently 100000 = 1000.00); must be >= --order-amount-cents. Requires --reusable (a single-use authorization is limited to the order amount). The authorization lasts as long as Visa allows (currently 30 days) and cannot be set here (optional)',
     )
     .option(
       '--order <json>',
       'Order details as ONE JSON object: description (one line, <=255 chars: what is being bought) / subtotal_cents / tax_cents / discount_cents / shipping_cents / products[] / shipping_address (optional, all amounts in cents)',
     )
     .option(
+      '--reusable',
+      'Make the authorization reusable (visa.usage=reusable): after this one passkey approval, further orders can be drawn with payment-tokens visa-draw until the limit or validity runs out. Without it the authorization covers this one order only (optional)',
+    )
+    .option(
       '--last',
-      'Authorize this one credential only (visa.is_last=true): no further payment-tokens visa-draw under this authorization; it completes once this credential is charged (optional)',
+      'Deprecated and ignored: an authorization is single-use by default now; use --reusable to allow visa-draw (optional)',
     )
     .option(
       '--external-transaction-id <id>',
@@ -283,9 +287,22 @@ export function registerVisaCreateCommand(
     const orderDetail =
       opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
 
+    const reusable = opts.reusable === true;
+    if (reusable && opts.last) {
+      throw new CliError(
+        'PARAM_INVALID',
+        '--last cannot be combined with --reusable: without --reusable the authorization is already single-use.',
+      );
+    }
     let maxAmountCents: number | undefined;
     const maxAmountRaw = (opts.maxAmountCents as string | undefined)?.trim();
     if (maxAmountRaw) {
+      if (!reusable) {
+        throw new CliError(
+          'PARAM_INVALID',
+          '--max-amount-cents requires --reusable: a single-use authorization is limited to --order-amount-cents.',
+        );
+      }
       if (!isValidMaxAmountCents(maxAmountRaw)) {
         throw new CliError(
           'PARAM_INVALID',
@@ -325,9 +342,9 @@ export function registerVisaCreateCommand(
         order_amount_cents: orderAmountCents,
         ...(orderDescription ? { order_description: orderDescription } : {}),
         ...(merchantOrderId ? { merchant_order_id: merchantOrderId } : {}),
+        ...(reusable ? { usage: 'reusable' } : {}),
         ...(maxAmountCents !== undefined ? { max_amount_cents: maxAmountCents } : {}),
         ...(orderDetail ? { order: orderDetail } : {}),
-        ...(opts.last ? { is_last: true } : {}),
       },
     };
 
