@@ -282,7 +282,7 @@ agenzo-token-cli payment-tokens visa-create --api-key <key> --format json --no-p
   --idempotency-key idem_1
 ```
 
-Without any of these flags the request body is unchanged and the platform applies its default limit. `visa-create` only creates the authorisation (and issues the first credential); to keep drawing credentials under the same approval use `visa-draw` below.
+Add `--last` (sends `visa.is_last: true`) when this authorization should issue only this one credential: `visa-draw` is then rejected for it, and it completes once this credential is charged. Without any of these flags the request body is unchanged and the platform applies its default limit. `visa-create` only creates the authorisation (and issues the first credential); to keep drawing credentials under the same approval use `visa-draw` below.
 
 **Flow in short.** (1) `visa-create` — the cardholder approves once with a passkey; the resulting ACTIVE token is the *authorization token*, note its `ptk_…` id. (2) For every further order, `visa-draw <authorization_ptk_id>` with a new `--idempotency-key` returns a fresh ACTIVE child token synchronously — no passkey, no polling — until the limit or the validity period runs out. Add `--last` to the final draw when you know no more orders will follow. (3) Then run `visa-create` again for a new approval. Every charge, refund and revoke is reported to Visa by the platform; nothing extra is needed from the CLI.
 

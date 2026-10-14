@@ -165,6 +165,31 @@ describe('payment-tokens visa-create — request body', () => {
     expect(body).not.toHaveProperty('currency');
     expect(body.visa).toEqual({ order_amount_cents: 500 });
   });
+
+  it('--last sends visa.is_last: true (authorize this one credential only)', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
+    const program = buildProgram();
+    registerVisaCreateCommand(program.command('payment-tokens'), { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '500',
+        '--idempotency-key', 'idem_visa_last',
+        '--last',
+      ]),
+    );
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body.visa).toEqual({ order_amount_cents: 500, is_last: true });
+  });
 });
 
 // ============================================================

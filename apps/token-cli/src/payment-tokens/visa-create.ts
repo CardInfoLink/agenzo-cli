@@ -192,6 +192,10 @@ export function registerVisaCreateCommand(
       'Order details as ONE JSON object: description (one line, <=255 chars: what is being bought) / subtotal_cents / tax_cents / discount_cents / shipping_cents / products[] / shipping_address (optional, all amounts in cents)',
     )
     .option(
+      '--last',
+      'Authorize this one credential only (visa.is_last=true): no further payment-tokens visa-draw under this authorization; it completes once this credential is charged (optional)',
+    )
+    .option(
       '--external-transaction-id <id>',
       'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
     )
@@ -323,6 +327,7 @@ export function registerVisaCreateCommand(
         ...(merchantOrderId ? { merchant_order_id: merchantOrderId } : {}),
         ...(maxAmountCents !== undefined ? { max_amount_cents: maxAmountCents } : {}),
         ...(orderDetail ? { order: orderDetail } : {}),
+        ...(opts.last ? { is_last: true } : {}),
       },
     };
 
