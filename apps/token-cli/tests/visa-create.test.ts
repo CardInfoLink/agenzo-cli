@@ -166,7 +166,32 @@ describe('payment-tokens visa-create — request body', () => {
     expect(body.visa).toEqual({ order_amount_cents: 500 });
   });
 
-  it('--last sends visa.is_last: true (authorize this one credential only)', async () => {
+  it('--reusable sends visa.usage: "reusable"; without it no usage is sent (single-use default)', async () => {
+    const apiClient = mockApiClient({
+      '/payment-tokens/create': VISA_PENDING,
+      '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
+    });
+    const program = buildProgram();
+    registerVisaCreateCommand(program.command('payment-tokens'), { apiClient } as any);
+    captureStdout();
+    captureStderr();
+
+    await runWithPoll(() =>
+      program.parseAsync([
+        'node', 'cli', '--yes', 'payment-tokens', 'visa-create',
+        '--api-key', 'sk_key',
+        '--payment-method-id', 'pm_visa_1',
+        '--order-amount-cents', '500',
+        '--idempotency-key', 'idem_visa_reusable',
+        '--reusable',
+      ]),
+    );
+
+    const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
+    expect(body.visa).toEqual({ order_amount_cents: 500, usage: 'reusable' });
+  });
+
+  it('--last is accepted but ignored (single use is the default) and never sends is_last', async () => {
     const apiClient = mockApiClient({
       '/payment-tokens/create': VISA_PENDING,
       '/payment-tokens/ptk_visa_001': VISA_ACTIVE,
@@ -188,7 +213,7 @@ describe('payment-tokens visa-create — request body', () => {
     );
 
     const body = apiClient.post.mock.calls[0][2] as Record<string, any>;
-    expect(body.visa).toEqual({ order_amount_cents: 500, is_last: true });
+    expect(body.visa).toEqual({ order_amount_cents: 500 });
   });
 });
 
@@ -389,12 +414,12 @@ describe('payment-tokens visa-create — mandate limit & order details', () => {
   }
 
   it('--max-amount-cents is forwarded under visa as an integer', async () => {
-    const body = await run(['--max-amount-cents', '50000']);
+    const body = await run(['--reusable', '--max-amount-cents', '50000']);
     expect(body.visa.max_amount_cents).toBe(50000);
   });
 
   it('--max-amount-cents equal to the order amount is allowed', async () => {
-    const body = await run(['--max-amount-cents', '999']);
+    const body = await run(['--reusable', '--max-amount-cents', '999']);
     expect(body.visa.max_amount_cents).toBe(999);
   });
 
@@ -416,17 +441,28 @@ describe('payment-tokens visa-create — mandate limit & order details', () => {
   it.each([['0'], ['-5'], ['12.5'], ['abc'], ['1e3'], ['100000000000']])(
     'rejects --max-amount-cents %s before sending anything',
     async (value) => {
-      await runRejected(['--max-amount-cents', value], /Invalid --max-amount-cents/);
+      await runRejected(['--reusable', '--max-amount-cents', value], /Invalid --max-amount-cents/);
     },
   );
 
   it('accepts --max-amount-cents at the 12-character Visa ceiling', async () => {
-    const body = await run(['--max-amount-cents', '99999999999']);
+    const body = await run(['--reusable', '--max-amount-cents', '99999999999']);
     expect(body.visa.max_amount_cents).toBe(99_999_999_999);
   });
 
   it('rejects --max-amount-cents below the order amount', async () => {
-    await runRejected(['--max-amount-cents', '998'], /must not be less than --order-amount-cents/);
+    await runRejected(
+      ['--reusable', '--max-amount-cents', '998'],
+      /must not be less than --order-amount-cents/,
+    );
+  });
+
+  it('rejects --max-amount-cents without --reusable (single-use is limited to the order amount)', async () => {
+    await runRejected(['--max-amount-cents', '50000'], /--max-amount-cents requires --reusable/);
+  });
+
+  it('rejects --last together with --reusable', async () => {
+    await runRejected(['--reusable', '--last'], /--last cannot be combined with --reusable/);
   });
 
   it('has no --consumer-prompt: the description now lives in --order', async () => {
