@@ -11,7 +11,7 @@ import {
   renderWithContext,
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
-import type { PriceItem } from '../types/hotel.js';
+import type { PriceItem, RoomGuest } from '../types/hotel.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 import { attachSchemaHelp, hotelCreateOrderSchema } from '../verb-schema.js';
 import { MEMBER_OPTION_DESCRIPTION, memberIdOf } from '../member.js';
@@ -65,6 +65,64 @@ export function parsePriceItems(raw: string): PriceItem[] {
 
   // Forwarded verbatim — the parsed objects are returned unchanged.
   return parsed as PriceItem[];
+}
+
+/**
+ * Parse and shape-validate `--room-guests`.
+ *
+ * Optional per-room primary guests, so several rooms can be booked under
+ * different names. The raw flag MUST be a non-empty JSON array in which every
+ * element carries `guest_name` (non-empty string). `room_index` is OPTIONAL:
+ * callers list the names in room order and the 1-based index is filled in from
+ * the array position; supplying it explicitly is allowed and then wins. Any
+ * other deviation raises `PARAM_INVALID` before any request is issued.
+ *
+ * Omitting the flag entirely is the backward-compatible path: the platform then
+ * reuses `guest_name` for every room.
+ *
+ * Elements are forwarded as-is apart from the filled-in `room_index` (extra
+ * keys untouched); the platform validates `room_index` against `room_num` and
+ * sends the names upstream.
+ *
+ * Exported so tests and other verbs can import and exercise it directly.
+ */
+export function parseRoomGuests(raw: string): RoomGuest[] {
+  const INVALID =
+    '--room-guests must be a JSON array of {guest_name (non-empty string), room_index (optional 1-based integer)}.';
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new CliError('PARAM_INVALID', INVALID);
+  }
+
+  return parsed.map((el, i) => {
+    if (typeof el !== 'object' || el === null || Array.isArray(el)) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+    const item = el as Record<string, unknown>;
+    if (typeof item.guest_name !== 'string' || item.guest_name.trim() === '') {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+    // room_index is OPTIONAL: callers just list the names in room order and the
+    // 1-based index is filled in here. Supplying it is still allowed (and then
+    // wins), but 0 / negatives / non-integers are the classic off-by-one and are
+    // rejected locally rather than after a round trip. The upper bound is left
+    // to the platform (it validates against room_num) so the two never disagree.
+    if (item.room_index === undefined) {
+      return { ...item, room_index: i + 1 } as unknown as RoomGuest;
+    }
+    if (!Number.isInteger(item.room_index) || (item.room_index as number) < 1) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+    // Other keys are forwarded untouched.
+    return item as unknown as RoomGuest;
+  });
 }
 
 /**
@@ -229,6 +287,13 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--children <n>', 'Children per room (match quote)', '0')
     .option('--nationality <code>', 'Guest nationality (ISO country code)', 'CN')
     .option('--guest-name <name>', 'Primary guest name')
+    .option(
+      '--room-guests <json>',
+      'Optional per-room primary guests as a JSON array [{guest_name}], listed in room ' +
+      'order, for booking several rooms under different names. room_index is filled in ' +
+      'from the array position (1-based); pass it explicitly to override. Omit the flag ' +
+      'and every room reuses --guest-name.',
+    )
     .option('--contact-name <name>', 'Booking contact name (may equal guest-name)')
     .option('--contact-phone <phone>', 'Booking contact phone number (digits)')
     .option('--contact-country-code <code>', "Phone country calling code without '+'", '86')
@@ -318,6 +383,8 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     };
 
     // Optional fields — included only when supplied.
+    // 每间房各自的住客名：不传则平台让所有房间沿用 guest_name（向后兼容）。
+    if (opts.roomGuests !== undefined) body.room_guests = parseRoomGuests(opts.roomGuests as string);
     if (opts.contactEmail !== undefined) body.contact_email = opts.contactEmail as string;
     if (opts.arriveTime !== undefined) body.arrive_time = opts.arriveTime as string;
     if (opts.specialRequests !== undefined) body.special_requests = opts.specialRequests as string;

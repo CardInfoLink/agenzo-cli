@@ -246,15 +246,31 @@ export interface ListHotelOrdersResponse {
 
 // ---- parsed-flag intermediate models (pure builders) ----
 //
-// `--price-items` (book) and `--checkout-rooms` (checkout) are parsed and
-// shape-validated by pure functions before body assembly. `PriceItem` (above)
-// is the parsed type for `--price-items`; `CheckoutRoom` is the parsed type for
-// `--checkout-rooms`.
+// `--price-items` (book), `--room-guests` (create-order) and `--checkout-rooms`
+// (checkout) are parsed and shape-validated by pure functions before body
+// assembly. `PriceItem` (above) is the parsed type for `--price-items`;
+// `RoomGuest` for `--room-guests`; `CheckoutRoom` for `--checkout-rooms`.
 
 export interface CheckoutRoom {
   room_index: string;
   guest_name: string;
   cancel_check_in_date: string;
+}
+
+/**
+ * Per-room primary guest for `create-order --room-guests`, AFTER parsing.
+ *
+ * `room_index` is always present here even though the flag accepts it as
+ * optional — `parseRoomGuests` fills it in from the array position, so the body
+ * always carries an explicit 1-based index.
+ *
+ * NOTE the `room_index` type differs from {@link CheckoutRoom}: here it is a
+ * NUMBER (matching the platform's `room_guests[].room_index: int`), whereas
+ * checkout echoes it back as a string from the order's `rooms[]`.
+ */
+export interface RoomGuest {
+  room_index: number;
+  guest_name: string;
 }
 
 // ---- find-destination ----  (provider passthrough; rendered as destinations[])

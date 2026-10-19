@@ -866,6 +866,7 @@ export const hotelCreateOrderSchema: VerbSchema = {
     children: { type: 'int', required: false, default: 0, description: 'Children per room (match quote)', constraints: '0-10' },
     nationality: { type: 'string', required: false, default: 'CN', description: 'Guest nationality (match quote)' },
     'guest-name': { type: 'string', required: true, description: 'Primary guest name', constraints: 'Use the name as the user gives it. If a supplier returns NAME_FORMAT_INVALID, re-collect in Latin letters and retry' },
+    'room-guests': { type: 'string', required: false, description: "Per-room primary guests, listed in room order, for booking several rooms under different names. Omit it and every room reuses guest-name (backward compatible); guest-name stays required either way", constraints: 'JSON array of {guest_name (non-empty string)}; room_index is optional and filled in from the array position (1-based, validated against room-num by the platform) — pass it explicitly only to override; else PARAM_INVALID' },
     'contact-name': { type: 'string', required: true, description: 'Booking contact name (may equal guest-name)' },
     'contact-phone': { type: 'string', required: true, description: 'Booking contact phone number', constraints: 'Digits; collect country code separately in --contact-country-code' },
     'contact-country-code': { type: 'string', required: false, default: '86', description: "Phone country calling code without '+'" },
