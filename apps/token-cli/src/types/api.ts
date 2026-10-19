@@ -99,6 +99,10 @@ export interface NetworkToken {
   brand: string;
   eci: string;
   cryptogram: string;
+  /** Visa only: which one-time dynamic data this credential carries. Absent on older responses (= TAVV). */
+  dynamic_data_type?: 'TAVV' | 'DAVV';
+  /** Visa DAVV only: the 3-digit dynamic CVV (`cryptogram` is empty then). */
+  cvv?: string;
   expiry: string;
   value: string;
 }

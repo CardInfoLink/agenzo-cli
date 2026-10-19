@@ -119,7 +119,12 @@ export function formatPaymentTokenGet(
     lines.push(['Type', 'Network Token']);
     lines.push(['Brand', String(nt.payment_brand || nt.brand || '')]);
     lines.push(['ECI', String(nt.eci || '')]);
-    lines.push(['Cryptogram', String(nt.token_cryptogram || nt.cryptogram || '')]);
+    if (nt.dynamic_data_type === 'DAVV') {
+      // Visa DAVV：3 位动态 CVV 在 cvv，cryptogram 为空。
+      lines.push(['Dynamic CVV (DAVV)', String(nt.cvv || '')]);
+    } else {
+      lines.push(['Cryptogram', String(nt.token_cryptogram || nt.cryptogram || '')]);
+    }
     lines.push(['Expiry', String(nt.expiry_date || nt.expiry || '')]);
     lines.push(['Value', String(nt.value || '')]);
   } else if (type === 'x402') {

@@ -11,6 +11,11 @@ import {
   renderWithContext,
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
+import {
+  DYNAMIC_DATA_TYPE_OPTION_HELP,
+  dynamicDataLine,
+  parseDynamicDataType,
+} from './dynamic-data-type.js';
 
 // ============================================================
 // Constants / helpers
@@ -121,7 +126,7 @@ function formatVisaActiveToken(data: Record<string, unknown>): string {
     ['Status', String(data.status || 'ACTIVE')],
     ['Payment Brand', String(data.payment_brand || 'visa')],
     ['Network Token (DPAN)', String(nt.value || '')],
-    ['Cryptogram (TAVV)', String(nt.cryptogram || '')],
+    dynamicDataLine(nt),
     ['Expiry', String(nt.expiry_date || '')],
   ];
   if (data.instruction_id) {
@@ -199,6 +204,7 @@ export function registerVisaCreateCommand(
       '--last',
       'Deprecated and ignored: an authorization is single-use by default now; use --reusable to allow visa-draw (optional)',
     )
+    .option('--dynamic-data-type <type>', DYNAMIC_DATA_TYPE_OPTION_HELP)
     .option(
       '--external-transaction-id <id>',
       'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
@@ -286,6 +292,8 @@ export function registerVisaCreateCommand(
     // 校验，坏参数不会走到发请求。
     const orderDetail =
       opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
+    // 取回哪种动态数据（TAVV / DAVV）；省略时不进请求体，平台默认 TAVV。
+    const dynamicDataType = parseDynamicDataType(opts.dynamicDataType);
 
     const reusable = opts.reusable === true;
     if (reusable && opts.last) {
@@ -345,6 +353,7 @@ export function registerVisaCreateCommand(
         ...(reusable ? { usage: 'reusable' } : {}),
         ...(maxAmountCents !== undefined ? { max_amount_cents: maxAmountCents } : {}),
         ...(orderDetail ? { order: orderDetail } : {}),
+        ...(dynamicDataType ? { dynamic_data_type: dynamicDataType } : {}),
       },
     };
 
