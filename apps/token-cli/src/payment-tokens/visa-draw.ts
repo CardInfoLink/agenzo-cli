@@ -16,6 +16,11 @@ import {
   parseJsonObjectFlag,
   parseOrderAmountCents,
 } from './visa-create.js';
+import {
+  DYNAMIC_DATA_TYPE_OPTION_HELP,
+  dynamicDataLine,
+  parseDynamicDataType,
+} from './dynamic-data-type.js';
 
 /**
  * `payment-tokens visa-draw <payment_token_id>` — 在已有的 Visa 授权下再取一份凭证，
@@ -65,6 +70,7 @@ export function registerVisaDrawCommand(
       '--last',
       'This is the LAST draw under the authorization: no further draws are accepted, and the authorization is closed at Visa once this credential is charged. Credentials already drawn can still be charged (optional)',
     )
+    .option('--dynamic-data-type <type>', DYNAMIC_DATA_TYPE_OPTION_HELP)
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header. Use one per order; retrying with the same key never double-counts the limit',
@@ -109,6 +115,7 @@ export function registerVisaDrawCommand(
     // 坏参数先于任何交互提示报错，不会走到发请求。
     const orderDetail =
       opts.order !== undefined ? parseJsonObjectFlag('--order', String(opts.order)) : undefined;
+    const dynamicDataType = parseDynamicDataType(opts.dynamicDataType);
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
@@ -129,6 +136,7 @@ export function registerVisaDrawCommand(
       ...(orderDetail ? { order: orderDetail } : {}),
       ...(member ? { member_id: member } : {}),
       ...(opts.last ? { is_last: true } : {}),
+      ...(dynamicDataType ? { dynamic_data_type: dynamicDataType } : {}),
     };
 
     const result = await deps.apiClient.post<Record<string, unknown>>(
@@ -169,7 +177,7 @@ export function registerVisaDrawCommand(
           ['Type', 'Network Token'],
           ['Status', String(tokenData.status || 'ACTIVE')],
           ['Network Token (DPAN)', String(nt.value || '')],
-          ['Cryptogram (TAVV)', String(nt.cryptogram || '')],
+          dynamicDataLine(nt),
           ['Expiry', String(nt.expiry_date || '')],
         ];
         return Formatter.keyValue(lines);

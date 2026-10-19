@@ -271,6 +271,7 @@ agenzo-token-cli payment-tokens get <ptk_id> --api-key <key>
 | Flag | Maps to | Notes |
 |---|---|---|
 | `--reusable` | `visa.usage: "reusable"` | Makes the authorization reusable with `visa-draw`. Without it the authorization is single-use |
+| `--dynamic-data-type <TAVV\|DAVV>` | `visa.dynamic_data_type` | Which one-time dynamic data comes with the credential. Omit for `TAVV` (default). See *TAVV vs DAVV* below |
 | `--max-amount-cents <cents>` | `visa.max_amount_cents` | Requires `--reusable`. Authorization limit in integer cents (1 to 99,999,999,999). When omitted the platform uses its configured default (currently **100000** = 1000.00; raised to the order amount if the order is larger). Must be >= `--order-amount-cents` |
 | `--order <json>` | `visa.order` | `description` (one line, ≤255 chars: what is being bought — the platform also uses it as Visa's purchase-intent summary and as the authorization description) / `subtotal_cents` / `tax_cents` / `discount_cents` / `shipping_cents` / `products[]` / `shipping_address`, amounts in cents |
 
@@ -304,10 +305,25 @@ agenzo-token-cli payment-tokens visa-draw <authorization_ptk_id> --api-key <key>
 | `--external-transaction-id` | `external_transaction_id` | Optional; your order id, also Visa `merchantOrderId`. Defaults to the idempotency key |
 | `--order <json>` | `order` | Optional; one JSON object, same shape as `visa-create --order` |
 | `--member` | `member_id` | Optional; cross-checked against the token owner by the platform |
+| `--dynamic-data-type <TAVV\|DAVV>` | `dynamic_data_type` | Optional; `TAVV` (default) or `DAVV`, see *TAVV vs DAVV* below. Same value rules as `visa-create` |
 | `--last` | `is_last: true` | Optional; declares this the last draw under the authorization. Further draws are rejected (`authorization_closed`, also for a second `--last`), and once this credential is charged the platform tells Visa the authorization is complete. Credentials already drawn can still be charged. If this one is declined or revoked you can draw again with `--last` |
 | `--idempotency-key` | `Idempotency-Key` header | Required in `--yes` mode. One per order; a retry with the same key never double-counts the limit |
 
 There are deliberately no limit / expiry / card flags: the boundary comes from the existing authorization. The response is a new ACTIVE child token. The platform links it to the authorization server-side but does **not** echo `parent_payment_token_id` in the response, so keep the authorization id yourself. Platform rejections are `1403` with `data.reason`: `authorization_limit_exceeded`, `authorization_expired`, `authorization_closed`, `authorization_not_active`, `authorization_missing`, `authorization_invalid`, `not_visa`, `card_unavailable`, `draw_declined` (use a new idempotency key to retry); `1001` with `currency_mismatch` / `intent_reuse_disabled`; or `1501` (token not found, not owned by this API key, or `--member` does not match — the platform does not say which). When the limit or the 30 days run out, create a new authorization with `visa-create`.
+
+**TAVV vs DAVV — `--dynamic-data-type`.** A Visa network token is a token number (`value`) plus expiry; it has no static CVV. Each credential also carries one-time dynamic data, and you pick which kind:
+
+| Type | What it is | Output field | Use it for |
+|---|---|---|---|
+| `TAVV` (default) | 28-char cryptogram | `network_token.cryptogram` (`Cryptogram (TAVV)` in text) | An acquirer that accepts network-token cryptograms |
+| `DAVV` | 3-digit dynamic CVV | `network_token.cvv` (`Dynamic CVV (DAVV)` in text; `cryptogram` is empty) | A normal card form: token number as card number, `expiry_date`, and this as CVV |
+
+`network_token.dynamic_data_type` echoes which one you got. One type per call: for both, run it twice (`visa-draw` under a `--reusable` authorization) — **each credential counts its full amount against the authorization limit**. Both are valid for about 72 hours. `DAVV` issuance is verified against the Visa sandbox; whether a given merchant or acquirer accepts "token number + dynamic CVV" has to be confirmed with that merchant.
+
+```bash
+agenzo-token-cli payment-tokens visa-draw <authorization_ptk_id> --api-key <key> --format json \
+  --order-amount-cents 2500 --dynamic-data-type DAVV --idempotency-key idem_draw_davv_1
+```
 
 ### get / list / revoke
 
