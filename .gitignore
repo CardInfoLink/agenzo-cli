@@ -38,3 +38,6 @@ scripts/test-commands.sh
 # GitNexus 本地索引缓存（可由 gitnexus analyze 再生，不入库）
 .gitnexus/
 .codegraph/
+
+# git worktree 的本地检出（各自是独立工作区，不入库）
+.worktrees/
