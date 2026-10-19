@@ -258,11 +258,15 @@ export interface CheckoutRoom {
 }
 
 /**
- * Per-room primary guest for `create-order --room-guests`.
+ * Per-room primary guest for `create-order --room-guests`, AFTER parsing.
+ *
+ * `room_index` is always present here even though the flag accepts it as
+ * optional — `parseRoomGuests` fills it in from the array position, so the body
+ * always carries an explicit 1-based index.
  *
  * NOTE the `room_index` type differs from {@link CheckoutRoom}: here it is a
- * NUMBER (1-based, matching the platform's `room_guests[].room_index: int`),
- * whereas checkout echoes it back as a string from the order's `rooms[]`.
+ * NUMBER (matching the platform's `room_guests[].room_index: int`), whereas
+ * checkout echoes it back as a string from the order's `rooms[]`.
  */
 export interface RoomGuest {
   room_index: number;

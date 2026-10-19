@@ -72,21 +72,23 @@ export function parsePriceItems(raw: string): PriceItem[] {
  *
  * Optional per-room primary guests, so several rooms can be booked under
  * different names. The raw flag MUST be a non-empty JSON array in which every
- * element carries `room_index` (1-based integer) and `guest_name` (non-empty
- * string). Any deviation raises `PARAM_INVALID` before any request is issued.
+ * element carries `guest_name` (non-empty string). `room_index` is OPTIONAL:
+ * callers list the names in room order and the 1-based index is filled in from
+ * the array position; supplying it explicitly is allowed and then wins. Any
+ * other deviation raises `PARAM_INVALID` before any request is issued.
  *
  * Omitting the flag entirely is the backward-compatible path: the platform then
  * reuses `guest_name` for every room.
  *
- * The parsed array is forwarded VERBATIM as the request body's `room_guests`
- * (extra keys untouched); the platform validates `room_index` against
- * `room_num` and sends the names upstream.
+ * Elements are forwarded as-is apart from the filled-in `room_index` (extra
+ * keys untouched); the platform validates `room_index` against `room_num` and
+ * sends the names upstream.
  *
  * Exported so tests and other verbs can import and exercise it directly.
  */
 export function parseRoomGuests(raw: string): RoomGuest[] {
   const INVALID =
-    '--room-guests must be a JSON array of {room_index (1-based integer), guest_name (non-empty string)}.';
+    '--room-guests must be a JSON array of {guest_name (non-empty string), room_index (optional 1-based integer)}.';
 
   let parsed: unknown;
   try {
@@ -99,28 +101,28 @@ export function parseRoomGuests(raw: string): RoomGuest[] {
     throw new CliError('PARAM_INVALID', INVALID);
   }
 
-  for (const el of parsed) {
+  return parsed.map((el, i) => {
     if (typeof el !== 'object' || el === null || Array.isArray(el)) {
       throw new CliError('PARAM_INVALID', INVALID);
     }
     const item = el as Record<string, unknown>;
-    // room_index is 1-based: 0 and negatives are an off-by-one mistake worth
-    // catching here rather than after a round trip. The upper bound is left to
-    // the platform (it validates against room_num) so the two never disagree.
-    if (
-      typeof item.room_index !== 'number' ||
-      !Number.isInteger(item.room_index) ||
-      item.room_index < 1
-    ) {
-      throw new CliError('PARAM_INVALID', INVALID);
-    }
     if (typeof item.guest_name !== 'string' || item.guest_name.trim() === '') {
       throw new CliError('PARAM_INVALID', INVALID);
     }
-  }
-
-  // Forwarded verbatim — the parsed objects are returned unchanged.
-  return parsed as RoomGuest[];
+    // room_index is OPTIONAL: callers just list the names in room order and the
+    // 1-based index is filled in here. Supplying it is still allowed (and then
+    // wins), but 0 / negatives / non-integers are the classic off-by-one and are
+    // rejected locally rather than after a round trip. The upper bound is left
+    // to the platform (it validates against room_num) so the two never disagree.
+    if (item.room_index === undefined) {
+      return { ...item, room_index: i + 1 } as unknown as RoomGuest;
+    }
+    if (!Number.isInteger(item.room_index) || (item.room_index as number) < 1) {
+      throw new CliError('PARAM_INVALID', INVALID);
+    }
+    // Other keys are forwarded untouched.
+    return item as unknown as RoomGuest;
+  });
 }
 
 /**
@@ -287,9 +289,10 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     .option('--guest-name <name>', 'Primary guest name')
     .option(
       '--room-guests <json>',
-      'Optional per-room primary guests as a JSON array [{room_index, guest_name}] ' +
-      '(room_index is 1-based and must match --room-num), for booking several rooms ' +
-      'under different names. Omit it and every room reuses --guest-name.',
+      'Optional per-room primary guests as a JSON array [{guest_name}], listed in room ' +
+      'order, for booking several rooms under different names. room_index is filled in ' +
+      'from the array position (1-based); pass it explicitly to override. Omit the flag ' +
+      'and every room reuses --guest-name.',
     )
     .option('--contact-name <name>', 'Booking contact name (may equal guest-name)')
     .option('--contact-phone <phone>', 'Booking contact phone number (digits)')

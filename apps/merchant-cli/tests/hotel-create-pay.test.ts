@@ -523,18 +523,30 @@ describe('hotel-redaug create-order --room-guests', () => {
     return body;
   }
 
-  it('forwards the parsed array verbatim as body.room_guests', async () => {
+  it('fills room_index from the array position when callers omit it', async () => {
+    // The documented contract is just [{guest_name}] listed in room order.
+    const guests = [{ guest_name: 'Alice' }, { guest_name: 'Bob' }];
+
+    const body = await bodyOf(['--room-num', '2', '--room-guests', JSON.stringify(guests)]);
+
+    expect(body.room_guests).toEqual([
+      { guest_name: 'Alice', room_index: 1 },
+      { guest_name: 'Bob', room_index: 2 },
+    ]);
+    // guest-name stays required and is sent alongside — the platform uses it for
+    // any room not covered by room_guests.
+    expect(body.guest_name).toBe('Alice');
+  });
+
+  it('keeps an explicitly supplied room_index (it wins over the array position)', async () => {
     const guests = [
-      { room_index: 1, guest_name: 'Alice' },
       { room_index: 2, guest_name: 'Bob' },
+      { room_index: 1, guest_name: 'Alice' },
     ];
 
     const body = await bodyOf(['--room-num', '2', '--room-guests', JSON.stringify(guests)]);
 
     expect(body.room_guests).toEqual(guests);
-    // guest-name stays required and is sent alongside — the platform uses it for
-    // any room not covered by room_guests.
-    expect(body.guest_name).toBe('Alice');
   });
 
   it('omitting the flag leaves room_guests out of the body entirely', async () => {
@@ -545,9 +557,9 @@ describe('hotel-redaug create-order --room-guests', () => {
   });
 
   it('a single entry is accepted (one room under its own name)', async () => {
-    const body = await bodyOf(['--room-guests', '[{"room_index":1,"guest_name":"Alice"}]']);
+    const body = await bodyOf(['--room-guests', '[{"guest_name":"Alice"}]']);
 
-    expect(body.room_guests).toEqual([{ room_index: 1, guest_name: 'Alice' }]);
+    expect(body.room_guests).toEqual([{ guest_name: 'Alice', room_index: 1 }]);
   });
 });
 
@@ -563,13 +575,27 @@ describe('parseRoomGuests', () => {
     expect((caught as CliError).code).toBe('PARAM_INVALID');
   };
 
-  it('accepts a well-formed array and returns it verbatim', () => {
+  it('accepts a well-formed array with explicit room_index and returns it unchanged', () => {
     const guests = [{ room_index: 1, guest_name: 'Alice' }, { room_index: 2, guest_name: 'Bob' }];
 
     expect(parseRoomGuests(JSON.stringify(guests))).toEqual(guests);
   });
 
-  it('keeps extra keys untouched (forwarded verbatim)', () => {
+  it('fills room_index by array order when omitted', () => {
+    expect(parseRoomGuests('[{"guest_name":"Alice"},{"guest_name":"Bob"}]')).toEqual([
+      { guest_name: 'Alice', room_index: 1 },
+      { guest_name: 'Bob', room_index: 2 },
+    ]);
+  });
+
+  it('fills only the elements that omit room_index, leaving the explicit ones alone', () => {
+    expect(parseRoomGuests('[{"guest_name":"Alice"},{"room_index":7,"guest_name":"Bob"}]')).toEqual([
+      { guest_name: 'Alice', room_index: 1 },
+      { room_index: 7, guest_name: 'Bob' },
+    ]);
+  });
+
+  it('keeps extra keys untouched', () => {
     const raw = '[{"room_index":1,"guest_name":"Alice","note":"late arrival"}]';
 
     expect(parseRoomGuests(raw)).toEqual([
@@ -581,8 +607,10 @@ describe('parseRoomGuests', () => {
   it('rejects a non-array', () => bad('{"room_index":1,"guest_name":"Alice"}'));
   it('rejects an empty array', () => bad('[]'));
   it('rejects a non-object element', () => bad('["Alice"]'));
-  it('rejects a missing room_index', () => bad('[{"guest_name":"Alice"}]'));
   it('rejects a missing guest_name', () => bad('[{"room_index":1}]'));
+  // The shape the a2a caller actually sent (2026-10-19): {name, phone} — no
+  // guest_name at all. It must be rejected rather than silently renamed.
+  it('rejects the {name, phone} shape', () => bad('[{"name":"Alice","phone":"13800138000"}]'));
   it('rejects a blank guest_name', () => bad('[{"room_index":1,"guest_name":"  "}]'));
   it('rejects a string room_index', () => bad('[{"room_index":"1","guest_name":"Alice"}]'));
   it('rejects a non-integer room_index', () => bad('[{"room_index":1.5,"guest_name":"Alice"}]'));
