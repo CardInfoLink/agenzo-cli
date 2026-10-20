@@ -60,6 +60,10 @@ export function registerChargeCardCommand(parent: Command, deps: ChargeCardDeps)
     .option('--member-id <id>', 'End-user attribution: restrict card selection to this member')
     .option('--description <text>', 'Optional charge description')
     .option(
+      '--provider-id <id>',
+      'Acquiring provider this standalone charge is settled under; forwarded to the request body as provider_id (optional). A bare-card charge is not tied to a platform merchant order, so use one of your own declared-and-configured ids; omit it to settle on your default store.',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header (required; not auto-generated)',
     );
@@ -140,6 +144,15 @@ export function registerChargeCardCommand(parent: Command, deps: ChargeCardDeps)
     }
     if (opts.description) {
       body.description = opts.description as string;
+    }
+    // 承接供应商（收单门店路由）。裸卡独立支付不挂平台订单，门店就取**本笔**声明值。判据是
+    // **这个 flag 有没有出现**（present 判断），不是真值判断：`""` / `"   "` 属于「已声明但无效」，
+    // 必须原样上送，由平台以 409 PROVIDER_NOT_CONFIGURED fail-closed；若在这里折叠成「没给」，
+    // 这笔款会被悄悄落到默认门店。取值不 trim、不折叠大小写、不校验格式——合法性的唯一判据是
+    // 平台的映射表。与上面 --member-id / --description 的真值判断不同是刻意的，不要「顺手统一」。
+    const providerId = opts.providerId as string | undefined;
+    if (providerId !== undefined) {
+      body.provider_id = providerId;
     }
 
     const extraHeaders: Record<string, string> = {

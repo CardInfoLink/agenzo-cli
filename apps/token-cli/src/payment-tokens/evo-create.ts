@@ -129,6 +129,10 @@ export function registerEvoCreateCommand(
       'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
     )
     .option(
+      '--provider-id <id>',
+      'Acquiring provider this payment is settled under; forwarded to the request body as provider_id (optional). Omit it to settle on your default store. A value that has not been configured for you is rejected with PROVIDER_NOT_CONFIGURED (409).',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     );
@@ -200,6 +204,12 @@ export function registerEvoCreateCommand(
     // (distinct from the generic `payment-tokens create --external-tx-id`,
     // which maps to `external_tx_id`).
     const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
+    // 承接供应商（收单门店路由）。「没声明」与「声明了无效值」是两件事，判据是**这个 flag 有没有
+    // 出现**（present 判断），不是真值判断：`""` / `"   "` 属于「已声明但无效」，必须原样上送，
+    // 由平台以 409 PROVIDER_NOT_CONFIGURED fail-closed。若在这里折叠成 undefined，这笔款会被悄悄
+    // 落到默认门店。取值不 trim、不折叠大小写、不校验格式——合法性的唯一判据是平台的映射表。
+    // 与上面 --member / --external-transaction-id 的写法不同是刻意的，不要「顺手统一」。
+    const providerId = opts.providerId as string | undefined;
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
@@ -223,6 +233,7 @@ export function registerEvoCreateCommand(
       ...(currency ? { currency } : {}),
       ...(member ? { member_id: member } : {}),
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
+      ...(providerId !== undefined ? { provider_id: providerId } : {}),
     };
 
     // Exactly one POST /payment-tokens/create; `--idempotency-key` forwarded

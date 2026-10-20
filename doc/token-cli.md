@@ -325,6 +325,29 @@ agenzo-token-cli payment-tokens visa-draw <authorization_ptk_id> --api-key <key>
   --order-amount-cents 2500 --dynamic-data-type DAVV --idempotency-key idem_draw_davv_1
 ```
 
+### Acquiring-store routing by provider (`--provider-id`)
+
+Declares which **acquiring provider** this payment is settled under, which decides the acquiring
+store the charge lands on. Declared **once**, when the token is minted — every later charge on that
+token reads the store from the token record.
+
+| Flag | Maps to | Notes |
+|---|---|---|
+| `--provider-id <id>` | `provider_id` (top level) | Optional, ≤128 chars. Forwarded **verbatim**: no trimming, no case folding, no local enum check. Omit it and the payment settles on your default store |
+
+**Which commands accept it.** `unionpay-create`, `visa-create` and `evo-create` (and, on the capture
+plane, `agenzo-payment-cli payments capture` as a *restatement* plus `payments charge-card` for bare
+cards — see [payment-cli.md](payment-cli.md)). `visa-draw` does **not** accept it: a credential drawn
+under an existing authorization inherits the value declared on the authorization token.
+
+**Where the value comes from.** For a payment tied to a platform merchant order, it follows the order
+id prefix — `hho_` → `redaug` (hotel), `ffo_` → `flink` (flight), `rio_` → `elife` (ride), and a `pg_`
+trip-aggregate batch → `platform`. For a payment not tied to a platform order, use an id you declared
+yourself and the platform has configured for you. An id with no configured mapping is rejected with
+`PROVIDER_NOT_CONFIGURED` (409) — including an empty value, which counts as *declared but invalid*,
+not as omitted. A value that contradicts the order's own acquiring provider is rejected with
+`PROVIDER_MISMATCH` (409).
+
 ### get / list / revoke
 
 - `get` masks VCN PAN and CVC by default; `--reveal` prints them in full — only use it when a payment flow actually needs the credential.

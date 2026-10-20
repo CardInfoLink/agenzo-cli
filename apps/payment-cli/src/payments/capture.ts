@@ -83,6 +83,10 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
       'Cardholder phone in E.164 (e.g. +14155551234). Required by FIDOPage when --authenticate is set.',
     )
     .option(
+      '--provider-id <id>',
+      "Restate the acquiring provider declared on the token, for consistency checking only (optional). When given it MUST equal the token's own provider_id, otherwise the charge is rejected with PROVIDER_MISMATCH (409). It never rewrites the token and cannot move a token to another store; omit it to use the token's declared value.",
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header (required; not auto-generated)',
     );
@@ -160,6 +164,15 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     }
     if (opts.cardholderPhone) {
       body.cardholder_phone = opts.cardholderPhone as string;
+    }
+    // 承接供应商的**重述**：门店始终来自令牌文档，这里给的值只参与一致性校验（不一致 → 平台 409
+    // PROVIDER_MISMATCH），永不改写令牌、也搬不动门店。判据是**这个 flag 有没有出现**（present
+    // 判断），不是真值判断：`""` / `"   "` 属于「已声明但无效」，必须原样上送由平台 fail-closed；
+    // 折叠成「没给」会让一次矛盾的重述被悄悄当成「按令牌执行」而漏过校验。取值不 trim、不折叠
+    // 大小写、不校验格式。与上面 --member 的写法不同是刻意的，不要「顺手统一」。
+    const providerId = opts.providerId as string | undefined;
+    if (providerId !== undefined) {
+      body.provider_id = providerId;
     }
 
     const extraHeaders: Record<string, string> = {

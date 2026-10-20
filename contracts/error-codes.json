@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "total_members": 71,
-  "total_unique_codes": 71,
+  "total_members": 73,
+  "total_unique_codes": 73,
   "members": [
     {
       "name": "ACCESS_DENIED",
@@ -316,6 +316,18 @@
       "default_message": "The price_amount does not match the quoted price. Please use the amount from the quote response."
     },
     {
+      "name": "PROVIDER_MISMATCH",
+      "code": "1512",
+      "http_status": 409,
+      "default_message": "The declared provider_id does not match this order's acquiring provider."
+    },
+    {
+      "name": "PROVIDER_NOT_CONFIGURED",
+      "code": "1511",
+      "http_status": 409,
+      "default_message": "No acquiring store is configured for this provider_id."
+    },
+    {
       "name": "QUOTE_EXPIRED",
       "code": "1902",
       "http_status": 410,
@@ -457,6 +469,8 @@
     "1508",
     "1509",
     "1510",
+    "1511",
+    "1512",
     "1514",
     "1515",
     "1601",
