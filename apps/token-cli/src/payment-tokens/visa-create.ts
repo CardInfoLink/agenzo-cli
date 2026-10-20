@@ -210,6 +210,10 @@ export function registerVisaCreateCommand(
       'Order id to bind this token to; forwarded to the request body as external_transaction_id (optional)',
     )
     .option(
+      '--provider-id <id>',
+      'Acquiring provider this payment is settled under; forwarded to the request body as provider_id (optional). Omit it to settle on your default store. A value that has not been configured for you is rejected with PROVIDER_NOT_CONFIGURED (409).',
+    )
+    .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     )
@@ -287,6 +291,13 @@ export function registerVisaCreateCommand(
     // which maps to `external_tx_id`). Sits at the TOP level of the body — the
     // nested `visa.merchant_order_id` is a separate, Visa-specific field.
     const externalTransactionId = (opts.externalTransactionId as string | undefined)?.trim() || undefined;
+    // 承接供应商（收单门店路由）。同 external_transaction_id，落在 body **顶层**，不进嵌套的
+    // `visa: { … }` 子对象。「没声明」与「声明了无效值」是两件事，判据是**这个 flag 有没有出现**
+    // （present 判断），不是真值判断：`""` / `"   "` 属于「已声明但无效」，必须原样上送，由平台以
+    // 409 PROVIDER_NOT_CONFIGURED fail-closed；在这里折叠成 undefined 会让这笔款被悄悄落到默认
+    // 门店。取值不 trim、不折叠大小写、不校验格式——合法性的唯一判据是平台的映射表。与上面
+    // --member / --external-transaction-id 的写法不同是刻意的，不要「顺手统一」。
+    const providerId = opts.providerId as string | undefined;
 
     // 授权额度 / 订单明细（均为可选；不传时请求体与之前逐字节一致）。参数先于任何交互提示
     // 校验，坏参数不会走到发请求。
@@ -345,6 +356,7 @@ export function registerVisaCreateCommand(
       ...(currency ? { currency } : {}),
       ...(member ? { member_id: member } : {}),
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
+      ...(providerId !== undefined ? { provider_id: providerId } : {}),
       ...(opts.notify === false ? { notify_cardholder: false } : {}),
       visa: {
         order_amount_cents: orderAmountCents,

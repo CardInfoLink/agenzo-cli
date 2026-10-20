@@ -38,10 +38,19 @@ agenzo-payment-cli payments capture \
 | `--payment-token-id` | yes | The payment token to charge (`ptk_...`). Prompted if omitted; a hard error under `--yes`. |
 | `--payment-brand` | no | Override only — `evo` or `unionpay` (case-insensitive). Omitted from the request body by default so the platform auto-detects the brand from the token record. Any other value is rejected locally as `PARAM_INVALID`. |
 | `--description` | no | Free-text description; sent in the body only when provided. |
+| `--provider-id` | no | **Restatement only** of the acquiring provider declared when the token was minted; sent in the body as `provider_id` when provided. It is checked for consistency and never rewrites the token: a value that differs from the token's own `provider_id` is rejected with `PROVIDER_MISMATCH` (409), and no value can move a token to another acquiring store. Omit it to use the token's declared value. Forwarded verbatim (no trimming, no case folding); an empty value counts as *declared but invalid* and is rejected with `PROVIDER_NOT_CONFIGURED` (409), not treated as omitted. |
 | `--idempotency-key` | yes | Unique value per logical charge attempt; forwarded verbatim as the `Idempotency-Key` header (never in the body) and **never auto-generated**. Prompted if omitted; a hard error under `--yes`. Reuse the same value to safely retry the same charge. |
 
 Global flags (`--yes`, `--format json|table`, `--verbose`) are defined on the program root and
 apply to every verb. Amount, currency, and fee are **not** flags — see the prerequisite above.
+
+**`--provider-id` elsewhere on this plane.** `payments charge-card` also accepts it, but there it is a
+*declaration*, not a restatement: a bare-card charge has no token to inherit from, so the value decides
+this charge's acquiring store (omit it to settle on your default store). `payments refund` does **not**
+accept it — a refund always follows the store of the original charge, and the field is ignored if sent.
+The two 3DS follow-ups (`payments capture-resume` / `payments charge-card-resume`) do not accept it
+either; they read the store from the pending charge record. See
+[token-cli.md](token-cli.md) for where the value comes from and how it is declared at mint time.
 
 **Auto-detection**: The platform reads `payment_brand` from the payment token document.
 You do NOT need to specify `--payment-brand` — the CLI omits it by default and the server
