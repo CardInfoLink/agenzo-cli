@@ -46,6 +46,9 @@ export interface VerifyFlightResponse {
   price_changed: boolean;
   /** The complete itinerary being priced — every leg, not just the last one relayed. */
   journeys?: unknown[];
+  /** Task 4: the selected offer's price when it was picked; present when the request carried
+   * --previous-total-price and the supplier answered 1002/1950 (a re-search refreshed the fare). */
+  previous_total_price?: number;
   [key: string]: unknown;
 }
 
