@@ -648,6 +648,138 @@ export const rideTripStatusSchema: VerbSchema = {
   },
 };
 
+// ── ride-elife callback-* (status-event forwarding to the caller's endpoint) ──
+
+const RIDE_ORDER_ID_FLAG: FlagSchema = {
+  type: 'string',
+  required: true,
+  description: 'The numeric ride_id returned by book (NOT the rio_... order_id)',
+};
+const CALLBACK_IDEMPOTENCY_FLAG: FlagSchema = {
+  type: 'string',
+  required: true,
+  description: 'Unique key (1-128 chars [A-Za-z0-9_-]) forwarded verbatim as the Idempotency-Key header; never auto-generated',
+};
+const CALLBACK_SUBSCRIPTION_FLAGS: Record<string, FlagSchema> = {
+  'callback-url': { type: 'string', required: true, description: 'https URL that receives status events; internal addresses are rejected by the platform' },
+  adapter: { type: 'string', required: false, default: 'techtanium_v1', description: 'Outbound event shape' },
+  'signature-mode': { type: 'string', required: false, default: 'off', description: 'off / optional / required' },
+  'callback-api-key': { type: 'string', required: false, description: 'API key sent to your endpoint; omit to keep the stored one (never echoed back)' },
+  'rotate-secret': { type: 'bool', required: false, default: false, description: 'Issue a new signing secret; the old one stops verifying' },
+  'idempotency-key': CALLBACK_IDEMPOTENCY_FLAG,
+};
+const CALLBACK_SUBSCRIPTION_RESPONSE = {
+  callback_url: { type: 'string', description: 'Registered destination' },
+  adapter: { type: 'string', description: 'Outbound event shape' },
+  signature_mode: { type: 'string', description: 'off / optional / required' },
+  status: { type: 'string', description: 'Registration status' },
+  callback_secret: { type: 'string', description: 'Signing secret — present ONLY in the set response that issued it; store it, it cannot be read back' },
+};
+const CALLBACK_ERRORS = {
+  RIDE_NOT_FOUND: 'The ride is not yours or does not exist; check the ride_id from book/list-orders.',
+  PARAM_INVALID: 'Fix the flag named in the message (https URL, signature-mode, ranges) and retry.',
+  PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+};
+
+/** `ride-elife callback-set` schema. Write op: per-ride callback destination. */
+export const rideCallbackSetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'callback-set',
+  description: "Register (or update) where one ride's status events are forwarded; takes priority over the default",
+  flags: { 'order-id': RIDE_ORDER_ID_FLAG, ...CALLBACK_SUBSCRIPTION_FLAGS },
+  response: { ride_id: { type: 'string|int', description: 'Ride id' }, order_id: { type: 'string', description: 'rio_... order id' }, ...CALLBACK_SUBSCRIPTION_RESPONSE },
+  example: {
+    command: 'agenzo-merchant-cli ride-elife callback-set --order-id 4112961 --callback-url https://example.com/ride-events --idempotency-key cb-1',
+    output_summary: 'Returns the registration; the first registration also returns callback_secret once.',
+  },
+  error_recovery: CALLBACK_ERRORS,
+};
+
+/** `ride-elife callback-get` schema. Read-only. */
+export const rideCallbackGetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'callback-get',
+  description: "Show one ride's callback registration (the signing secret is never returned)",
+  flags: { 'order-id': RIDE_ORDER_ID_FLAG },
+  response: { ride_id: { type: 'string|int', description: 'Ride id' }, order_id: { type: 'string', description: 'rio_... order id' }, ...CALLBACK_SUBSCRIPTION_RESPONSE },
+  example: { command: 'agenzo-merchant-cli ride-elife callback-get --order-id 4112961', output_summary: 'Returns the registration without the secret.' },
+  error_recovery: { RIDE_NOT_FOUND: CALLBACK_ERRORS.RIDE_NOT_FOUND },
+};
+
+/** `ride-elife callback-default-set` schema. Write op: developer-wide fallback. */
+export const rideCallbackDefaultSetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'callback-default-set',
+  description: 'Register (or update) the developer-wide fallback used by rides that have no callback of their own',
+  flags: CALLBACK_SUBSCRIPTION_FLAGS,
+  response: { developer_id: { type: 'string', description: 'Owner of the default' }, ...CALLBACK_SUBSCRIPTION_RESPONSE },
+  example: {
+    command: 'agenzo-merchant-cli ride-elife callback-default-set --callback-url https://example.com/ride-events --idempotency-key cbd-1',
+    output_summary: 'Configure once so events for rides booked later are never dropped.',
+  },
+  error_recovery: { PARAM_INVALID: CALLBACK_ERRORS.PARAM_INVALID, PARAM_IDEMPOTENCY_KEY_REQUIRED: CALLBACK_ERRORS.PARAM_IDEMPOTENCY_KEY_REQUIRED },
+};
+
+/** `ride-elife callback-default-get` schema. Read-only. */
+export const rideCallbackDefaultGetSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'callback-default-get',
+  description: 'Show the developer-wide fallback callback (the signing secret is never returned)',
+  flags: {},
+  response: { developer_id: { type: 'string', description: 'Owner of the default' }, ...CALLBACK_SUBSCRIPTION_RESPONSE },
+  example: { command: 'agenzo-merchant-cli ride-elife callback-default-get', output_summary: 'Returns the default without the secret.' },
+};
+
+/** `ride-elife callback-deliveries` schema. Read-only. */
+export const rideCallbackDeliveriesSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'callback-deliveries',
+  description: "List one ride's callback forwarding records (pending / delivered / dead)",
+  flags: {
+    'order-id': RIDE_ORDER_ID_FLAG,
+    limit: { type: 'int', required: false, default: 50, description: 'Page size 1-100' },
+    offset: { type: 'int', required: false, default: 0, description: 'Records to skip' },
+  },
+  response: {
+    ride_id: { type: 'string|int', description: 'Ride id' },
+    limit: { type: 'int', description: 'Page size used' },
+    offset: { type: 'int', description: 'Offset used' },
+    count: { type: 'int', description: 'Records in this page' },
+    deliveries: { type: 'array', description: 'Forwarding records: event_id, status, attempts, last_error, timestamps' },
+  },
+  example: { command: 'agenzo-merchant-cli ride-elife callback-deliveries --order-id 4112961', output_summary: 'Shows what was forwarded and where it stalled.' },
+  error_recovery: { RIDE_NOT_FOUND: CALLBACK_ERRORS.RIDE_NOT_FOUND, PARAM_INVALID: CALLBACK_ERRORS.PARAM_INVALID },
+};
+
+/** `ride-elife callback-replay` schema. Write op: requeue dead/failed records. */
+export const rideCallbackReplaySchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: NOUN,
+  verb: 'callback-replay',
+  description: "Requeue one ride's dead (or failed) callback records; delivered records are never re-sent",
+  flags: {
+    'order-id': RIDE_ORDER_ID_FLAG,
+    'event-id': { type: 'string', required: false, description: 'Requeue only this record (default: all dead records)' },
+    'include-failed': { type: 'bool', required: false, default: false, description: 'Also requeue pending records that already failed' },
+    'reset-attempts': { type: 'bool', required: false, default: false, description: 'Reset the retry counter of requeued records' },
+    'idempotency-key': CALLBACK_IDEMPOTENCY_FLAG,
+  },
+  response: {
+    ride_id: { type: 'string', description: 'Ride id' },
+    requeued: { type: 'int', description: 'Number of records set back to pending' },
+  },
+  example: {
+    command: 'agenzo-merchant-cli ride-elife callback-replay --order-id 4112961 --idempotency-key rp-1',
+    output_summary: 'Requeues dead records; the delivery worker re-sends them on its next pass.',
+  },
+  error_recovery: CALLBACK_ERRORS,
+};
+
 /** `ride-elife list-orders` schema (§4.4.1.3 list-orders schema). Read-only. */
 export const listOrdersSchema: VerbSchema = {
   cli: CLI_NAME,
@@ -1706,6 +1838,41 @@ export const ordersPayBatchSchema: VerbSchema = {
     CURRENCY_MISMATCH: 'The batch mixes currencies — orders in one pay-batch must share a single currency. Split by currency and settle each group separately.',
     TOKEN_ORDER_MISMATCH: 'The token external_transaction_id is not bound to this payment_group. Mint a token for the aggregate total bound to THIS payment_group_id and retry; no funds moved.',
     AUTHENTICATION_REQUIRED: 'EVO requires cardholder 3DS: open three_ds_url, finish authentication, then replay pay-batch with the SAME idempotency-key (or use --watch to poll automatically).',
+  },
+};
+
+/** `orders get-payment-group` schema. Read-only status of one pay-batch settlement. */
+export const ordersGetPaymentGroupSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: ORDERS_NOUN,
+  verb: 'get-payment-group',
+  description: 'Get the status of an aggregate settlement created by `orders pay-batch` (read-only; never re-sends the payment)',
+  flags: {
+    'payment-group-id': { type: 'string', required: true, description: 'payment_group_id returned by `orders pay-batch` (1-64 chars)' },
+  },
+  response: {
+    payment_group_id: { type: 'string', description: 'The payment group' },
+    status: { type: 'string', description: 'settled | partially_settled | failed | uncertain' },
+    currency: { type: 'string', description: 'ISO 4217 currency of the aggregate settlement' },
+    total_amount: { type: 'float', description: 'Aggregate total in DECIMAL units' },
+    per_order: {
+      type: 'array',
+      description: 'Per-order outcome, same shape as pay-batch',
+      items: {
+        order_id: { type: 'string', description: 'Order id' },
+        domain: { type: 'string', description: 'hotel | flight | ride' },
+        status: { type: 'string', description: 'confirmed | refunded | failed' },
+        amount: { type: 'float', description: 'Authoritative order amount (decimal)' },
+        refunded_amount: { type: 'float', description: 'Amount refunded when upstream confirmation failed' },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-merchant-cli orders get-payment-group --payment-group-id pg_...',
+    output_summary: 'Returns the batch status and per-order results; use it instead of replaying pay-batch to check progress.',
+  },
+  error_recovery: {
+    PARAM_INVALID: 'Pass the payment_group_id exactly as pay-batch returned it (1-64 chars).',
   },
 };
 

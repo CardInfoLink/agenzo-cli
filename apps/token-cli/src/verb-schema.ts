@@ -228,6 +228,36 @@ export const travellersListSchema: VerbSchema = {
   },
 };
 
+/** `travellers delete` schema. Write op: removes one saved traveller of the member. */
+export const travellersDeleteSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: TRAVELLERS_NOUN,
+  verb: 'delete',
+  description: 'Delete one of the member\'s saved travellers',
+  flags: {
+    traveller_token: { type: 'string', required: 'conditional', description: 'Saved traveller token — positional, or pass --id for flag-only callers' },
+    id: { type: 'string', required: 'conditional', description: 'Saved traveller token (alternative to the positional traveller_token, for programmatic callers)' },
+    member: { type: 'string', required: true, source: 'session', description: 'Member who owns the saved traveller' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Idempotency key forwarded verbatim as the Idempotency-Key header',
+    },
+  },
+  response: {
+    deleted: { type: 'boolean', description: 'true when the traveller was deleted' },
+    traveller_token: { type: 'string', description: 'The deleted saved traveller token' },
+  },
+  example: {
+    command: 'agenzo-token-cli travellers delete tvp_... --member m_1 --idempotency-key del-123',
+    output_summary: 'Deletes the saved traveller. Only use when the user explicitly asks to remove it.',
+  },
+  error_recovery: {
+    INVALID_REQUEST: 'The token is not one of this member\'s saved travellers (or member is missing); run travellers list to get a valid token.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+  },
+};
+
 /** `payment-methods list` schema. Read-only. */
 export const pmListSchema: VerbSchema = {
   cli: CLI_NAME,

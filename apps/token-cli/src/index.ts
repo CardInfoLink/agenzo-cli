@@ -38,6 +38,7 @@ import { registerVisaRegisterCommand } from './visa/register.js';
 
 // travellers commands
 import { registerTravellersListCommand } from './travellers/list.js';
+import { registerTravellersDeleteCommand } from './travellers/delete.js';
 
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
@@ -116,6 +117,7 @@ async function main() {
   // travellers: 常用旅客（只出 token 和脱敏值；下单时把 traveller_token 当乘客传给 merchant create-order）。
   const travellersCmd = program.command('travellers').description('Saved travellers');
   registerTravellersListCommand(travellersCmd, deps);
+  registerTravellersDeleteCommand(travellersCmd, deps);
 
   // Parse and execute
   await program.parseAsync(process.argv);
