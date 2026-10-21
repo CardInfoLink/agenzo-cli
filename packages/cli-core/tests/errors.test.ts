@@ -95,6 +95,18 @@ describe('error-catalog toErrorEnvelope mapping (§8.4)', () => {
     expect(err.code).toBe('VEHICLE_UNAVAILABLE');
   });
 
+  it('UT-ERR-12d: D3 string code wins over HTTP status (OFFER_UNAVAILABLE over 404)', () => {
+    // 机票重搜找不到同一班：平台抛 1955(404) + error_code=OFFER_UNAVAILABLE。
+    // 没有本映射时它会被 404 兜底成 RESOURCE_NOT_FOUND，Base 的 verify
+    // error_recovery（回列表重选）永远命不中。
+    const err = CliError.fromApi(
+      { success: false, errorCode: 1955, errorMessage: 'm', statusCode: 404, code: 'OFFER_UNAVAILABLE' },
+      { auth: 'api-key' },
+    );
+    expect(err.code).toBe('OFFER_UNAVAILABLE');
+    expect(err.statusCode).toBe(404);
+  });
+
   it('UT-ERR-12c: D3 routes merchant codes verbatim (BILLING_MODE_MISMATCH, PAYMENT_ORDER_MISMATCH)', () => {
     expect(CliError.fromApi({ success: false, errorCode: 0, errorMessage: 'm', statusCode: 422, code: 'BILLING_MODE_MISMATCH' }).code).toBe('BILLING_MODE_MISMATCH');
     expect(CliError.fromApi({ success: false, errorCode: 0, errorMessage: 'm', statusCode: 422, code: 'PAYMENT_ORDER_MISMATCH' }).code).toBe('PAYMENT_ORDER_MISMATCH');

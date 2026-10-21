@@ -108,6 +108,28 @@ describe('flight-flink: verify', () => {
     const p = parseJsonOutput(out.text()) as any;
     expect(p.product_token).toBe('pt_v1');
   });
+
+  it('forwards the task-4 refresh flags when given', async () => {
+    const { prog, post } = setupWithPost(registerVerifyCommand, { '/flight/verify': VERIFY });
+    await prog.parseAsync(['node', 'test', 'flight-flink', 'verify', '--api-key', 'k', '--format', 'json',
+      '--product-token', 'pt_1', '--previous-total-price', '1200', '--cabin-class', 'business',
+      '--adult-num', '2', '--child-num', '1', '--infant-num', '0']);
+    expect(post).toHaveBeenCalledWith('/flight/verify', expect.anything(), expect.objectContaining({
+      product_token: 'pt_1',
+      previous_total_price: 1200,
+      cabin_class: 'business',
+      adult_num: 2,
+      child_num: 1,
+      infant_num: 0,
+    }));
+  });
+
+  it('omits the refresh flags entirely when not given (backward compatible)', async () => {
+    const { prog, post } = setupWithPost(registerVerifyCommand, { '/flight/verify': VERIFY });
+    await prog.parseAsync(['node', 'test', 'flight-flink', 'verify', '--api-key', 'k', '--format', 'json', '--product-token', 'pt_1']);
+    const body = (post.mock.calls[0] as unknown[])[2];
+    expect(body).toEqual({ product_token: 'pt_1' });
+  });
 });
 
 describe('flight-flink: create-order', () => {

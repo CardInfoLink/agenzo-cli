@@ -214,6 +214,7 @@ const STABLE_MESSAGE: Partial<Record<ErrorCode, string>> = {
     "This room has a booking condition that your request doesn't meet. Please check the room's booking rules and adjust your request.",
   PAYORDER_FAILED: 'The hotel order was created, but payment failed. Retry payment for the existing order.',
   PAYORDER_FAILED_AFTER_PAYMENT: 'Payment was received, but hotel confirmation failed. Contact support for reconciliation.',
+  OFFER_UNAVAILABLE: 'The selected flight is no longer available. Please search again and pick another flight.',
   NOT_IMPLEMENTED: 'This operation is not implemented yet.',
 };
 

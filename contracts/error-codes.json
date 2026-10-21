@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "total_members": 73,
-  "total_unique_codes": 73,
+  "total_members": 74,
+  "total_unique_codes": 74,
   "members": [
     {
       "name": "ACCESS_DENIED",
@@ -248,6 +248,12 @@
       "code": "1920",
       "http_status": 409,
       "default_message": "No rooms are available for the selected hotel and dates."
+    },
+    {
+      "name": "OFFER_UNAVAILABLE",
+      "code": "1955",
+      "http_status": 404,
+      "default_message": "The selected flight is no longer available. Please search again and pick another flight."
     },
     {
       "name": "OPERATION_NOT_FOUND",
@@ -515,6 +521,7 @@
     "1952",
     "1953",
     "1954",
+    "1955",
     "1999"
   ],
   "duplicate_codes": {}

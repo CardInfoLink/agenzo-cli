@@ -1806,13 +1806,21 @@ export const flightMoreOffersSchema = flightSchema(
 
 export const flightVerifySchema = flightSchema(
   'verify',
-  'Pre-booking price verification. Returns the authoritative product_token and a price_changed flag; pass the returned token to create-order.',
-  { 'product-token': { type: 'string', required: true, description: 'Opaque token from search.' } },
+  'Pre-booking price verification. Returns the authoritative product_token and a price_changed flag; pass the returned token to create-order. With --previous-total-price set, supplier 1002/1950 no longer dead-ends: the platform re-searches the SAME flight from the token and returns the refreshed fare; if that flight can no longer be found it fails with OFFER_UNAVAILABLE (pick another flight).',
+  {
+    'product-token': { type: 'string', required: true, description: 'Opaque token from search.' },
+    'previous-total-price': { type: 'int', required: false, description: 'Total price of the selected offer; enables the one-shot re-search refresh on supplier 1002/1950. Omit to keep the legacy behavior (error surfaces as-is).' },
+    'cabin-class': { type: 'string', required: false, description: 'Cabin class to re-search with when refreshing (economy | premium_economy | business | first). Omitted falls back to economy.' },
+    'adult-num': { type: 'int', required: false, description: 'Adults to re-search with when refreshing (1-9).' },
+    'child-num': { type: 'int', required: false, description: 'Children to re-search with when refreshing (0-9).' },
+    'infant-num': { type: 'int', required: false, description: 'Infants to re-search with when refreshing (0-9).' },
+  },
   {
     product_token: { type: 'string', description: 'Authoritative token to pass to create-order.' },
     total_price: { type: 'int', description: 'Verified total price (integer).' },
     currency: { type: 'string', description: 'Currency code.' },
     price_changed: { type: 'bool', description: 'True if the price changed since search; re-confirm with the user.' },
+    previous_total_price: { type: 'int', description: 'The selected offer’s price at pick time; present when the request carried previous-total-price. If it differs from total_price the fare was refreshed by a re-search (show the user the old → new price).' },
     journeys: { type: 'array', description: 'The COMPLETE itinerary being priced — every leg, not just the last one relayed. Use it to show the full trip on a confirmation screen.' },
   },
   { command: 'agenzo-merchant-cli flight-flink verify --product-token pt_...', output_summary: 'Returns the authoritative product_token + price_changed.' },
