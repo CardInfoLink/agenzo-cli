@@ -30,6 +30,7 @@ import type { Command } from 'commander';
 const CLI_NAME = 'agenzo-token-cli';
 export const PAYMENT_METHODS_NOUN = 'payment-methods';
 export const PAYMENT_TOKENS_NOUN = 'payment-tokens';
+export const TRAVELLERS_NOUN = 'travellers';
 
 // ============================================================
 // Schema shape (kept identical to merchant-cli's VerbSchema)
@@ -192,6 +193,38 @@ export const pmAddSchema: VerbSchema = {
   error_recovery: {
     PARAM_INVALID:
       'Fix the offending flag (--payment-brand must be "visa", "mastercard", "unionpay", or omitted), then retry.',
+  },
+};
+
+/** `travellers list` schema. Read-only. Only tokens + masked values ever come back. */
+export const travellersListSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: TRAVELLERS_NOUN,
+  verb: 'list',
+  description: 'List the member\'s saved travellers (token + masked values only)',
+  flags: {
+    member: { type: 'string', required: false, source: 'session', description: 'Member whose saved travellers to list' },
+  },
+  response: {
+    travellers: {
+      type: 'array',
+      description: 'Saved travellers. Pass traveller_token as a passenger to flight-flink create-order; the ID number is never returned.',
+      items: {
+        traveller_token: { type: 'string', description: 'Saved traveller token (tvp_...)' },
+        surname: { type: 'string', description: 'Family name (upper case)' },
+        name: { type: 'string', description: 'Given name (upper case)' },
+        gender: { type: 'string', description: '1=male / 2=female' },
+        birthday: { type: 'string', description: 'YYYY-MM-DD' },
+        nationality: { type: 'string', description: 'Nationality country code' },
+        id_type: { type: 'string', description: 'ID document type code' },
+        id_number_masked: { type: 'string', description: 'Masked ID number, e.g. E1*****78' },
+        expiration: { type: 'string', description: 'ID expiry, YYYY-MM-DD' },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-token-cli travellers list --member m_1',
+    output_summary: 'Returns travellers[]; empty when the member has none saved.',
   },
 };
 

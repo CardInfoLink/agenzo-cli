@@ -147,6 +147,32 @@ describe('flight-flink: create-order', () => {
   });
 });
 
+describe('flight-flink: create-order saved travellers', () => {
+  const base = ['node', 'test', 'flight-flink', 'create-order', '--api-key', 'k', '--format', 'json', '--yes',
+    '--product-token', 'pt_v1', '--total-amount', '1200', '--currency', 'CNY',
+    '--contact-name', 'Z', '--contact-region', '86', '--contact-phone', '138', '--contact-email', 'a@b.com',
+    '--passengers', '[{"traveller_token":"tvp_abc","type":"adult"}]', '--idempotency-key', 'k1'];
+
+  it('forwards a traveller_token passenger verbatim and save_travellers when asked', async () => {
+    const { prog, post } = setupWithPost(registerCreateOrderCommand, { '/flight/create-order': CREATE });
+    const out = captureStdout();
+    await prog.parseAsync([...base, '--save-travellers']);
+    out.spy.mockRestore();
+    expect(post).toHaveBeenCalledWith('/flight/create-order', expect.anything(), expect.objectContaining({
+      passengers: [{ traveller_token: 'tvp_abc', type: 'adult' }],
+      save_travellers: true,
+    }), expect.anything());
+  });
+
+  it('omits save_travellers entirely when the flag is not given (backward compatible)', async () => {
+    const { prog, post } = setupWithPost(registerCreateOrderCommand, { '/flight/create-order': CREATE });
+    const out = captureStdout();
+    await prog.parseAsync(base);
+    out.spy.mockRestore();
+    expect(post.mock.calls[0][2]).not.toHaveProperty('save_travellers');
+  });
+});
+
 describe('flight-flink: pay-order', () => {
   it('returns pay_status', async () => {
     const prog = setup(registerPayOrderCommand, { '/pay': PAY });
