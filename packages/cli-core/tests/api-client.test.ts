@@ -621,3 +621,98 @@ describe('ApiClient deadline propagation', () => {
     expect(DEADLINE_HEADER).toBe('x-deadline-ms');
   });
 });
+
+
+/**
+ * baggage 转发 — orchestrator 经 BAGGAGE 环境变量把业务旅程关联键 `flow_id` 传进来，
+ * CLI 必须转发为请求头，否则链路在 CLI 这一跳断开，platform 侧按 flow_id 查不到锁房 /
+ * 扣款这些调用。与 TRACEPARENT 同一机制。
+ *
+ * `flow_id` 带 `flw_` 前缀（与 hho_ / ffo_ / ptk_ 同款约定），既便于在日志里一眼辨识，
+ * 也作为一道强制的来源校验：缺前缀的值不转发。
+ */
+describe('ApiClient baggage forwarding', () => {
+  const FLOW_ID = 'flw_a3f9c1d84b7e4f2a9c6d0e8b5a2f7c13';
+  const VALID = `agenzo.flow_id=${FLOW_ID}`;
+
+  function mockFetchCapturingHeaders(): { headers: () => Record<string, string> } {
+    const spy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ code: '0', message: 'ok', data: {} }),
+    });
+    vi.stubGlobal('fetch', spy);
+    return {
+      headers: () =>
+        (spy.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>,
+    };
+  }
+
+  afterEach(() => {
+    delete process.env.BAGGAGE;
+  });
+
+  it('forwards a valid BAGGAGE env var as the baggage header', async () => {
+    process.env.BAGGAGE = VALID;
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['baggage']).toBe(VALID);
+    // X-Request-Id 仍是本次 CLI 调用自己的 id，关联头不覆盖它。
+    expect(captured.headers()['X-Request-Id']).toBeTruthy();
+  });
+
+  it('picks our member out of a multi-member baggage', async () => {
+    process.env.BAGGAGE = `userId=alice,${VALID},serverNode=DF28`;
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    // 只重拼我们自己的成员，不原样透传整串：入站 baggage 可达 8192 字节且来自不受信
+    // 上游，无条件转发等于让外部往内部调用链里塞任意键值。
+    expect(captured.headers()['baggage']).toBe(VALID);
+  });
+
+  it('tolerates optional whitespace around the member', async () => {
+    process.env.BAGGAGE = ` agenzo.flow_id = ${FLOW_ID} `;
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['baggage']).toBe(VALID);
+  });
+
+  it('drops member properties after the semicolon', async () => {
+    process.env.BAGGAGE = `${VALID};propagation=none`;
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['baggage']).toBe(VALID);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', ''],
+    ['malformed', 'garbage'],
+    ['a different member only', 'userId=alice'],
+    ['missing the flw_ prefix', 'agenzo.flow_id=a3f9c1d84b7e4f2a9c6d0e8b5a2f7c13'],
+    ['too short', 'agenzo.flow_id=flw_short'],
+    ['containing a space', 'agenzo.flow_id=flw_has%20space'],
+    ['containing a newline', 'agenzo.flow_id=flw_has%0Anewline'],
+  ])('does not send the header when BAGGAGE is %s', async (_label, value) => {
+    if (value === undefined) {
+      delete process.env.BAGGAGE;
+    } else {
+      process.env.BAGGAGE = value;
+    }
+    const captured = mockFetchCapturingHeaders();
+
+    await client.get('/v1/ping', { type: 'none' });
+
+    expect(captured.headers()['baggage']).toBeUndefined();
+  });
+});
