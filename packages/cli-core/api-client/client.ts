@@ -8,6 +8,24 @@ import { getCurrentVersion, isBelow, UPGRADE_COMMAND } from '../version/version.
 const TRACEPARENT_PATTERN = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 
 /**
+ * W3C `baggage` 里的业务旅程关联键 `flow_id`，以及它的合法字符集。
+ *
+ * `flow_id` 是「用户的一次任务」的关联键：一笔订单会横跨十几个 trace（`trace_id` 的
+ * 粒度是一个对话轮次）和两个 A2A session，trace_id 串不起整条链路。本进程只做转发。
+ *
+ * 形状与 py-commons 的 `_FLOW_ID_RE` 保持一致：`flw_` 前缀 + 8~60 个 `[A-Za-z0-9_-]`。
+ * `flw_` 前缀与仓里业务 ID 的既有约定同款（`hho_` / `ffo_` / `rio_` / `ptk_`），让这个值
+ * 在日志里一眼可辨；前缀是强制的，等于多一道来源校验。字符集刻意比 W3C 允许的范围窄
+ * 得多：该值来自环境变量、会被转成请求头并进入下游日志，宽松接受等于把日志注入与头部
+ * 膨胀的风险一起转发下去。校验不过就不发，和 TRACEPARENT 同样处理。
+ *
+ * 两处正则必须同步改——这是跨语言的同一条契约，py-commons 侧收紧而这里没跟上，会变成
+ * 「CLI 发出去的头被下游拒掉」这种只在集成时才暴露的错位。
+ */
+const FLOW_ID_BAGGAGE_KEY = 'agenzo.flow_id';
+const FLOW_ID_PATTERN = /^flw_[A-Za-z0-9_-]{8,60}$/;
+
+/**
  * HTTP 超时默认值（毫秒）。可被构造参数或 AGENZO_CLI_HTTP_TIMEOUT_MS 覆盖。
  *
  * 这个值是跨服务超时阶梯的一层，不能单独调：
@@ -37,6 +55,42 @@ export function httpTimeoutFromEnv(
 
 /** 递减 deadline 的 HTTP 头名（剩余毫秒）。与 py-commons 的 DEADLINE_HEADER 对齐。 */
 export const DEADLINE_HEADER = 'x-deadline-ms';
+
+/** W3C Baggage 的 HTTP 头名。与 py-commons 的 BAGGAGE_HEADER 对齐。 */
+export const BAGGAGE_HEADER = 'baggage';
+
+/**
+ * 从环境变量读上游给的 `flow_id` 并拼成 `baggage` 头值；缺失或不合规时返回 null。
+ *
+ * orchestrator spawn 本进程时经 `BAGGAGE` 注入，与 TRACEPARENT / DEADLINE_MS 同一机制。
+ * 接受的是完整 baggage 头值（可能含其他成员），本函数只挑出 `agenzo.flow_id` 这一个成员
+ * **重新拼**，不原样透传整串：入站 baggage 可达 8192 字节且来自不受信上游，无条件转发
+ * 等于让外部往内部调用链里塞任意键值。
+ */
+export function baggageFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const raw = env.BAGGAGE;
+  if (raw === undefined || raw.trim() === '') return null;
+  for (const member of raw.split(',')) {
+    // `;` 之后是成员属性，与值无关。
+    const pair = member.split(';', 1)[0] ?? '';
+    const eq = pair.indexOf('=');
+    if (eq < 0) continue;
+    if (pair.slice(0, eq).trim() !== FLOW_ID_BAGGAGE_KEY) continue;
+    let value = pair.slice(eq + 1).trim();
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // 畸形百分号编码视同缺失，不把脏值发给下游。
+      return null;
+    }
+    return FLOW_ID_PATTERN.test(value)
+      ? `${FLOW_ID_BAGGAGE_KEY}=${encodeURIComponent(value)}`
+      : null;
+  }
+  return null;
+}
 
 /**
  * 出站前为回程预留的毫秒数：下游返回后本进程还要解析 JSON、渲染输出、写回 stdout。
@@ -182,6 +236,12 @@ export class ApiClient {
     const traceparent = process.env.TRACEPARENT;
     if (traceparent && TRACEPARENT_PATTERN.test(traceparent.trim())) {
       headers['traceparent'] = traceparent.trim();
+    }
+    // 业务旅程关联键 flow_id：与 traceparent 同一机制（环境变量 → 请求头）。
+    // 不转发的话链路在 CLI 这里断开，platform 侧按 flow_id 查不到锁房 / 扣款这些调用。
+    const baggage = baggageFromEnv();
+    if (baggage !== null) {
+      headers[BAGGAGE_HEADER] = baggage;
     }
     if (auth.type === 'bearer') {
       headers['Authorization'] = `Bearer ${auth.token}`;
