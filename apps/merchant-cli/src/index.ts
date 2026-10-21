@@ -23,6 +23,7 @@ import { registerCancelCommand } from './ride-elife/cancel.js';
 import { registerRideUpdateCommand } from './ride-elife/update.js';
 import { registerRideTripStatusCommand } from './ride-elife/trip-status.js';
 import { registerListOrdersCommand } from './ride-elife/list-orders.js';
+import { registerRideCallbackCommands } from './ride-elife/callback.js';
 
 // services commands (CLI-bundled registry, D4)
 import { registerServicesListCommand } from './services/list.js';
@@ -32,6 +33,7 @@ import { registerServiceGetCommand } from './services/get.js';
 import { registerOrdersListCommand } from './orders/list.js';
 import { registerOrdersGetCommand } from './orders/get.js';
 import { registerOrdersPayBatchCommand } from './orders/pay-batch.js';
+import { registerOrdersGetPaymentGroupCommand } from './orders/get-payment-group.js';
 
 // hotel-redaug commands (injection-style register, D6)
 import { registerHotelSearchCommand } from './hotel-redaug/search.js';
@@ -142,6 +144,9 @@ Workflow (typical order):
                   (write; needs --idempotency-key; the fare may change)
      trip-status  (optional) Status + driver location points of ONE leg of a multi-leg ride
      list-orders  (standalone) List the developer's previous ride orders
+     callback-*   (standalone) Status-event forwarding to your own https endpoint:
+                  callback-set/-get (one ride), callback-default-set/-get (fallback for all
+                  rides), callback-deliveries / callback-replay (inspect and re-send)
 
 Key notes:
   • Coordinates are NOT geocoded by the backend — supply --pickup-lat/lng and --dropoff-lat/lng.
@@ -171,6 +176,7 @@ Key notes:
   registerRideUpdateCommand(rideCmd, deps);
   registerRideTripStatusCommand(rideCmd, deps);
   registerListOrdersCommand(rideCmd, deps);
+  registerRideCallbackCommands(rideCmd, deps);
 
   // services command group (capability discovery via platform backend + local fallback).
   // These commands gate backend capabilities against the CLI's own command tree,
@@ -191,6 +197,8 @@ Key notes:
   // 行程聚合支付：orders pay-batch —— `orders__aggregate__pay-batch` 逻辑工具名的物理落点
   // （供 trip-aggregate 的 pay-orders write verb 经 UniversalGateway 调用）。
   registerOrdersPayBatchCommand(ordersCmd, deps);
+  // 查 pay-batch 结算进度（只读，不重发付款）。
+  registerOrdersGetPaymentGroupCommand(ordersCmd, deps);
 
   // hotel-redaug command group (Redaug hotel booking) — 13 verbs
   const hotelCmd = program.command('hotel-redaug').description(

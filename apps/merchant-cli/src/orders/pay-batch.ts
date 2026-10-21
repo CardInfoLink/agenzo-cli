@@ -134,7 +134,8 @@ export function parseOrderIds(raw: string): string[] {
 // Output helper
 // ============================================================
 
-function formatPayBatch(data: PayBatchResponse): string {
+/** 导出供 `orders get-payment-group` 复用：查进度和付款返回同形，展示也一致。 */
+export function formatPayBatch(data: PayBatchResponse): string {
   const lines: [string, string][] = [
     ['Payment group', String(data.payment_group_id ?? '-')],
     ['Status', String(data.status ?? '-')],

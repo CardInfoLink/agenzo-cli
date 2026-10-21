@@ -26,7 +26,12 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     .option('--contact-region <code>', "Contact phone country code (no '+')")
     .option('--contact-phone <phone>', 'Booking contact phone')
     .option('--contact-email <email>', 'Booking contact email')
-    .option('--passengers <json>', 'JSON array of passengers (gender/id_type are strings)')
+    .option(
+      '--passengers <json>',
+      'JSON array of passengers (gender/id_type are strings). A passenger may be just ' +
+      '{"traveller_token":"tvp_...","type":"adult"} from token-cli travellers list.',
+    )
+    .option('--save-travellers', 'Save the fully filled passengers as frequent travellers (only when the user asked)')
     .option('--payment-method-id <id>', 'Optional bound-card id (pay_per_call only)')
     .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
     .option(
@@ -59,6 +64,8 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
       contact_email: need(opts.contactEmail as string | undefined, 'contact-email'),
       passengers: jsonArray(need(opts.passengers as string | undefined, 'passengers'), 'passengers'),
     };
+    // 常用旅客：只在用户要求保存时才带，缺省不出现在请求体里（老调用方逐字不变）。
+    if (opts.saveTravellers) body.save_travellers = true;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
     // UPI(unionpay) 扣款路径：透传已 ACTIVE 的 network token id；platform create-order
     // 据 payment_token_id 非空走 ChargeService 实扣（跳过 EVO 预授权/捕获）。

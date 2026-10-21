@@ -30,6 +30,7 @@ import type { Command } from 'commander';
 const CLI_NAME = 'agenzo-token-cli';
 export const PAYMENT_METHODS_NOUN = 'payment-methods';
 export const PAYMENT_TOKENS_NOUN = 'payment-tokens';
+export const TRAVELLERS_NOUN = 'travellers';
 
 // ============================================================
 // Schema shape (kept identical to merchant-cli's VerbSchema)
@@ -192,6 +193,68 @@ export const pmAddSchema: VerbSchema = {
   error_recovery: {
     PARAM_INVALID:
       'Fix the offending flag (--payment-brand must be "visa", "mastercard", "unionpay", or omitted), then retry.',
+  },
+};
+
+/** `travellers list` schema. Read-only. Only tokens + masked values ever come back. */
+export const travellersListSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: TRAVELLERS_NOUN,
+  verb: 'list',
+  description: 'List the member\'s saved travellers (token + masked values only)',
+  flags: {
+    member: { type: 'string', required: false, source: 'session', description: 'Member whose saved travellers to list' },
+  },
+  response: {
+    travellers: {
+      type: 'array',
+      description: 'Saved travellers. Pass traveller_token as a passenger to flight-flink create-order; the ID number is never returned.',
+      items: {
+        traveller_token: { type: 'string', description: 'Saved traveller token (tvp_...)' },
+        surname: { type: 'string', description: 'Family name (upper case)' },
+        name: { type: 'string', description: 'Given name (upper case)' },
+        gender: { type: 'string', description: '1=male / 2=female' },
+        birthday: { type: 'string', description: 'YYYY-MM-DD' },
+        nationality: { type: 'string', description: 'Nationality country code' },
+        id_type: { type: 'string', description: 'ID document type code' },
+        id_number_masked: { type: 'string', description: 'Masked ID number, e.g. E1*****78' },
+        expiration: { type: 'string', description: 'ID expiry, YYYY-MM-DD' },
+      },
+    },
+  },
+  example: {
+    command: 'agenzo-token-cli travellers list --member m_1',
+    output_summary: 'Returns travellers[]; empty when the member has none saved.',
+  },
+};
+
+/** `travellers delete` schema. Write op: removes one saved traveller of the member. */
+export const travellersDeleteSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: TRAVELLERS_NOUN,
+  verb: 'delete',
+  description: 'Delete one of the member\'s saved travellers',
+  flags: {
+    traveller_token: { type: 'string', required: 'conditional', description: 'Saved traveller token — positional, or pass --id for flag-only callers' },
+    id: { type: 'string', required: 'conditional', description: 'Saved traveller token (alternative to the positional traveller_token, for programmatic callers)' },
+    member: { type: 'string', required: true, source: 'session', description: 'Member who owns the saved traveller' },
+    'idempotency-key': {
+      type: 'string',
+      required: true,
+      description: 'Idempotency key forwarded verbatim as the Idempotency-Key header',
+    },
+  },
+  response: {
+    deleted: { type: 'boolean', description: 'true when the traveller was deleted' },
+    traveller_token: { type: 'string', description: 'The deleted saved traveller token' },
+  },
+  example: {
+    command: 'agenzo-token-cli travellers delete tvp_... --member m_1 --idempotency-key del-123',
+    output_summary: 'Deletes the saved traveller. Only use when the user explicitly asks to remove it.',
+  },
+  error_recovery: {
+    INVALID_REQUEST: 'The token is not one of this member\'s saved travellers (or member is missing); run travellers list to get a valid token.',
+    PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
   },
 };
 

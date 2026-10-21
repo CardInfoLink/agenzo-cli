@@ -36,6 +36,10 @@ import { registerEvoCreateCommand } from './payment-tokens/evo-create.js';
 // visa commands
 import { registerVisaRegisterCommand } from './visa/register.js';
 
+// travellers commands
+import { registerTravellersListCommand } from './travellers/list.js';
+import { registerTravellersDeleteCommand } from './travellers/delete.js';
+
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
 // is constructed; may be undefined if an error is thrown before then.
@@ -109,6 +113,11 @@ async function main() {
   // visa: enabler 显式前置注册（API Key 鉴权，developer_id 从 API Key 上下文解析）。
   const visaCmd = program.command('visa').description('Visa agent registration (enabler mode)');
   registerVisaRegisterCommand(visaCmd, deps);
+
+  // travellers: 常用旅客（只出 token 和脱敏值；下单时把 traveller_token 当乘客传给 merchant create-order）。
+  const travellersCmd = program.command('travellers').description('Saved travellers');
+  registerTravellersListCommand(travellersCmd, deps);
+  registerTravellersDeleteCommand(travellersCmd, deps);
 
   // Parse and execute
   await program.parseAsync(process.argv);
