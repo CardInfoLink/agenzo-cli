@@ -3,6 +3,7 @@ import { confirm } from '@inquirer/prompts';
 import { CliError, Formatter, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import type { PayFlightOrderResponse } from '../types/flight.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { PRICE_ANNOTATION_FLAGS, applyPriceAnnotation } from '../price-annotation.js';
 import { attachSchemaHelp, flightPayOrderSchema } from '../verb-schema.js';
 import { type Deps, need, render, resolveApiKey } from './_helpers.js';
 
@@ -38,7 +39,15 @@ export function registerPayOrderCommand(parent: Command, deps: Deps): void {
       '--evo-explicit',
       '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.',
     )
-    .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header');
+    .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header')
+    .option(
+      '--original-amount-cents <cents>',
+      PRICE_ANNOTATION_FLAGS['original-amount-cents'].description,
+    )
+    .option(
+      '--discount-amount-cents <cents>',
+      PRICE_ANNOTATION_FLAGS['discount-amount-cents'].description,
+    );
   attachSchemaHelp(cmd, flightPayOrderSchema);
 
   cmd.action(async () => {
@@ -80,6 +89,9 @@ export function registerPayOrderCommand(parent: Command, deps: Deps): void {
     }
     // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
     if (opts.evoExplicit) body.evo_explicit = true;
+    // 价格批注（原价 / 优惠，纯记录）：落订单 auth_snapshot + 统一流水并在订单详情回显，
+    // 不进网关报文、不参与权威价核验。
+    applyPriceAnnotation(body, opts);
     const result = await deps.apiClient.post<PayFlightOrderResponse>(
       `/flight/${encodeURIComponent(orderNo)}/pay`,
       { type: 'api-key', key: apiKey },

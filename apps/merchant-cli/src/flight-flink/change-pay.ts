@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { confirm } from '@inquirer/prompts';
 import { CliError, Formatter, createSpinner, resolveFormat } from '@agenzo/cli-core';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { PRICE_ANNOTATION_FLAGS, applyPriceAnnotation } from '../price-annotation.js';
 import { attachSchemaHelp, flightChangePaySchema } from '../verb-schema.js';
 import { type Deps, need, num, render, resolveApiKey } from './_helpers.js';
 
@@ -30,7 +31,15 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
       '--authorized-merchant-trans-id <id>',
       'Resume a 3DS challenge: merchant trans id of the already-authorised preauth',
     )
-    .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header');
+    .option('--idempotency-key <key>', 'Forwarded verbatim as the Idempotency-Key header')
+    .option(
+      '--original-amount-cents <cents>',
+      PRICE_ANNOTATION_FLAGS['original-amount-cents'].description,
+    )
+    .option(
+      '--discount-amount-cents <cents>',
+      PRICE_ANNOTATION_FLAGS['discount-amount-cents'].description,
+    );
   attachSchemaHelp(cmd, flightChangePaySchema);
 
   cmd.action(async () => {
@@ -58,6 +67,9 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
     if (opts.authorizedMerchantTransId !== undefined) {
       body.authorized_merchant_trans_id = opts.authorizedMerchantTransId as string;
     }
+    // 价格批注（原价 / 优惠，纯记录）：改签扣款额仍是上游权威 price_total，这两个值只落
+    // 改签单的 payment_snapshot + 统一流水，不进网关报文、不参与那道权威价交叉校验。
+    applyPriceAnnotation(body, opts);
 
     if (!isYes) {
       // 续单路径上钱已经扣过了，别再跟操作员说「charges the customer」。

@@ -28,6 +28,9 @@ interface ChargeResult {
   evo_trans_id?: string;
   result_code?: string | null;
   result_message?: string | null;
+  /** Record-only price annotation echoed back by the server; null when not declared. */
+  original_amount_cents?: number | null;
+  discount_amount_cents?: number | null;
 }
 
 /** Format integer cents to a display string (1250 -> "12.50"). */
@@ -85,6 +88,17 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     .option(
       '--provider-id <id>',
       "Restate the acquiring provider declared on the token, for consistency checking only (optional). When given it MUST equal the token's own provider_id, otherwise the charge is rejected with PROVIDER_MISMATCH (409). It never rewrites the token and cannot move a token to another store; omit it to use the token's declared value.",
+    )
+    .option(
+      '--original-amount-cents <cents>',
+      'Original (pre-discount) price in integer cents. Optional, RECORD-ONLY: stored on our ' +
+        'own charge record and echoed back in the result, never sent to the acquiring gateway ' +
+        'and never used to derive or validate the amount charged (that always comes from the token).',
+    )
+    .option(
+      '--discount-amount-cents <cents>',
+      'Discount amount in integer cents. Optional, RECORD-ONLY: same semantics as ' +
+        '--original-amount-cents.',
     )
     .option(
       '--idempotency-key <key>',
@@ -174,6 +188,25 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     if (providerId !== undefined) {
       body.provider_id = providerId;
     }
+    // 价格批注（原价 / 优惠，纯记录）：只落平台自己的流水并回显，**不进**发给收单网关的
+    // 报文，也不参与扣款金额（金额恒取令牌冻结值）。在本地就把非整数 / 负数挡掉，避免把
+    // 一个纯记录字段的格式错误变成一次 422 往返。0 是合法取值（优惠 0 = 明确声明没有优惠），
+    // 所以判据是 `< 0` 而不是 `< 1`，且用 present 判断而非真值判断。
+    for (const [flag, optKey, bodyKey] of [
+      ['--original-amount-cents', 'originalAmountCents', 'original_amount_cents'],
+      ['--discount-amount-cents', 'discountAmountCents', 'discount_amount_cents'],
+    ] as const) {
+      const raw = opts[optKey] as string | undefined;
+      if (raw === undefined) continue;
+      const cents = Number(raw);
+      if (!Number.isInteger(cents) || cents < 0) {
+        throw new CliError(
+          'PARAM_INVALID',
+          `Invalid ${flag} "${raw}". Expected a non-negative integer number of cents (e.g. 10000 for 100.00).`,
+        );
+      }
+      body[bodyKey] = cents;
+    }
 
     const extraHeaders: Record<string, string> = {
       'Idempotency-Key': idempotencyKey,
@@ -209,6 +242,23 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
           ['Amount', `${formatCents(charge.amount_cents)} ${charge.currency}`],
           ['Fee', `${formatCents(charge.fee_cents)} ${charge.currency}`],
           ['Total', `${formatCents(charge.total_cents)} ${charge.currency}`],
+          // 价格批注：声明过才显示（未声明时服务端回 null，不占一行）。
+          ...(charge.original_amount_cents !== undefined && charge.original_amount_cents !== null
+            ? [
+                ['Original', `${formatCents(charge.original_amount_cents)} ${charge.currency}`] as [
+                  string,
+                  string,
+                ],
+              ]
+            : []),
+          ...(charge.discount_amount_cents !== undefined && charge.discount_amount_cents !== null
+            ? [
+                ['Discount', `${formatCents(charge.discount_amount_cents)} ${charge.currency}`] as [
+                  string,
+                  string,
+                ],
+              ]
+            : []),
           ...(charge.three_ds_url ? [['3DS URL', charge.three_ds_url] as [string, string]] : []),
           ['Merchant Trans ID', charge.merchant_trans_id ?? '-'],
           ['EVO Trans ID', charge.evo_trans_id ?? '-'],
