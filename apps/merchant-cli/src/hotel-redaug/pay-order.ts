@@ -12,6 +12,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import { resolveIdempotencyKey } from '../idempotency.js';
+import { PRICE_ANNOTATION_FLAGS, applyPriceAnnotation } from '../price-annotation.js';
 import { attachSchemaHelp, hotelPayOrderSchema } from '../verb-schema.js';
 import {
   ndjsonWriteLine,
@@ -149,6 +150,8 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
     )
+    .option('--original-amount-cents <cents>', PRICE_ANNOTATION_FLAGS['original-amount-cents'].description)
+    .option('--discount-amount-cents <cents>', PRICE_ANNOTATION_FLAGS['discount-amount-cents'].description)
     .option('--watch', 'Poll until PAID or timeout (NDJSON output)', false)
     .option(
       '--watch-interval <seconds>',
@@ -208,6 +211,9 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     }
     // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
     if (opts.evoExplicit) body.evo_explicit = true;
+    // 价格批注（原价 / 优惠，纯记录）：落订单 auth_snapshot + 统一流水并在订单详情回显，
+    // 不进网关报文、不参与权威价核验。
+    applyPriceAnnotation(body, opts);
 
     // Confirm before the write unless --yes. This is the step that actually
     // moves money (settlement account debit for monthly_settlement, or EVO

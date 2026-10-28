@@ -19,6 +19,7 @@
  */
 import type { Command } from 'commander';
 import { MEMBER_FLAG_SCHEMA } from './member.js';
+import { PRICE_ANNOTATION_FLAGS } from './price-annotation.js';
 import { TERMINAL_STATUSES, DEFAULT_WATCH_INTERVAL_SECONDS } from './ride-elife/watch.js';
 
 const CLI_NAME = 'agenzo-merchant-cli';
@@ -424,6 +425,7 @@ export const ridePayOrderSchema: VerbSchema = {
       required: true,
       description: 'Unique key (1-128 chars [A-Za-z0-9_-]) forwarded verbatim as the Idempotency-Key header; never auto-generated',
     },
+    ...PRICE_ANNOTATION_FLAGS,
   },
   response: {
     order_id: { type: 'string', description: 'Authoritative order_ref (rio_…, = order document _id) that was settled' },
@@ -1113,6 +1115,7 @@ export const hotelPayOrderSchema: VerbSchema = {
       description: 'Unique key forwarded verbatim as the Idempotency-Key header; never auto-generated. Derive from business intent (e.g. hash(order_id + attempt)) and reuse the SAME key when retrying the same payment',
       constraints: '1-128 chars [A-Za-z0-9_-]',
     },
+    ...PRICE_ANNOTATION_FLAGS,
     watch: { type: 'bool', required: false, default: false, description: 'Poll automatically on PAYMENT_NOT_COMPLETED until PAID or timeout. Each iteration emits one NDJSON line' },
     'watch-interval': { type: 'int', required: false, default: 5, description: 'Seconds between poll attempts in --watch mode' },
     'watch-timeout': { type: 'int', required: false, default: 300, description: 'Total seconds before giving up in --watch mode' },
@@ -2040,6 +2043,7 @@ export const flightPayOrderSchema = flightSchema(
     'authorized-charge-no': { type: 'string', required: false, description: 'Resume a network-token 3DS challenge: charge_no from a prior AUTHENTICATION_REQUIRED response (settled via resume_token), then triggers ticketing on success.' },
     'evo-explicit': { type: 'bool', required: false, default: false, description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
+    ...PRICE_ANNOTATION_FLAGS,
   },
   { order_no: { type: 'string', description: 'Our order reference.' }, status: { type: 'string', description: 'PAID on success; AUTHENTICATION_REQUIRED when the card needs 3DS.' } },
   { command: 'agenzo-merchant-cli flight-flink pay-order --order-no ffo_... --idempotency-key k2', output_summary: 'Order becomes PAID; poll get-order until TICKETED.' },
@@ -2157,6 +2161,7 @@ export const flightChangePaySchema = flightSchema(
     'payment-token-id': { type: 'string', required: false, description: 'Optional UPI network-token id (unionpay charge path).' },
     'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with the merchant trans id of the already-authorised preauth; the platform reuses and captures it instead of authorizing again.' },
     'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },
+    ...PRICE_ANNOTATION_FLAGS,
   },
   {
     change_order_no: { type: 'string', description: 'Change order number.' },

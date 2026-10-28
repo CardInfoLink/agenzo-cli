@@ -12,6 +12,7 @@ import {
 } from '@agenzo/cli-core';
 import type { CommandResult } from '@agenzo/cli-core';
 import type { PayRideOrderResponse } from '../types/api.js';
+import { PRICE_ANNOTATION_FLAGS, applyPriceAnnotation } from '../price-annotation.js';
 import { attachSchemaHelp, ridePayOrderSchema } from '../verb-schema.js';
 import { resolveIdempotencyKey } from '../idempotency.js';
 
@@ -180,6 +181,14 @@ export function registerRidePayOrderCommand(
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
+    )
+    .option(
+      '--original-amount-cents <cents>',
+      PRICE_ANNOTATION_FLAGS['original-amount-cents'].description,
+    )
+    .option(
+      '--discount-amount-cents <cents>',
+      PRICE_ANNOTATION_FLAGS['discount-amount-cents'].description,
     );
 
   attachSchemaHelp(cmd, ridePayOrderSchema);
@@ -224,6 +233,9 @@ export function registerRidePayOrderCommand(
     if (authorizedChargeNo !== undefined) body.authorized_charge_no = authorizedChargeNo;
     // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
     if (opts.evoExplicit) body.evo_explicit = true;
+    // 价格批注（原价 / 优惠，纯记录）：落订单 auth_snapshot + 统一流水并在订单详情回显，
+    // 不进网关报文、不参与「实扣额 == 锁单权威价」那道核验（金额仍不由调用方决定，R2.6）。
+    applyPriceAnnotation(body, opts);
 
     // Confirm before the write unless --yes. This step actually moves money
     // (network-token direct charge or EVO preauth+capture) and creates the ride
