@@ -333,7 +333,7 @@ token reads the store from the token record.
 
 | Flag | Maps to | Notes |
 |---|---|---|
-| `--provider-id <id>` | `provider_id` (top level) | Optional, ≤128 chars. Forwarded **verbatim**: no trimming, no case folding, no local enum check. Omit it and the payment settles on your default store |
+| `--provider-id <id>` | `provider_id` (top level) | Optional, ≤128 chars. Forwarded **verbatim**: the CLI does no trimming, no case folding and no local enum check. The **platform** matches it case-insensitively (it folds the value to lower case, stores it folded and echoes the folded form), so `REDAUG` and `redaug` are the same declaration and you need not normalise the case yourself — it still does no alias guessing and still does not trim whitespace, so a blank value is a declared-but-invalid one. Omit it and the payment settles on your default store |
 
 **Which commands accept it.** `unionpay-create`, `visa-create` and `evo-create` (and, on the capture
 plane, `agenzo-payment-cli payments capture` as a *restatement* plus `payments charge-card` for bare
