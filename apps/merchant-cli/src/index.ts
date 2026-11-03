@@ -74,6 +74,12 @@ import { registerRefundDetailCommand } from './flight-flink/refund-detail.js';
 import { registerRefundConfirmCommand } from './flight-flink/refund-confirm.js';
 import { registerFlightSkillCommand } from './flight-flink/skill.js';
 
+// data-aisa commands (AIsa read-only information lookup, injection-style register, D6)
+import { registerDataListCategoriesCommand } from './data-aisa/list-categories.js';
+import { registerDataSearchCommand } from './data-aisa/search.js';
+import { registerDataDescribeCommand } from './data-aisa/describe.js';
+import { registerDataQueryCommand } from './data-aisa/query.js';
+
 // Holds the parsed program so the top-level error handler can read the
 // resolved `--format` global flag. Assigned inside `main()` once the program
 // is constructed; may be undefined if an error is thrown before then.
@@ -295,6 +301,17 @@ Key notes:
   registerRefundDetailCommand(flightCmd, deps);
   registerRefundConfirmCommand(flightCmd, deps);
   registerFlightSkillCommand(flightCmd);
+
+  // data-aisa command group (AIsa read-only information lookup) — 4 verbs
+  const dataCmd = program.command('data-aisa').description(
+    'AIsa read-only information lookup (crypto, markets, web & news, SEO, social, prediction markets, research): ' +
+      'list-categories / search / describe / query. Pay-per-call READ-ONLY lookups — ' +
+      'it never places an order and never takes money.',
+  );
+  registerDataListCategoriesCommand(dataCmd, deps);
+  registerDataSearchCommand(dataCmd, deps);
+  registerDataDescribeCommand(dataCmd, deps);
+  registerDataQueryCommand(dataCmd, deps);
 
   // Parse and execute
   await program.parseAsync(process.argv);

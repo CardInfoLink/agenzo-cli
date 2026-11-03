@@ -2209,3 +2209,90 @@ export const flightRefundConfirmSchema = flightSchema(
   { status: { type: 'int', description: 'Refund status after the action.' } },
   { command: 'agenzo-merchant-cli flight-flink refund-confirm --refund-order-no R1 --confirm 1 --idempotency-key k7', output_summary: 'Refund confirmed or cancelled.' },
 );
+
+// ============================================================
+// data-aisa verb schemas (AIsa read-only information lookup) — 4 verbs
+// ============================================================
+//
+// Pay-per-call READ-ONLY lookups: there is no write verb here, so no verb
+// carries `--yes`, `--watch` or a required `--idempotency-key`. Flag names are
+// declared in HYPHEN form (`operation-id` / `idempotency-key`) because the
+// orchestrator builds `--<flag>` from the very same names; response fields keep
+// the upstream index's own casing (`operationId`) so a relayed id stays
+// byte-identical across the chain.
+
+/** Data noun (command group) — the `data-aisa/*` verbs share this. */
+export const DATA_NOUN = 'data-aisa';
+
+/**
+ * Build a data-aisa VerbSchema. Same job as `flightSchema` (inject cli + noun,
+ * keep the four entries readable), but the sections are passed as a LABELLED
+ * object rather than positionally: the cross-repo flag-name check reads
+ * `flags:` / `response:` straight out of this file's text, and positional
+ * arguments give it nothing to key off.
+ */
+function dataSchema(
+  spec: Omit<VerbSchema, 'cli' | 'noun'>,
+): VerbSchema {
+  return { cli: CLI_NAME, noun: DATA_NOUN, ...spec };
+}
+
+export const dataListCategoriesSchema = dataSchema({
+  verb: 'list-categories',
+  description: 'List the data categories and how many capabilities each one holds. Free: answered from the bundled index, no upstream call.',
+  flags: {
+    // No flags of its own — authentication rides on the global --api-key.
+  },
+  response: {
+    categories: { type: 'array', description: 'Categories ordered by size; each item is {category, endpoints}.' },
+  },
+  example: { command: 'agenzo-merchant-cli data-aisa list-categories', output_summary: 'The data categories with a capability count each — use it to answer "what can you look up".' },
+});
+
+export const dataSearchSchema = dataSchema({
+  verb: 'search',
+  description: 'Find a data capability by keyword. Free: answered from the bundled index, no upstream call. Returns operationId + method + path + tags + summary + price_usd for each hit.',
+  flags: {
+    keyword: { type: 'string', required: false, constraints: 'Space- or comma-separated tokens, matched against operationId / path / summary / tags. Omitted returns the first `limit` capabilities as examples.', description: "What to look for, e.g. 'crypto price' or 'reddit'." },
+    limit: { type: 'int', required: false, default: 15, constraints: '1..50; defaults to 15.', description: 'How many hits to return.' },
+  },
+  response: {
+    results: { type: 'array', description: 'Matching capabilities; each item is {operationId, method, path, tags, summary, price_usd}. Relay operationId VERBATIM into describe / query.' },
+  },
+  example: { command: "agenzo-merchant-cli data-aisa search --keyword 'crypto price' --limit 5", output_summary: 'Hits with operationId + price_usd; describe the chosen one before running it.' },
+});
+
+export const dataDescribeSchema = dataSchema({
+  verb: 'describe',
+  description: "Read one capability's parameter spec, usage hint and unit price before calling it. Free: answered from the bundled index, no upstream call.",
+  flags: {
+    'operation-id': { type: 'string', required: true, constraints: 'An operationId returned by search, verbatim.', description: 'Which capability to describe.' },
+  },
+  response: {
+    operationId: { type: 'string', description: 'The capability id — pass it unchanged to query.' },
+    method: { type: 'string', description: 'Upstream HTTP method of the capability.' },
+    path: { type: 'string', description: 'Upstream path of the capability.' },
+    params: { type: 'array', description: 'Declared parameters; each item is {name, in, required, type, desc}. `desc` may be an empty string.' },
+    required: { type: 'array', description: 'Names of the required parameters.' },
+    usage: { type: 'string', description: 'Human-readable call guidance: which params are required, where each one sits, how to assemble --params.' },
+    price_usd: { type: 'number|null', description: 'Unit price of one query call, in USD.' },
+    tags: { type: 'array', description: 'Categories this capability belongs to.' },
+    cost_tier: { type: 'string|null', description: 'Coarse price band of this capability.' },
+  },
+  example: { command: 'agenzo-merchant-cli data-aisa describe --operation-id get_coingecko_simple_price', output_summary: 'Parameter spec + unit price; build --params from params[].name, then query.' },
+});
+
+export const dataQuerySchema = dataSchema({
+  verb: 'query',
+  description: 'Run one capability and return its data. Charged per call. READ-ONLY: it fetches data and nothing else.',
+  flags: {
+    'operation-id': { type: 'string', required: true, constraints: 'An operationId returned by search, verbatim.', description: 'Which capability to run.' },
+    params: { type: 'object', required: false, constraints: 'A JSON object keyed by the parameter names from describe. Passed through as a whole; unknown keys are dropped.', description: "The capability's parameters." },
+    'idempotency-key': { type: 'string', required: false, constraints: 'Optional. [A-Za-z0-9_-]{1,128}. When absent the request is still sent (no prompt, nothing generated) and de-duplication falls back to the result cache.', description: 'Caller-supplied de-duplication key, forwarded verbatim as the Idempotency-Key header.' },
+  },
+  response: {
+    data: { type: 'object', description: 'The capability response, verbatim.' },
+    cost_usd: { type: 'number', description: 'What this call cost, in USD.' },
+  },
+  example: { command: 'agenzo-merchant-cli data-aisa query --operation-id get_coingecko_simple_price --params \'{"ids":"bitcoin","vs_currencies":"usd"}\'', output_summary: 'Returns data (upstream payload, verbatim) plus cost_usd for this call.' },
+});
