@@ -2251,13 +2251,13 @@ export const dataListCategoriesSchema = dataSchema({
 
 export const dataSearchSchema = dataSchema({
   verb: 'search',
-  description: 'Find a data capability by keyword. Free: answered from the bundled index, no upstream call. Returns operationId + method + path + tags + summary + price_usd for each hit.',
+  description: 'Find a data capability by keyword. Free: answered from the bundled index, no upstream call. Returns operationId + method + tags + summary + price_usd for each hit.',
   flags: {
-    keyword: { type: 'string', required: false, constraints: 'Space- or comma-separated tokens, matched against operationId / path / summary / tags. Omitted returns the first `limit` capabilities as examples.', description: "What to look for, e.g. 'crypto price' or 'reddit'." },
+    keyword: { type: 'string', required: false, constraints: 'Space- or comma-separated tokens, matched against the capability index (identifier, summary, tags). Omitted returns the first `limit` capabilities as examples.', description: "What to look for, e.g. 'crypto price' or 'reddit'." },
     limit: { type: 'int', required: false, default: 15, constraints: '1..50; defaults to 15.', description: 'How many hits to return.' },
   },
   response: {
-    results: { type: 'array', description: 'Matching capabilities; each item is {operationId, method, path, tags, summary, price_usd}. Relay operationId VERBATIM into describe / query.' },
+    results: { type: 'array', description: 'Matching capabilities; each item is {operationId, method, tags, summary, price_usd}. Relay operationId VERBATIM into describe / query.' },
   },
   example: { command: "agenzo-merchant-cli data-aisa search --keyword 'crypto price' --limit 5", output_summary: 'Hits with operationId + price_usd; describe the chosen one before running it.' },
 });
@@ -2270,8 +2270,7 @@ export const dataDescribeSchema = dataSchema({
   },
   response: {
     operationId: { type: 'string', description: 'The capability id — pass it unchanged to query.' },
-    method: { type: 'string', description: 'Upstream HTTP method of the capability.' },
-    path: { type: 'string', description: 'Upstream path of the capability.' },
+    method: { type: 'string', description: 'Upstream HTTP method of the capability. GET and POST are both reads; POST does not mean a write.' },
     params: { type: 'array', description: 'Declared parameters; each item is {name, in, required, type, desc}. `desc` may be an empty string.' },
     required: { type: 'array', description: 'Names of the required parameters.' },
     usage: { type: 'string', description: 'Human-readable call guidance: which params are required, where each one sits, how to assemble --params.' },
