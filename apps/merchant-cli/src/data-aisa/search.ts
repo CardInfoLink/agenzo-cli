@@ -8,7 +8,7 @@ export function registerDataSearchCommand(parent: Command, deps: Deps): void {
   const cmd = parent
     .command('search')
     .description(
-      'Find a data capability by keyword. Free (answered from the bundled index, no upstream call), read-only. Returns operationId + method + tags + summary + price_usd for each hit.',
+      'Find a data capability by keyword. Free and read-only. Returns operationId + method + tags + summary + price_usd for each hit.',
     )
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option(

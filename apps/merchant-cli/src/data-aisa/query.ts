@@ -26,7 +26,7 @@ export function registerDataQueryCommand(parent: Command, deps: Deps): void {
   const cmd = parent
     .command('query')
     .description(
-      'Run one capability and return its data. Charged per call. READ-ONLY: it fetches data and nothing else.',
+      'Run one capability and return its data. Charged per call (re-sending the same query is charged again). READ-ONLY: it fetches data and nothing else.',
     )
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--operation-id <id>', 'Which capability to run — an operationId returned by search, verbatim')

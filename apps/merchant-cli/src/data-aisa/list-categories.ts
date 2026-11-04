@@ -8,7 +8,7 @@ export function registerDataListCategoriesCommand(parent: Command, deps: Deps): 
   const cmd = parent
     .command('list-categories')
     .description(
-      'List the data categories and how many capabilities each one holds. Free (answered from the bundled index, no upstream call), read-only.',
+      'List the data categories and how many capabilities each one holds. Free and read-only.',
     )
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)');
   attachSchemaHelp(cmd, dataListCategoriesSchema);
