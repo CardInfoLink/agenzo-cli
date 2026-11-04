@@ -8,7 +8,7 @@ export function registerDataDescribeCommand(parent: Command, deps: Deps): void {
   const cmd = parent
     .command('describe')
     .description(
-      "Read one capability's parameter spec, usage hint and unit price before calling it. Free (answered from the bundled index, no upstream call), read-only.",
+      "Read one capability's parameter spec, usage hint and unit price before calling it. Free and read-only.",
     )
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--operation-id <id>', 'Which capability to describe — an operationId returned by search, verbatim');

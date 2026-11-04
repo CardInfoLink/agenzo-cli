@@ -2239,7 +2239,7 @@ function dataSchema(
 
 export const dataListCategoriesSchema = dataSchema({
   verb: 'list-categories',
-  description: 'List the data categories and how many capabilities each one holds. Free: answered from the bundled index, no upstream call.',
+  description: 'List the data categories and how many capabilities each one holds. Free and read-only.',
   flags: {
     // No flags of its own — authentication rides on the global --api-key.
   },
@@ -2251,9 +2251,9 @@ export const dataListCategoriesSchema = dataSchema({
 
 export const dataSearchSchema = dataSchema({
   verb: 'search',
-  description: 'Find a data capability by keyword. Free: answered from the bundled index, no upstream call. Returns operationId + method + tags + summary + price_usd for each hit.',
+  description: 'Find a data capability by keyword. Free and read-only. Returns operationId + method + tags + summary + price_usd for each hit.',
   flags: {
-    keyword: { type: 'string', required: false, constraints: 'Space- or comma-separated tokens, matched against the capability index (identifier, summary, tags). Omitted returns the first `limit` capabilities as examples.', description: "What to look for, e.g. 'crypto price' or 'reddit'." },
+    keyword: { type: 'string', required: false, constraints: 'Space- or comma-separated tokens, matched against capability identifiers, summaries and tags. Omitted returns the first `limit` capabilities as examples.', description: "What to look for, e.g. 'crypto price' or 'reddit'." },
     limit: { type: 'int', required: false, default: 15, constraints: '1..50; defaults to 15.', description: 'How many hits to return.' },
   },
   response: {
@@ -2264,7 +2264,7 @@ export const dataSearchSchema = dataSchema({
 
 export const dataDescribeSchema = dataSchema({
   verb: 'describe',
-  description: "Read one capability's parameter spec, usage hint and unit price before calling it. Free: answered from the bundled index, no upstream call.",
+  description: "Read one capability's parameter spec, usage hint and unit price before calling it. Free and read-only.",
   flags: {
     'operation-id': { type: 'string', required: true, constraints: 'An operationId returned by search, verbatim.', description: 'Which capability to describe.' },
   },
@@ -2274,7 +2274,7 @@ export const dataDescribeSchema = dataSchema({
     params: { type: 'array', description: 'Declared parameters; each item is {name, in, required, type, desc}. `desc` may be an empty string.' },
     required: { type: 'array', description: 'Names of the required parameters.' },
     usage: { type: 'string', description: 'Human-readable call guidance: which params are required, where each one sits, how to assemble --params.' },
-    price_usd: { type: 'number|null', description: 'Unit price of one query call, in USD.' },
+    price_usd: { type: 'number|null', description: 'What ONE query call costs, in USD. null = not knowable in advance; the actual amount comes back as cost_usd.' },
     tags: { type: 'array', description: 'Categories this capability belongs to.' },
     cost_tier: { type: 'string|null', description: 'Coarse price band of this capability.' },
   },
@@ -2287,11 +2287,11 @@ export const dataQuerySchema = dataSchema({
   flags: {
     'operation-id': { type: 'string', required: true, constraints: 'An operationId returned by search, verbatim.', description: 'Which capability to run.' },
     params: { type: 'object', required: false, constraints: 'A JSON object keyed by the parameter names from describe. Passed through as a whole; unknown keys are dropped.', description: "The capability's parameters." },
-    'idempotency-key': { type: 'string', required: false, constraints: 'Optional. [A-Za-z0-9_-]{1,128}. When absent the request is still sent (no prompt, nothing generated) and de-duplication falls back to the result cache.', description: 'Caller-supplied de-duplication key, forwarded verbatim as the Idempotency-Key header.' },
+    'idempotency-key': { type: 'string', required: false, constraints: 'Optional. [A-Za-z0-9_-]{1,128}. When absent the request is still sent (no prompt, nothing generated). Pass the same key when retrying the same params.', description: 'Caller-supplied de-duplication key, forwarded verbatim as the Idempotency-Key header.' },
   },
   response: {
     data: { type: 'object', description: 'The capability response, verbatim.' },
-    cost_usd: { type: 'number', description: 'What this call cost, in USD.' },
+    cost_usd: { type: 'number', description: 'What this call costs, in USD. Billed per call: re-sending the same query is charged again, and a call rejected for a mistyped parameter name is charged too.' },
   },
   example: { command: 'agenzo-merchant-cli data-aisa query --operation-id get_coingecko_simple_price --params \'{"ids":"bitcoin","vs_currencies":"usd"}\'', output_summary: 'Returns data (upstream payload, verbatim) plus cost_usd for this call.' },
 });
