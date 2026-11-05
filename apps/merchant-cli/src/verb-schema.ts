@@ -2257,7 +2257,7 @@ export const dataSearchSchema = dataSchema({
     limit: { type: 'int', required: false, default: 15, constraints: '1..50; defaults to 15.', description: 'How many hits to return.' },
   },
   response: {
-    results: { type: 'array', description: 'Matching capabilities; each item is {operationId, method, tags, summary, price_usd}. Relay operationId VERBATIM into describe / query.' },
+    results: { type: 'array', description: 'Matching capabilities; each item is {operationId, method, tags, summary, price_usd} plus price_estimate_usd when price_usd is null. Relay operationId VERBATIM into describe / query.' },
   },
   example: { command: "agenzo-merchant-cli data-aisa search --keyword 'crypto price' --limit 5", output_summary: 'Hits with operationId + price_usd; describe the chosen one before running it.' },
 });
@@ -2274,7 +2274,8 @@ export const dataDescribeSchema = dataSchema({
     params: { type: 'array', description: 'Declared parameters; each item is {name, in, required, type, desc}. `desc` may be an empty string.' },
     required: { type: 'array', description: 'Names of the required parameters.' },
     usage: { type: 'string', description: 'Human-readable call guidance: which params are required, where each one sits, how to assemble --params.' },
-    price_usd: { type: 'number|null', description: 'What ONE query call costs, in USD. null = not knowable in advance; the actual amount comes back as cost_usd.' },
+    price_usd: { type: 'number|null', description: 'What ONE query call costs, in USD. 0 means this step is free. null = no fixed price (usage-based); see price_estimate_usd for the magnitude and cost_usd for what you actually pay.' },
+    price_estimate_usd: { type: 'number', description: 'Present ONLY when price_usd is null: a magnitude estimate for this usage-based capability, in USD. Not a committed price, but it tells you the order of magnitude before you spend — some of these cost over 2 USD per call.' },
     tags: { type: 'array', description: 'Categories this capability belongs to.' },
     cost_tier: { type: 'string|null', description: 'Coarse price band of this capability.' },
   },
