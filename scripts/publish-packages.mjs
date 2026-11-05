@@ -23,6 +23,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+// 发布前置检查：lock 的 workspace 版本必须与 package.json 一致。
+// 为什么这道检查必须在**发布流程里**而不只在 CI 里：漂移恰恰是发版动作本身造成的
+// （npm publish 会同步 lock，而那发生在提交之后），所以要在动手前先把上一轮的残留问出来。
+import { checkLockfileVersions, formatReport } from './check-lockfile-versions.mjs';
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const NPM = 'npm';
 // Node 22 在 Windows 上禁止用 shell:false 直接 spawn .cmd/.bat（CVE-2024-27980），
@@ -163,6 +168,22 @@ async function main() {
 
   console.log(color('bold', '\n即将发布：'));
   chosen.forEach((r) => console.log(`  - ${r.name}@${r.version}  ${color('dim', r.relDir)}`));
+
+  // lock 对账：放在确认之前，让上一轮遗留的漂移在动手前就暴露。不一致默认中止 ——
+  // 带着落后的 lock 发版，等于把「装出来的版本号与源码不符」这个问题留给下一个人。
+  const lockCheck = checkLockfileVersions();
+  console.log('');
+  if (lockCheck.ok) {
+    console.log(color('dim', `  ✓ ${formatReport(lockCheck)}`));
+  } else {
+    console.log(color('red', formatReport(lockCheck)));
+    const cont = (await ask(color('red', '\n仍继续发布？'), 'y/N')).toLowerCase();
+    if (cont !== 'y' && cont !== 'yes') {
+      await rl.close();
+      console.log('已中止 —— 先把 lock 修好并提交，再回来发版。');
+      return;
+    }
+  }
 
   const confirm = (await ask(color('bold', '\n确认发布以上包？'), 'y/N')).toLowerCase();
   if (confirm !== 'y' && confirm !== 'yes') { await rl.close(); console.log('已取消。'); return; }

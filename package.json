@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:error-codes": "node scripts/check-error-codes.mjs",
+    "check:lockfile": "node scripts/check-lockfile-versions.mjs",
     "release": "node scripts/publish-packages.mjs"
   },
   "workspaces": [
