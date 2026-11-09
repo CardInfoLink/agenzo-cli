@@ -60,6 +60,7 @@ agenzo-admin-cli config show                                       # show curren
 | `payment-tokens` | `create` | Issue a payment token (VCN / Network Token / X402, pick one) | W |
 | `payment-tokens` | `visa-create` | Mint a Visa network token: returns `payment_url` for the FIDO passkey, then polls to ACTIVE/FAILED (`--no-poll` returns right after the URL). Single-use by default (limit = order amount, no `visa-draw`). Optional `--dynamic-data-type TAVV|DAVV` (which one-time data to fetch: `TAVV` cryptogram by default, or `DAVV` 3-digit dynamic CVV for normal card forms; one per call), `--reusable` (allow `visa-draw` under this approval), `--max-amount-cents` (requires `--reusable`; authorization limit, omit for the platform default, currently 100000 cents = 1000.00; validity is fixed by the platform at 30 days), `--order` (order details incl. a one-line `description`, one JSON object) | W |
 | `payment-tokens` | `visa-draw <payment_token_id>` | Draw another Visa credential under an existing `--reusable` authorization (no passkey): returns a new ACTIVE child token for that order. Required `--order-amount-cents`; optional `--currency`, `--external-transaction-id`, `--order`, `--member`, `--dynamic-data-type TAVV|DAVV`, `--last` (final draw: no further draws, authorization closed at Visa once charged). The amount counts against the authorization limit | W |
+| `payment-tokens` | `vcn-quote` | Quote the charge needed to fund a VCN (card amount + fee) | R |
 | `payment-tokens` | `list` | List payment tokens under the current API Key | R |
 | `payment-tokens` | `get <payment_token_id>` | Show details of a single payment token | R |
 | `payment-tokens` | `revoke <payment_token_id>` | Revoke a payment token (X402 uses delayed revocation) | W |
@@ -175,9 +176,13 @@ agenzo-token-cli payment-tokens create \
 | `--card` | vcn / network-token | Match a payment method by its last 4 digits |
 | `--member` | all | Associate a member (optional) |
 | `--amount` | vcn / x402 | VCN: USD (`0.01`–`500.00`); X402: USDC amount |
+| `--amount-cents` | vcn | Card amount in integer cents instead of `--amount` (for programmatic callers); takes priority |
 | `--currency` | vcn | Omitted by default; the server applies its default currency |
+| `--funding-charge-no` | vcn | Required by the PhotonPay issuer: `charge_no` of a successful standalone charge that funds the card. Charge `vcn-quote`'s total first (any brand); one charge funds one card, and the unused balance is refunded to it on revoke. No freeze/fee prompt is shown in this mode |
+| `--card-bin` | vcn | Optional 6–8 digit card BIN (PhotonPay issuer). Must be one of the issuer's available BINs for the currency; check it with `vcn-quote --card-bin` before charging. Omitted → the platform picks an available BIN |
 | `--pay-to` / `--nonce` / `--network` / `--deadline` | x402 | Required X402 quadruple; `--deadline` is a Unix timestamp |
 | `--external-tx-id` | all | Forwarded to the request body as `external_tx_id` (optional) |
+| `--external-transaction-id` | all | Your order / reference id, sent as `external_transaction_id` and stored on the token. For VCN it links your order to the card |
 | `--recipient-first-name` | network-token (unionpay) | Recipient first name for UnionPay order delivery details |
 | `--recipient-last-name` | network-token (unionpay) | Recipient last name for UnionPay order delivery details |
 | `--recipient-email` | network-token (unionpay) | Recipient email (one of email or phone required for unionpay) |
@@ -187,6 +192,14 @@ agenzo-token-cli payment-tokens create \
 | `--idempotency-key` | all | **Required**; forwarded verbatim as the `Idempotency-Key` HTTP header, retrying the same key returns the first result |
 
 > Before writing, the freeze amount and service fee are shown and confirmation is requested; `--yes` skips confirmation (in which case `--idempotency-key` must be supplied explicitly).
+
+### vcn-quote — how much to charge to fund a VCN
+
+```bash
+agenzo-token-cli payment-tokens vcn-quote --api-key <api_key> --amount 25.00 [--currency USD] [--card-bin 524984]
+```
+
+Returns `amount_cents` (the card limit), `fee_cents`, `total_cents` and `card_bin` (the BIN the card will be issued on). A `--card-bin` the issuer cannot open for this currency is rejected here, before any charge. Charge `total_cents` on the user's card first, then run `create --type vcn --funding-charge-no <charge_no>`.
 
 ### list
 

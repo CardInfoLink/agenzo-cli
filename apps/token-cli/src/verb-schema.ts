@@ -361,12 +361,35 @@ export const ptCreateSchema: VerbSchema = {
     card: { type: 'string', required: false, description: 'Match payment method by last 4 digits' },
     member: { type: 'string', required: false, description: 'Member ID' },
     amount: { type: 'string', required: 'conditional', description: 'Amount in USD (vcn) or USDC (x402)' },
+    'amount-cents': {
+      type: 'string',
+      required: 'conditional',
+      description: 'vcn only: card amount in integer cents; takes priority over --amount',
+    },
     currency: { type: 'string', required: false, description: 'Currency (vcn only; server default applies if omitted)' },
+    'funding-charge-no': {
+      type: 'string',
+      required: 'conditional',
+      description:
+        'vcn only, required by the PhotonPay issuer: charge_no (chg_...) of a successful standalone charge that funds the card. Charge vcn-quote total_cents first (any brand); one charge funds one card; unused balance is refunded to it on revoke.',
+    },
+    'card-bin': {
+      type: 'string',
+      required: false,
+      description:
+        'vcn only (PhotonPay issuer): 6-8 digit card BIN to issue on. Must be one of the issuer\'s available BINs for the currency (check it with vcn-quote --card-bin before charging); omit to let the platform pick one.',
+    },
     'pay-to': { type: 'string', required: 'conditional', description: 'Pay-to address (x402 only)' },
     nonce: { type: 'string', required: 'conditional', description: 'Nonce (x402 only)' },
     network: { type: 'string', required: 'conditional', description: 'Network (x402 only)' },
     deadline: { type: 'string', required: 'conditional', description: 'Deadline as a Unix timestamp in seconds (x402 only)' },
     'external-tx-id': { type: 'string', required: false, description: 'External transaction ID' },
+    'external-transaction-id': {
+      type: 'string',
+      required: false,
+      description:
+        'Your order / reference id recorded on the token as external_transaction_id (vcn: links your order to the virtual card for reconciliation).',
+    },
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -379,8 +402,10 @@ export const ptCreateSchema: VerbSchema = {
     status: { type: 'string', description: 'Token status' },
   },
   example: {
-    command: 'agenzo-token-cli payment-tokens create --type vcn --card 1234 --amount 25.00 --idempotency-key tok-123',
-    output_summary: 'Creates a token; response shape varies by type (nested under vcn / network_token / x402).',
+    command:
+      'agenzo-token-cli payment-tokens create --type vcn --card 1234 --amount 25.00 --funding-charge-no chg_01H... --idempotency-key chg_01H...',
+    output_summary:
+      'Creates a token; response shape varies by type (nested under vcn / network_token / x402). A VCN response carries the full card number and CVC once.',
   },
   error_recovery: {
     TOKEN_FEATURE_DISABLED: 'This token type is not enabled yet. Tell the user and suggest an alternative type if applicable.',
@@ -468,5 +493,46 @@ export const ptRevokeSchema: VerbSchema = {
   },
   error_recovery: {
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+  },
+};
+
+/** `payment-tokens vcn-quote` schema. Read-only. */
+export const ptVcnQuoteSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: PAYMENT_TOKENS_NOUN,
+  verb: 'vcn-quote',
+  description: 'Quote how much to charge to fund a VCN (card amount + fee)',
+  flags: {
+    amount: {
+      type: 'string',
+      required: 'conditional',
+      description: 'Card amount in USD, e.g. 25.00 (becomes the card limit). One of --amount / --amount-cents',
+    },
+    'amount-cents': {
+      type: 'string',
+      required: 'conditional',
+      description: 'Card amount in integer cents; takes priority over --amount',
+    },
+    currency: { type: 'string', required: false, description: 'Currency (default: USD)' },
+    'card-bin': {
+      type: 'string',
+      required: false,
+      description:
+        '6-8 digit card BIN to issue on; rejected here if the issuer has no such BIN for the currency. Omit to let the platform pick an available BIN',
+    },
+  },
+  response: {
+    amount_cents: { type: 'number', description: 'Card limit in cents (the requested amount)' },
+    fee_cents: { type: 'number', description: 'Fee in cents, charged on top of the card limit' },
+    total_cents: { type: 'number', description: 'Amount to charge the funding card, in cents' },
+    currency: { type: 'string', description: 'Currency' },
+    card_bin: { type: 'string', description: 'Card BIN the card will be issued on (requested or picked by the platform)' },
+  },
+  example: {
+    command: 'agenzo-token-cli payment-tokens vcn-quote --amount 25.00',
+    output_summary: 'Returns amount_cents / fee_cents / total_cents. Charge total_cents first, then create the VCN with --funding-charge-no.',
+  },
+  error_recovery: {
+    TOKEN_FEATURE_DISABLED: 'VCN is not enabled yet. Tell the user.',
   },
 };

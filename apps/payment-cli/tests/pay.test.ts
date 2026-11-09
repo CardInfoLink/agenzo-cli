@@ -103,13 +103,33 @@ describe('capture', () => {
         'node', 'cli', 'capture',
         '--api-key', 'sk_key',
         '--payment-token-id', 'ptk_abc',
-        '--payment-brand', 'visa',
+        '--payment-brand', 'mastercard',
         '--idempotency-key', 'idem_4',
         '--yes',
       ]),
     ).rejects.toThrow();
 
     expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('--payment-brand visa is accepted and forwarded (platform /pay accepts visa)', async () => {
+    const apiClient = mockApiClient({ '/pay': { ...CHARGE_RESULT, payment_brand: 'visa' } });
+    const program = buildProgram();
+    registerPayCommand(program, { apiClient } as any);
+
+    captureStdout();
+    captureStderr();
+
+    await program.parseAsync([
+      'node', 'cli', 'capture',
+      '--api-key', 'sk_key',
+      '--payment-token-id', 'ptk_visa',
+      '--payment-brand', 'VISA',
+      '--idempotency-key', 'idem_visa',
+      '--yes',
+    ]);
+
+    expect(apiClient.post.mock.calls[0][2].payment_brand).toBe('visa');
   });
 
   it('missing --idempotency-key in --yes mode throws IdempotencyKeyRequiredError', async () => {

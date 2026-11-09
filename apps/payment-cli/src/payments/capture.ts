@@ -14,6 +14,9 @@ import type { CommandResult } from '@agenzo/cli-core';
 
 type PayDeps = { apiClient: ApiClient };
 
+/** Brands the platform /pay accepts (mirrors platform `app.core.payment_brand`). */
+const PAYMENT_BRANDS: readonly string[] = ['evo', 'unionpay', 'visa'];
+
 /** Server ChargeResult payload (amounts in integer cents). */
 interface ChargeResult {
   charge_no: string;
@@ -46,7 +49,7 @@ function formatCents(cents: number | undefined): string {
  *
  * Amount / currency / fee are taken from the token (set when it was created),
  * so this verb does NOT accept --amount / --currency. Branch is chosen by
- * `--payment-brand` (evo default | unionpay). Requires `--idempotency-key`
+ * `--payment-brand` (evo default | unionpay | visa). Requires `--idempotency-key`
  * (never auto-generated). API key and Idempotency-Key are sent as headers.
  *
  * Registered under the `payments` command group (see index.ts) so the full
@@ -68,7 +71,7 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     )
     .option(
       '--payment-brand <brand>',
-      'Payment brand override (optional; auto-detected from token). "evo" or "unionpay".',
+      'Payment brand override (optional; auto-detected from token). "evo", "unionpay" or "visa".',
     )
     .option('--description <text>', 'Optional payment description')
     .option(
@@ -113,10 +116,12 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     const paymentBrand = opts.paymentBrand
       ? String(opts.paymentBrand).toLowerCase()
       : undefined;
-    if (paymentBrand && paymentBrand !== 'evo' && paymentBrand !== 'unionpay') {
+    // 与平台 ChargeRequest.payment_brand 的取值保持一致（evo / unionpay / visa）；
+    // 编排器的 visa-charge 会传 visa，漏掉它会让 Visa 令牌扣款在 CLI 这一层就被拒。
+    if (paymentBrand && !PAYMENT_BRANDS.includes(paymentBrand)) {
       throw new CliError(
         'PARAM_INVALID',
-        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo" or "unionpay".`,
+        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo", "unionpay" or "visa".`,
       );
     }
 

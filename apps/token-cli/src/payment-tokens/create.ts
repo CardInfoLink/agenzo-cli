@@ -248,12 +248,22 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     .option('--card <last4>', 'Match payment method by last 4 digits')
     .option('--member <member_id>', 'Member ID')
     .option('--amount <amount>', 'Amount in USD (VCN / X402)')
+    .option('--amount-cents <cents>', 'VCN: card amount in integer cents (alternative to --amount)')
     .option('--currency <currency>', 'Currency (default: USD)')
+    .option(
+      '--funding-charge-no <charge_no>',
+      'VCN: charge_no (chg_...) of a successful charge that funds the card (must cover amount + fee, see payment-tokens vcn-quote)',
+    )
+    .option('--card-bin <bin>', 'VCN: 6-8 digit card BIN to issue on (default: platform picks an available BIN)')
     .option('--pay-to <address>', 'Pay-to address (X402)')
     .option('--nonce <nonce>', 'Nonce (X402)')
     .option('--network <network>', 'Network (X402)')
     .option('--deadline <deadline>', 'Deadline (X402)')
     .option('--external-tx-id <id>', 'External transaction ID')
+    .option(
+      '--external-transaction-id <id>',
+      "Your order / reference id recorded on the token (sent as external_transaction_id; VCN: links your order to the card)",
+    )
     .option('--recipient-first-name <name>', 'UnionPay network token: recipient first name (order delivery details)')
     .option('--recipient-last-name <name>', 'UnionPay network token: recipient last name (order delivery details)')
     .option('--recipient-email <email>', 'UnionPay network token: recipient email (recipient-email or recipient-phone required)')
@@ -356,22 +366,31 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
       // VCN branch: feature gate + amount + fee
       await checkVcnFeatureEnabled(deps.apiClient, apiKey);
 
-      const amountStr = await PromptEngine.resolveInput(opts.amount as string | undefined, {
-        message: 'Amount (USD, e.g. 25.00):',
-        validate: (v) => {
-          try {
-            const cents = usdToCents(v);
-            if (cents < 1 || cents > 50000) {
-              return 'Amount must be between $0.01 and $500.00';
+      let cents: number;
+      if (opts.amountCents !== undefined) {
+        // 程序化调用方（orchestrator）手里已是整数分，免得来回换算成 USD 字符串。
+        const raw = String(opts.amountCents).trim();
+        if (!/^\d+$/.test(raw)) {
+          throw new CliError('PARAM_INVALID', `Invalid --amount-cents "${opts.amountCents}". Expected a positive integer.`);
+        }
+        cents = Number(raw);
+      } else {
+        const amountStr = await PromptEngine.resolveInput(opts.amount as string | undefined, {
+          message: 'Amount (USD, e.g. 25.00):',
+          validate: (v) => {
+            try {
+              const c = usdToCents(v);
+              if (c < 1 || c > 50000) {
+                return 'Amount must be between $0.01 and $500.00';
+              }
+              return true;
+            } catch {
+              return 'Invalid amount format. Use a decimal like "25.00"';
             }
-            return true;
-          } catch {
-            return 'Invalid amount format. Use a decimal like "25.00"';
-          }
-        },
-      });
-
-      const cents = usdToCents(amountStr);
+          },
+        });
+        cents = usdToCents(amountStr);
+      }
       if (cents < 1 || cents > 50000) {
         throw new CliError(
           'PARAM_INVALID',
@@ -379,10 +398,24 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
         );
       }
 
-      feeCents = Math.max(1, Math.round(cents * 0.05));
-      freezeAmountCents = cents + feeCents;
-      feeDisplay = `$${formatCentsToUsd(feeCents)}`;
-      freezeDisplay = `$${formatCentsToUsd(freezeAmountCents)}`;
+      const cardBin = String(opts.cardBin ?? '').trim();
+      if (cardBin) {
+        if (!/^\d{6,8}$/.test(cardBin)) {
+          throw new CliError('PARAM_INVALID', '--card-bin must be 6-8 digits');
+        }
+        typeBody.card_bin = cardBin;
+      }
+
+      const fundingChargeNo = String(opts.fundingChargeNo ?? '').trim();
+      if (fundingChargeNo) {
+        // 资金已由这笔扣款付清，开卡不再冻结任何金额，不显示冻结额 / 手续费。
+        typeBody.funding_charge_no = fundingChargeNo;
+      } else {
+        feeCents = Math.max(1, Math.round(cents * 0.05));
+        freezeAmountCents = cents + feeCents;
+        feeDisplay = `$${formatCentsToUsd(feeCents)}`;
+        freezeDisplay = `$${formatCentsToUsd(freezeAmountCents)}`;
+      }
 
       typeBody.amount = cents;
       // §3.4.1: --currency omitted → do NOT send; server applies its default.
@@ -551,6 +584,12 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     }
     if (opts.externalTxId) {
       body.external_tx_id = opts.externalTxId as string;
+    }
+    // 平台 CreatePaymentTokenRequest 读的是 external_transaction_id（external_tx_id 不在请求模型里，
+    // 会被静默丢弃）。VCN 用它把调用方订单号记到卡上，便于订单 ↔ 虚拟卡对账。
+    const externalTransactionId = String(opts.externalTransactionId ?? '').trim();
+    if (externalTransactionId) {
+      body.external_transaction_id = externalTransactionId;
     }
 
     const extraHeaders: Record<string, string> = {
