@@ -408,8 +408,20 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
 
       const fundingChargeNo = String(opts.fundingChargeNo ?? '').trim();
       if (fundingChargeNo) {
-        // 资金已由这笔扣款付清，开卡不再冻结任何金额，不显示冻结额 / 手续费。
         typeBody.funding_charge_no = fundingChargeNo;
+        // 资金由这笔扣款出，但确认前仍要告知用户卡额度之外的手续费：按平台报价展示，
+        // 不再用旧的 5% 估算。--yes 不展示确认，就不多调一次报价。
+        if (!isYes) {
+          const quote = await fetchVcnQuote(deps.apiClient, apiKey, {
+            amountCents: cents,
+            currency: opts.currency as string | undefined,
+            cardBin: cardBin || undefined,
+          });
+          feeCents = quote.fee_cents;
+          freezeAmountCents = quote.total_cents;
+          feeDisplay = `$${formatCentsToUsd(feeCents)}`;
+          freezeDisplay = `$${formatCentsToUsd(freezeAmountCents)}`;
+        }
       } else {
         feeCents = Math.max(1, Math.round(cents * 0.05));
         freezeAmountCents = cents + feeCents;
@@ -703,6 +715,32 @@ async function checkVcnFeatureEnabled(apiClient: ApiClient, apiKey: string): Pro
       'VCN creation is not supported yet. Coming soon.',
     );
   }
+}
+
+/**
+ * VCN 报价：GET /payment-tokens/vcn-quote。报价失败（币种 / BIN 不可用等）时开卡同样会失败，
+ * 所以直接抛出平台原因，不回退到估算值。
+ */
+async function fetchVcnQuote(
+  apiClient: ApiClient,
+  apiKey: string,
+  args: { amountCents: number; currency?: string; cardBin?: string },
+): Promise<{ fee_cents: number; total_cents: number }> {
+  const query = new URLSearchParams({ amount_cents: String(args.amountCents) });
+  if (args.currency) {
+    query.set('currency', args.currency);
+  }
+  if (args.cardBin) {
+    query.set('card_bin', args.cardBin);
+  }
+  const result = await apiClient.get<{ fee_cents: number; total_cents: number }>(
+    `/payment-tokens/vcn-quote?${query.toString()}`,
+    { type: 'api-key', key: apiKey },
+  );
+  if (!result.success) {
+    throw CliError.fromApi(result, { auth: 'api-key' });
+  }
+  return result.data;
 }
 
 /**

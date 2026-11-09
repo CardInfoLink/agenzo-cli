@@ -107,17 +107,44 @@ describe('payment-tokens create --type vcn --funding-charge-no', () => {
     expect(apiClient.post.mock.calls[0][2]).not.toHaveProperty('funding_charge_no');
   });
 
-  it('does not show a freeze / 5% fee warning when the card is already funded', async () => {
-    const apiClient = apiClientFor();
+  it('shows freeze / fee from the platform quote (not 5%) before confirming a funded card', async () => {
+    const apiClient = apiClientFor({ amount_cents: 1000, fee_cents: 112, total_cents: 1112, currency: 'USD' });
     const { err } = await runCreate(
       apiClient,
-      ['--funding-charge-no', 'chg_fund_1', '--member', 'm_1'],
+      ['--funding-charge-no', 'chg_fund_1', '--member', 'm_1', '--card-bin', '558325'],
       false,
     );
 
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/payment-tokens/vcn-quote?amount_cents=1000&card_bin=558325',
+      { type: 'api-key', key: 'sk_key' },
+    );
     expect(confirm).toHaveBeenCalled();
+    expect(err.text()).toContain('Freeze: $11.12');
+    expect(err.text()).toContain('Fee: $1.12');
+  });
 
-    expect(err.text()).not.toContain('Freeze');
+  it('stops before creating when the quote is rejected', async () => {
+    const apiClient = apiClientFor();
+    apiClient.get.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/payment-tokens/vcn-quote')
+          ? { success: false, error: { code: 'INVALID_REQUEST', message: 'Card BIN 52737576 is not available' }, status: 400 }
+          : { success: true, data: { enabled: true } },
+      ),
+    );
+    await expect(
+      runCreate(apiClient, ['--funding-charge-no', 'chg_fund_1', '--member', 'm_1'], false),
+    ).rejects.toThrow();
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('--yes skips the quote call for a funded card', async () => {
+    const apiClient = apiClientFor();
+    await runCreate(apiClient, ['--funding-charge-no', 'chg_fund_1']);
+
+    const quoteCalls = apiClient.get.mock.calls.filter(([p]) => String(p).startsWith('/payment-tokens/vcn-quote'));
+    expect(quoteCalls).toHaveLength(0);
   });
 });
 
