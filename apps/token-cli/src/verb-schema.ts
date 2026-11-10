@@ -371,7 +371,7 @@ export const ptCreateSchema: VerbSchema = {
       type: 'string',
       required: 'conditional',
       description:
-        'vcn only, required by the PhotonPay issuer: charge_no (chg_...) of a successful standalone charge that funds the card. Charge vcn-quote total_cents first (any brand); one charge funds one card; unused balance is refunded to it on revoke.',
+        'vcn only, required by the PhotonPay issuer: charge_no (chg_...) of a successful standalone charge that funds the card. Charge vcn-quote total_cents first (any brand); one charge funds one card; on revoke the unused balance minus the cancel fee is refunded to it.',
     },
     'card-bin': {
       type: 'string',
@@ -423,6 +423,7 @@ export const ptListSchema: VerbSchema = {
   flags: {
     type: { type: 'string', required: false, description: 'Filter by token type' },
     member: { type: 'string', required: false, description: 'Filter by member ID' },
+    status: { type: 'string', required: false, description: 'Filter by token status, e.g. ACTIVE' },
   },
   response: {
     payment_tokens: {
@@ -474,7 +475,17 @@ export const ptRevokeSchema: VerbSchema = {
   verb: 'revoke',
   description: 'Revoke a payment token',
   flags: {
-    payment_token_id: { type: 'string', required: true, description: 'Payment token id (positional argument)' },
+    payment_token_id: {
+      type: 'string',
+      required: 'conditional',
+      description: 'Payment token id (positional argument). One of payment_token_id / --id',
+    },
+    id: { type: 'string', required: 'conditional', description: 'Payment token id, for callers that pass flags only' },
+    member: {
+      type: 'string',
+      required: false,
+      description: 'Only revoke if the token belongs to this member (otherwise NOT_FOUND)',
+    },
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -486,6 +497,11 @@ export const ptRevokeSchema: VerbSchema = {
     status: { type: 'string', description: 'Status after revocation' },
     revoked_at: { type: 'string|absent', description: 'Revocation time (immediate revoke)' },
     expires_at: { type: 'string|absent', description: 'Expiry time (delayed revoke — x402 cryptogram auto-expires)' },
+    'vcn.settlement': {
+      type: 'object|absent',
+      description:
+        'VCN only: consumed_cents / fee_cents (open fee settled + cancel fee) / refunded_cents (total refunded to the funding charge) / settled_at',
+    },
   },
   example: {
     command: 'agenzo-token-cli payment-tokens revoke pt_01H... --idempotency-key revoke-123',
@@ -493,6 +509,46 @@ export const ptRevokeSchema: VerbSchema = {
   },
   error_recovery: {
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+    PARAM_INVALID:
+      'VCN: the card balance does not cover the cancel fee, so it cannot be cancelled; it stays active. Tell the user (check with revoke-quote first).',
+  },
+};
+
+/** `payment-tokens revoke-quote` schema. Read-only. */
+export const ptRevokeQuoteSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: PAYMENT_TOKENS_NOUN,
+  verb: 'revoke-quote',
+  description: 'Quote cancelling a VCN: live card balance, cancel fee, whether it can be cancelled, expected refund',
+  flags: {
+    payment_token_id: {
+      type: 'string',
+      required: 'conditional',
+      description: 'VCN payment token id (positional argument). One of payment_token_id / --id',
+    },
+    id: { type: 'string', required: 'conditional', description: 'VCN payment token id, for callers that pass flags only' },
+    member: {
+      type: 'string',
+      required: false,
+      description: 'Only quote if the token belongs to this member (otherwise NOT_FOUND)',
+    },
+  },
+  response: {
+    balance_cents: { type: 'number', description: 'Live card balance in cents' },
+    cancel_fee_cents: { type: 'number', description: 'Cancel fee in cents, paid out of the balance on cancel' },
+    can_revoke: {
+      type: 'boolean',
+      description: 'false when the balance does not cover the cancel fee: the card cannot be cancelled and stays active',
+    },
+    refund_cents: { type: 'number', description: 'Expected refund to the funding charge if cancelled now (0 when can_revoke is false)' },
+    currency: { type: 'string', description: 'Currency' },
+  },
+  example: {
+    command: 'agenzo-token-cli payment-tokens revoke-quote ptk_01H... --member m_1',
+    output_summary: 'Read-only: nothing is cancelled or refunded. The final refund comes from revoke (spending in between changes it).',
+  },
+  error_recovery: {
+    TOKEN_FEATURE_DISABLED: 'VCN is not enabled yet. Tell the user.',
   },
 };
 
@@ -523,14 +579,19 @@ export const ptVcnQuoteSchema: VerbSchema = {
   },
   response: {
     amount_cents: { type: 'number', description: 'Card limit in cents (the requested amount)' },
-    fee_cents: { type: 'number', description: 'Fee in cents, charged on top of the card limit' },
-    total_cents: { type: 'number', description: 'Amount to charge the funding card, in cents' },
+    fee_cents: { type: 'number', description: 'Open fee in cents, charged on top of the card limit' },
+    total_cents: { type: 'number', description: 'Amount to charge the funding card, in cents (card limit + open fee)' },
+    cancel_fee_cents: {
+      type: 'number',
+      description: 'Cancel fee in cents. Not part of total_cents; it is taken from the refund when the card is revoked',
+    },
     currency: { type: 'string', description: 'Currency' },
     card_bin: { type: 'string', description: 'Card BIN the card will be issued on (requested or picked by the platform)' },
   },
   example: {
     command: 'agenzo-token-cli payment-tokens vcn-quote --amount 25.00',
-    output_summary: 'Returns amount_cents / fee_cents / total_cents. Charge total_cents first, then create the VCN with --funding-charge-no.',
+    output_summary:
+      'Returns amount_cents / fee_cents (open fee) / total_cents / cancel_fee_cents. Charge total_cents first, then create the VCN with --funding-charge-no; the cancel fee is taken from the refund on revoke.',
   },
   error_recovery: {
     TOKEN_FEATURE_DISABLED: 'VCN is not enabled yet. Tell the user.',

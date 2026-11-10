@@ -18,6 +18,8 @@ interface VcnQuote {
   total_cents: number;
   currency: string;
   card_bin?: string;
+  /** 销卡费：销卡时从退款里扣，不计入 total_cents。 */
+  cancel_fee_cents?: number;
 }
 
 function centsToUsd(cents: number): string {
@@ -28,8 +30,9 @@ function centsToUsd(cents: number): string {
 export function formatVcnQuote(quote: VcnQuote): string {
   return Formatter.keyValue([
     ['Card Limit', centsToUsd(quote.amount_cents)],
-    ['Fee', centsToUsd(quote.fee_cents)],
+    ['Open Fee', centsToUsd(quote.fee_cents)],
     ['Charge Total', centsToUsd(quote.total_cents)],
+    ['Cancel Fee', `${centsToUsd(quote.cancel_fee_cents ?? 0)} (taken from the refund on revoke)`],
     ['Currency', quote.currency],
     ['Card BIN', quote.card_bin ?? '-'],
   ]);

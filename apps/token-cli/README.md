@@ -61,6 +61,7 @@ agenzo-admin-cli config show                                       # show curren
 | `payment-tokens` | `visa-create` | Mint a Visa network token: returns `payment_url` for the FIDO passkey, then polls to ACTIVE/FAILED (`--no-poll` returns right after the URL). Single-use by default (limit = order amount, no `visa-draw`). Optional `--dynamic-data-type TAVV|DAVV` (which one-time data to fetch: `TAVV` cryptogram by default, or `DAVV` 3-digit dynamic CVV for normal card forms; one per call), `--reusable` (allow `visa-draw` under this approval), `--max-amount-cents` (requires `--reusable`; authorization limit, omit for the platform default, currently 100000 cents = 1000.00; validity is fixed by the platform at 30 days), `--order` (order details incl. a one-line `description`, one JSON object) | W |
 | `payment-tokens` | `visa-draw <payment_token_id>` | Draw another Visa credential under an existing `--reusable` authorization (no passkey): returns a new ACTIVE child token for that order. Required `--order-amount-cents`; optional `--currency`, `--external-transaction-id`, `--order`, `--member`, `--dynamic-data-type TAVV|DAVV`, `--last` (final draw: no further draws, authorization closed at Visa once charged). The amount counts against the authorization limit | W |
 | `payment-tokens` | `vcn-quote` | Quote the charge needed to fund a VCN (card amount + fee) | R |
+| `payment-tokens` | `revoke-quote <payment_token_id>` | Quote cancelling a VCN: live card balance, cancel fee, whether it can be cancelled, expected refund | R |
 | `payment-tokens` | `list` | List payment tokens under the current API Key | R |
 | `payment-tokens` | `get <payment_token_id>` | Show details of a single payment token | R |
 | `payment-tokens` | `revoke <payment_token_id>` | Revoke a payment token (X402 uses delayed revocation) | W |
@@ -178,7 +179,7 @@ agenzo-token-cli payment-tokens create \
 | `--amount` | vcn / x402 | VCN: USD (`0.01`–`500.00`); X402: USDC amount |
 | `--amount-cents` | vcn | Card amount in integer cents instead of `--amount` (for programmatic callers); takes priority |
 | `--currency` | vcn | Omitted by default; the server applies its default currency |
-| `--funding-charge-no` | vcn | Required by the PhotonPay issuer: `charge_no` of a successful standalone charge that funds the card. Charge `vcn-quote`'s total first (any brand); one charge funds one card, and the unused balance is refunded to it on revoke. No freeze/fee prompt is shown in this mode |
+| `--funding-charge-no` | vcn | Required by the PhotonPay issuer: `charge_no` of a successful standalone charge that funds the card. Charge `vcn-quote`'s total first (any brand); one charge funds one card, and on revoke the unused balance minus the cancel fee is refunded to it. Before confirming, the prompt shows the charge total, open fee and cancel fee from `vcn-quote` (skipped with `--yes`) |
 | `--card-bin` | vcn | Optional 6–8 digit card BIN (PhotonPay issuer). Must be one of the issuer's available BINs for the currency; check it with `vcn-quote --card-bin` before charging. Omitted → the platform picks an available BIN |
 | `--pay-to` / `--nonce` / `--network` / `--deadline` | x402 | Required X402 quadruple; `--deadline` is a Unix timestamp |
 | `--external-tx-id` | all | Forwarded to the request body as `external_tx_id` (optional) |
@@ -199,12 +200,21 @@ agenzo-token-cli payment-tokens create \
 agenzo-token-cli payment-tokens vcn-quote --api-key <api_key> --amount 25.00 [--currency USD] [--card-bin 524984]
 ```
 
-Returns `amount_cents` (the card limit), `fee_cents`, `total_cents` and `card_bin` (the BIN the card will be issued on). A `--card-bin` the issuer cannot open for this currency is rejected here, before any charge. Charge `total_cents` on the user's card first, then run `create --type vcn --funding-charge-no <charge_no>`.
+Returns `amount_cents` (the card limit), `fee_cents` (open fee), `total_cents` (limit + open fee), `cancel_fee_cents` (taken from the refund on revoke, not part of `total_cents`) and `card_bin` (the BIN the card will be issued on). A `--card-bin` the issuer cannot open for this currency is rejected here, before any charge. Charge `total_cents` on the user's card first, then run `create --type vcn --funding-charge-no <charge_no>`.
+
+### revoke-quote — what cancelling a VCN would refund
+
+```bash
+agenzo-token-cli payment-tokens revoke-quote <payment_token_id> --api-key <api_key> [--member <member_id>]
+# flag-only callers: payment-tokens revoke-quote --id <payment_token_id> ...
+```
+
+Read-only. Returns `balance_cents` (live card balance), `cancel_fee_cents`, `can_revoke` and `refund_cents` (expected refund if cancelled now). A card whose balance does not cover the cancel fee cannot be cancelled (`can_revoke: false`); it stays active. The final refund comes from `revoke`.
 
 ### list
 
 ```bash
-agenzo-token-cli payment-tokens list --api-key <api_key> [--type <type>] [--member <member_id>]
+agenzo-token-cli payment-tokens list --api-key <api_key> [--type <type>] [--member <member_id>] [--status ACTIVE]
 ```
 
 ### get
@@ -216,10 +226,11 @@ agenzo-token-cli payment-tokens get <payment_token_id> --api-key <api_key>
 ### revoke
 
 ```bash
-agenzo-token-cli payment-tokens revoke <payment_token_id> --api-key <api_key> [--idempotency-key <key>]
+agenzo-token-cli payment-tokens revoke <payment_token_id> --api-key <api_key> [--member <member_id>] [--idempotency-key <key>]
+# flag-only callers: payment-tokens revoke --id <payment_token_id> ...
 ```
 
-Revokes immediately and prints `REVOKED` plus the revocation time; X402 tokens use delayed revocation (the cryptogram expires naturally), printing `ACTIVE` plus the expiry time. `--idempotency-key` is required in `--yes` mode.
+Revokes immediately and prints `REVOKED` plus the revocation time; X402 tokens use delayed revocation (the cryptogram expires naturally), printing `ACTIVE` plus the expiry time. `--idempotency-key` is required in `--yes` mode. `--member` only revokes a token that belongs to that member (another member's token is `NOT_FOUND`). Revoking a VCN cancels the card and refunds the unused balance minus fees to the funding charge; it is rejected (card stays active) when the balance does not cover the cancel fee or cannot be read; the output adds `Consumed`, `Fee` and `Refunded` (JSON: `vcn.settlement`).
 
 ## Output and errors
 

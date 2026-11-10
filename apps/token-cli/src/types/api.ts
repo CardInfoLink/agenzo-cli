@@ -77,6 +77,15 @@ export interface RevokeResult {
   revoked_at?: string;
   expires_at?: string;
   message?: string;
+  /** 只在 VCN 撤销后出现：销卡结算。 */
+  vcn?: {
+    settlement?: {
+      consumed_cents: number;
+      fee_cents: number;
+      refunded_cents: number;
+      settled_at?: string;
+    };
+  };
 }
 
 // ---- Payment Tokens (logical display models; commands read via Record) ----

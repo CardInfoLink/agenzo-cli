@@ -35,7 +35,7 @@ Add `--no-poll` when you need `link_url` synchronously and will poll yourself (`
 
 Three token types: `vcn` (single-use virtual card), `network-token` (tokenized credential + cryptogram), `x402` (HTTP 402 on-chain payment).
 
-A VCN is funded by a charge you make first: run `payment-tokens vcn-quote --amount <usd>` and charge its `total_cents` on the user's card with any brand, then `payment-tokens create --type vcn --amount <usd> --funding-charge-no <charge_no>`. One charge funds one card; revoking the card refunds the unused balance to that charge. Add `--card-bin <6-8 digits>` to both `vcn-quote` and `create` only when the card must be issued on a specific BIN; the quote rejects a BIN the issuer cannot open, before any charge. Without it the platform picks an available BIN.
+A VCN is funded by a charge you make first: run `payment-tokens vcn-quote --amount <usd>` and charge its `total_cents` on the user's card with any brand, then `payment-tokens create --type vcn --amount <usd> --funding-charge-no <charge_no>`. One charge funds one card; `total_cents` is the card limit plus the open fee (`fee_cents`). Revoking the card refunds the unused balance minus the cancel fee (`cancel_fee_cents`) to that charge; run `payment-tokens revoke-quote <id>` first to show the user the card balance and expected refund. A card whose balance does not cover the cancel fee cannot be cancelled. Add `--card-bin <6-8 digits>` to both `vcn-quote` and `create` only when the card must be issued on a specific BIN; the quote rejects a BIN the issuer cannot open, before any charge. Without it the platform picks an available BIN.
 
 UnionPay network tokens require a separate checkout step (`payment-tokens unionpay-create`) that returns a `checkout_url` for user authentication.
 
