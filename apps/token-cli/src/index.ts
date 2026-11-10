@@ -33,6 +33,7 @@ import { registerVisaCreateCommand } from './payment-tokens/visa-create.js';
 import { registerVisaDrawCommand } from './payment-tokens/visa-draw.js';
 import { registerEvoCreateCommand } from './payment-tokens/evo-create.js';
 import { registerVcnQuoteCommand } from './payment-tokens/vcn-quote.js';
+import { registerRevokeQuoteCommand } from './payment-tokens/revoke-quote.js';
 
 // visa commands
 import { registerVisaRegisterCommand } from './visa/register.js';
@@ -104,6 +105,7 @@ async function main() {
   registerRevokeCommand(ptCmd, deps);
   // VCN 开卡报价：先按 total_cents 扣款，再带扣款号 create --type vcn。
   registerVcnQuoteCommand(ptCmd, deps);
+  registerRevokeQuoteCommand(ptCmd, deps);
   // UnionPay non-blocking command (programmatic callers; not in SKILL/README).
   registerUnionpayCreateCommand(ptCmd, deps);
   // Visa non-blocking command (programmatic callers; not in SKILL/README).

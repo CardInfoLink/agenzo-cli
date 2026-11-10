@@ -509,6 +509,46 @@ export const ptRevokeSchema: VerbSchema = {
   },
   error_recovery: {
     PARAM_IDEMPOTENCY_KEY_REQUIRED: 'Supply --idempotency-key (1-128 chars [A-Za-z0-9_-]); the CLI never generates one under --yes.',
+    PARAM_INVALID:
+      'VCN: the card balance does not cover the cancel fee, so it cannot be cancelled; it stays active. Tell the user (check with revoke-quote first).',
+  },
+};
+
+/** `payment-tokens revoke-quote` schema. Read-only. */
+export const ptRevokeQuoteSchema: VerbSchema = {
+  cli: CLI_NAME,
+  noun: PAYMENT_TOKENS_NOUN,
+  verb: 'revoke-quote',
+  description: 'Quote cancelling a VCN: live card balance, cancel fee, whether it can be cancelled, expected refund',
+  flags: {
+    payment_token_id: {
+      type: 'string',
+      required: 'conditional',
+      description: 'VCN payment token id (positional argument). One of payment_token_id / --id',
+    },
+    id: { type: 'string', required: 'conditional', description: 'VCN payment token id, for callers that pass flags only' },
+    member: {
+      type: 'string',
+      required: false,
+      description: 'Only quote if the token belongs to this member (otherwise NOT_FOUND)',
+    },
+  },
+  response: {
+    balance_cents: { type: 'number', description: 'Live card balance in cents' },
+    cancel_fee_cents: { type: 'number', description: 'Cancel fee in cents, paid out of the balance on cancel' },
+    can_revoke: {
+      type: 'boolean',
+      description: 'false when the balance does not cover the cancel fee: the card cannot be cancelled and stays active',
+    },
+    refund_cents: { type: 'number', description: 'Expected refund to the funding charge if cancelled now (0 when can_revoke is false)' },
+    currency: { type: 'string', description: 'Currency' },
+  },
+  example: {
+    command: 'agenzo-token-cli payment-tokens revoke-quote ptk_01H... --member m_1',
+    output_summary: 'Read-only: nothing is cancelled or refunded. The final refund comes from revoke (spending in between changes it).',
+  },
+  error_recovery: {
+    TOKEN_FEATURE_DISABLED: 'VCN is not enabled yet. Tell the user.',
   },
 };
 
