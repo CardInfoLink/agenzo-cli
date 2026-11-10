@@ -204,7 +204,7 @@ Returns `amount_cents` (the card limit), `fee_cents` (open fee), `total_cents` (
 ### list
 
 ```bash
-agenzo-token-cli payment-tokens list --api-key <api_key> [--type <type>] [--member <member_id>]
+agenzo-token-cli payment-tokens list --api-key <api_key> [--type <type>] [--member <member_id>] [--status ACTIVE]
 ```
 
 ### get
@@ -216,10 +216,11 @@ agenzo-token-cli payment-tokens get <payment_token_id> --api-key <api_key>
 ### revoke
 
 ```bash
-agenzo-token-cli payment-tokens revoke <payment_token_id> --api-key <api_key> [--idempotency-key <key>]
+agenzo-token-cli payment-tokens revoke <payment_token_id> --api-key <api_key> [--member <member_id>] [--idempotency-key <key>]
+# flag-only callers: payment-tokens revoke --id <payment_token_id> ...
 ```
 
-Revokes immediately and prints `REVOKED` plus the revocation time; X402 tokens use delayed revocation (the cryptogram expires naturally), printing `ACTIVE` plus the expiry time. `--idempotency-key` is required in `--yes` mode.
+Revokes immediately and prints `REVOKED` plus the revocation time; X402 tokens use delayed revocation (the cryptogram expires naturally), printing `ACTIVE` plus the expiry time. `--idempotency-key` is required in `--yes` mode. `--member` only revokes a token that belongs to that member (another member's token is `NOT_FOUND`). Revoking a VCN cancels the card and refunds the unused balance minus fees to the funding charge; the output adds `Consumed`, `Fee` and `Refunded` (JSON: `vcn.settlement`).
 
 ## Output and errors
 

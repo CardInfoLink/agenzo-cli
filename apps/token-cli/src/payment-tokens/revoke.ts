@@ -15,7 +15,12 @@ import type { RevokeResult } from '../types/api.js';
 import { attachSchemaHelp, ptRevokeSchema } from '../verb-schema.js';
 
 /**
- * `payment-tokens revoke <payment_token_id>` — revoke a payment token (§3.4.4).
+ * `payment-tokens revoke [payment_token_id]` — revoke a payment token (§3.4.4).
+ *
+ * The id may be the positional argument or `--id` (programmatic callers such as the
+ * orchestrator pass flags only). `--member` scopes the revoke to that end user: the
+ * platform answers NOT_FOUND for another member's token. A revoked VCN returns its
+ * settlement (consumed / fee / refunded), shown in the text output.
  *
  * POST /payment-tokens/<id>/revoke (no body).
  * Two output states:
@@ -27,9 +32,11 @@ import { attachSchemaHelp, ptRevokeSchema } from '../verb-schema.js';
  */
 export function registerRevokeCommand(parent: Command, deps: { apiClient: ApiClient }): void {
   const cmd = parent
-    .command('revoke <payment_token_id>')
+    .command('revoke [payment_token_id]')
     .description('Revoke a payment token')
     .option('--api-key <key>', 'API key for authentication')
+    .option('--id <id>', 'Payment token id (alternative to the positional argument, for flag-only callers)')
+    .option('--member <member_id>', 'Only revoke if the token belongs to this member')
     .option(
       '--idempotency-key <key>',
       'Idempotency key forwarded verbatim as the Idempotency-Key header',
@@ -37,9 +44,13 @@ export function registerRevokeCommand(parent: Command, deps: { apiClient: ApiCli
 
   attachSchemaHelp(cmd, ptRevokeSchema);
 
-  cmd.action(async (paymentTokenId: string) => {
+  cmd.action(async (paymentTokenIdArg: string | undefined) => {
     const opts = cmd.optsWithGlobals();
     const format = resolveFormat(opts.format as string | undefined);
+    const paymentTokenId = String(paymentTokenIdArg ?? opts.id ?? '').trim();
+    if (!paymentTokenId) {
+      throw new CliError('PARAM_INVALID', 'Payment token id is required (positional argument or --id).');
+    }
 
     const apiKey = await PromptEngine.resolveInput(opts.apiKey as string | undefined, {
       message: 'API Key:',
@@ -64,8 +75,10 @@ export function registerRevokeCommand(parent: Command, deps: { apiClient: ApiCli
       'Idempotency-Key': idempotencyKey,
     };
 
+    const member = String(opts.member ?? '').trim();
+    const query = member ? `?${new URLSearchParams({ member_id: member }).toString()}` : '';
     const result = await deps.apiClient.post<RevokeResult>(
-      `/payment-tokens/${paymentTokenId}/revoke`,
+      `/payment-tokens/${encodeURIComponent(paymentTokenId)}/revoke${query}`,
       { type: 'api-key', key: apiKey },
       undefined,
       extraHeaders,
@@ -113,6 +126,7 @@ export function registerRevokeCommand(parent: Command, deps: { apiClient: ApiCli
             ['Token ID', data.id],
             ['Status', data.status],
             ['Revoked At', Formatter.formatTime(data.revoked_at)],
+            ...settlementRows(data),
           ]),
       };
 
@@ -120,4 +134,21 @@ export function registerRevokeCommand(parent: Command, deps: { apiClient: ApiCli
       await renderWithContext(cmdResult, { format }, configManager);
     }
   });
+}
+
+function centsToUsd(cents: number): string {
+  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`;
+}
+
+/** VCN 销卡结算：已用 / 手续费（开卡费结算 + 销卡费）/ 累计退款。其它令牌没有这一段。 */
+function settlementRows(data: RevokeResult): [string, string][] {
+  const settlement = data.vcn?.settlement;
+  if (!settlement) {
+    return [];
+  }
+  return [
+    ['Consumed', centsToUsd(settlement.consumed_cents)],
+    ['Fee', centsToUsd(settlement.fee_cents)],
+    ['Refunded', centsToUsd(settlement.refunded_cents)],
+  ];
 }

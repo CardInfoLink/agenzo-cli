@@ -59,6 +59,7 @@ function getSummary(token: Record<string, unknown>): string {
  * GET /payment-tokens with X-Api-Key header.
  * Optional --type flag maps to ?type= query param.
  * Optional --member flag maps to ?member_id= query param.
+ * Optional --status flag maps to ?status= query param (upper-cased).
  * Table headers: Token ID / Type / Status / Summary.
  * Empty list → `ℹ No payment tokens found` (no table).
  */
@@ -68,7 +69,8 @@ export function registerListCommand(parent: Command, deps: { apiClient: ApiClien
     .description('List payment tokens')
     .option('--api-key <key>', 'API Key for authentication')
     .option('--type <type>', 'Filter by token type')
-    .option('--member <member_id>', 'Filter by member ID');
+    .option('--member <member_id>', 'Filter by member ID')
+    .option('--status <status>', 'Filter by token status, e.g. ACTIVE');
 
   attachSchemaHelp(cmd, ptListSchema);
 
@@ -88,6 +90,9 @@ export function registerListCommand(parent: Command, deps: { apiClient: ApiClien
     }
     if (opts.member) {
       params.member_id = opts.member as string;
+    }
+    if (opts.status) {
+      params.status = String(opts.status).trim().toUpperCase();
     }
 
     const result = await deps.apiClient.get<Record<string, unknown>[]>(

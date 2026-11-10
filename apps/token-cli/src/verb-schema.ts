@@ -423,6 +423,7 @@ export const ptListSchema: VerbSchema = {
   flags: {
     type: { type: 'string', required: false, description: 'Filter by token type' },
     member: { type: 'string', required: false, description: 'Filter by member ID' },
+    status: { type: 'string', required: false, description: 'Filter by token status, e.g. ACTIVE' },
   },
   response: {
     payment_tokens: {
@@ -474,7 +475,17 @@ export const ptRevokeSchema: VerbSchema = {
   verb: 'revoke',
   description: 'Revoke a payment token',
   flags: {
-    payment_token_id: { type: 'string', required: true, description: 'Payment token id (positional argument)' },
+    payment_token_id: {
+      type: 'string',
+      required: 'conditional',
+      description: 'Payment token id (positional argument). One of payment_token_id / --id',
+    },
+    id: { type: 'string', required: 'conditional', description: 'Payment token id, for callers that pass flags only' },
+    member: {
+      type: 'string',
+      required: false,
+      description: 'Only revoke if the token belongs to this member (otherwise NOT_FOUND)',
+    },
     'idempotency-key': {
       type: 'string',
       required: true,
@@ -486,6 +497,11 @@ export const ptRevokeSchema: VerbSchema = {
     status: { type: 'string', description: 'Status after revocation' },
     revoked_at: { type: 'string|absent', description: 'Revocation time (immediate revoke)' },
     expires_at: { type: 'string|absent', description: 'Expiry time (delayed revoke — x402 cryptogram auto-expires)' },
+    'vcn.settlement': {
+      type: 'object|absent',
+      description:
+        'VCN only: consumed_cents / fee_cents (open fee settled + cancel fee) / refunded_cents (total refunded to the funding charge) / settled_at',
+    },
   },
   example: {
     command: 'agenzo-token-cli payment-tokens revoke pt_01H... --idempotency-key revoke-123',
