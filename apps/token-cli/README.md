@@ -178,7 +178,7 @@ agenzo-token-cli payment-tokens create \
 | `--amount` | vcn / x402 | VCN: USD (`0.01`–`500.00`); X402: USDC amount |
 | `--amount-cents` | vcn | Card amount in integer cents instead of `--amount` (for programmatic callers); takes priority |
 | `--currency` | vcn | Omitted by default; the server applies its default currency |
-| `--funding-charge-no` | vcn | Required by the PhotonPay issuer: `charge_no` of a successful standalone charge that funds the card. Charge `vcn-quote`'s total first (any brand); one charge funds one card, and the unused balance is refunded to it on revoke. No freeze/fee prompt is shown in this mode |
+| `--funding-charge-no` | vcn | Required by the PhotonPay issuer: `charge_no` of a successful standalone charge that funds the card. Charge `vcn-quote`'s total first (any brand); one charge funds one card, and on revoke the unused balance minus the cancel fee is refunded to it. Before confirming, the prompt shows the charge total, open fee and cancel fee from `vcn-quote` (skipped with `--yes`) |
 | `--card-bin` | vcn | Optional 6–8 digit card BIN (PhotonPay issuer). Must be one of the issuer's available BINs for the currency; check it with `vcn-quote --card-bin` before charging. Omitted → the platform picks an available BIN |
 | `--pay-to` / `--nonce` / `--network` / `--deadline` | x402 | Required X402 quadruple; `--deadline` is a Unix timestamp |
 | `--external-tx-id` | all | Forwarded to the request body as `external_tx_id` (optional) |
@@ -199,7 +199,7 @@ agenzo-token-cli payment-tokens create \
 agenzo-token-cli payment-tokens vcn-quote --api-key <api_key> --amount 25.00 [--currency USD] [--card-bin 524984]
 ```
 
-Returns `amount_cents` (the card limit), `fee_cents`, `total_cents` and `card_bin` (the BIN the card will be issued on). A `--card-bin` the issuer cannot open for this currency is rejected here, before any charge. Charge `total_cents` on the user's card first, then run `create --type vcn --funding-charge-no <charge_no>`.
+Returns `amount_cents` (the card limit), `fee_cents` (open fee), `total_cents` (limit + open fee), `cancel_fee_cents` (taken from the refund on revoke, not part of `total_cents`) and `card_bin` (the BIN the card will be issued on). A `--card-bin` the issuer cannot open for this currency is rejected here, before any charge. Charge `total_cents` on the user's card first, then run `create --type vcn --funding-charge-no <charge_no>`.
 
 ### list
 

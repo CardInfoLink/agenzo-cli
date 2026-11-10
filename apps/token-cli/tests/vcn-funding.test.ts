@@ -107,8 +107,14 @@ describe('payment-tokens create --type vcn --funding-charge-no', () => {
     expect(apiClient.post.mock.calls[0][2]).not.toHaveProperty('funding_charge_no');
   });
 
-  it('shows freeze / fee from the platform quote (not 5%) before confirming a funded card', async () => {
-    const apiClient = apiClientFor({ amount_cents: 1000, fee_cents: 112, total_cents: 1112, currency: 'USD' });
+  it('shows charge / open fee / cancel fee from the platform quote (not 5%) before confirming a funded card', async () => {
+    const apiClient = apiClientFor({
+      amount_cents: 1000,
+      fee_cents: 222,
+      total_cents: 1222,
+      cancel_fee_cents: 112,
+      currency: 'USD',
+    });
     const { err } = await runCreate(
       apiClient,
       ['--funding-charge-no', 'chg_fund_1', '--member', 'm_1', '--card-bin', '558325'],
@@ -120,8 +126,10 @@ describe('payment-tokens create --type vcn --funding-charge-no', () => {
       { type: 'api-key', key: 'sk_key' },
     );
     expect(confirm).toHaveBeenCalled();
-    expect(err.text()).toContain('Freeze: $11.12');
-    expect(err.text()).toContain('Fee: $1.12');
+    expect(err.text()).toContain('Charge: $12.22');
+    expect(err.text()).toContain('Open fee: $2.22');
+    expect(err.text()).toContain('Cancel fee: $1.12 (taken from the refund on revoke)');
+    expect(err.text()).not.toContain('Freeze');
   });
 
   it('stops before creating when the quote is rejected', async () => {
@@ -182,6 +190,16 @@ describe('payment-tokens vcn-quote', () => {
       key: 'sk_key',
     });
     expect(out.text()).toContain('Charge Total');
+    expect(out.text()).toContain('11.50');
+    expect(out.text()).toContain('Open Fee');
+  });
+
+  it('prints the cancel fee as taken from the refund, not as part of the charge', async () => {
+    const apiClient = apiClientFor({ ...QUOTE, cancel_fee_cents: 112 });
+    const out = await runQuote(apiClient, ['--amount', '10.00']);
+
+    expect(out.text()).toContain('Cancel Fee');
+    expect(out.text()).toContain('1.12 (taken from the refund on revoke)');
     expect(out.text()).toContain('11.50');
   });
 

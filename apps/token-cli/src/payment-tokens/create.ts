@@ -359,6 +359,8 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     let feeCents: number | undefined;
     let feeDisplay: string | undefined;
     let freezeDisplay: string | undefined;
+    // 资金卡（--funding-charge-no）才有：销卡费销卡时从退款里扣，开卡时只提示。
+    let cancelFeeDisplay: string | undefined;
     // Body fields that vary by type
     const typeBody: Record<string, unknown> = {};
 
@@ -421,6 +423,7 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
           freezeAmountCents = quote.total_cents;
           feeDisplay = `$${formatCentsToUsd(feeCents)}`;
           freezeDisplay = `$${formatCentsToUsd(freezeAmountCents)}`;
+          cancelFeeDisplay = `$${formatCentsToUsd(quote.cancel_fee_cents ?? 0)}`;
         }
       } else {
         feeCents = Math.max(1, Math.round(cents * 0.05));
@@ -555,7 +558,15 @@ export function registerCreateCommand(parent: Command, deps: { apiClient: ApiCli
     // --- Confirmation (unless --yes) ---
     if (!isYes) {
       if (freezeDisplay !== undefined && feeDisplay !== undefined) {
-        const warningLines = [`Freeze: ${freezeDisplay}`, `Fee: ${feeDisplay}`];
+        // 资金卡不冻结：资金已由那笔扣款出，提示扣款总额、开卡费与销卡时要扣的销卡费。
+        const warningLines =
+          cancelFeeDisplay !== undefined
+            ? [
+                `Charge: ${freezeDisplay}`,
+                `Open fee: ${feeDisplay}`,
+                `Cancel fee: ${cancelFeeDisplay} (taken from the refund on revoke)`,
+              ]
+            : [`Freeze: ${freezeDisplay}`, `Fee: ${feeDisplay}`];
         notify(format, 'warning', warningLines.join(' | '));
       } else if (isUnionpayNetworkToken) {
         notify(format, 'info', 'UnionPay: no fee (clearing network not yet enabled)');
@@ -725,7 +736,7 @@ async function fetchVcnQuote(
   apiClient: ApiClient,
   apiKey: string,
   args: { amountCents: number; currency?: string; cardBin?: string },
-): Promise<{ fee_cents: number; total_cents: number }> {
+): Promise<{ fee_cents: number; total_cents: number; cancel_fee_cents?: number }> {
   const query = new URLSearchParams({ amount_cents: String(args.amountCents) });
   if (args.currency) {
     query.set('currency', args.currency);
@@ -733,7 +744,7 @@ async function fetchVcnQuote(
   if (args.cardBin) {
     query.set('card_bin', args.cardBin);
   }
-  const result = await apiClient.get<{ fee_cents: number; total_cents: number }>(
+  const result = await apiClient.get<{ fee_cents: number; total_cents: number; cancel_fee_cents?: number }>(
     `/payment-tokens/vcn-quote?${query.toString()}`,
     { type: 'api-key', key: apiKey },
   );

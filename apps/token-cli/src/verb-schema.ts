@@ -371,7 +371,7 @@ export const ptCreateSchema: VerbSchema = {
       type: 'string',
       required: 'conditional',
       description:
-        'vcn only, required by the PhotonPay issuer: charge_no (chg_...) of a successful standalone charge that funds the card. Charge vcn-quote total_cents first (any brand); one charge funds one card; unused balance is refunded to it on revoke.',
+        'vcn only, required by the PhotonPay issuer: charge_no (chg_...) of a successful standalone charge that funds the card. Charge vcn-quote total_cents first (any brand); one charge funds one card; on revoke the unused balance minus the cancel fee is refunded to it.',
     },
     'card-bin': {
       type: 'string',
@@ -523,14 +523,19 @@ export const ptVcnQuoteSchema: VerbSchema = {
   },
   response: {
     amount_cents: { type: 'number', description: 'Card limit in cents (the requested amount)' },
-    fee_cents: { type: 'number', description: 'Fee in cents, charged on top of the card limit' },
-    total_cents: { type: 'number', description: 'Amount to charge the funding card, in cents' },
+    fee_cents: { type: 'number', description: 'Open fee in cents, charged on top of the card limit' },
+    total_cents: { type: 'number', description: 'Amount to charge the funding card, in cents (card limit + open fee)' },
+    cancel_fee_cents: {
+      type: 'number',
+      description: 'Cancel fee in cents. Not part of total_cents; it is taken from the refund when the card is revoked',
+    },
     currency: { type: 'string', description: 'Currency' },
     card_bin: { type: 'string', description: 'Card BIN the card will be issued on (requested or picked by the platform)' },
   },
   example: {
     command: 'agenzo-token-cli payment-tokens vcn-quote --amount 25.00',
-    output_summary: 'Returns amount_cents / fee_cents / total_cents. Charge total_cents first, then create the VCN with --funding-charge-no.',
+    output_summary:
+      'Returns amount_cents / fee_cents (open fee) / total_cents / cancel_fee_cents. Charge total_cents first, then create the VCN with --funding-charge-no; the cancel fee is taken from the refund on revoke.',
   },
   error_recovery: {
     TOKEN_FEATURE_DISABLED: 'VCN is not enabled yet. Tell the user.',
