@@ -60,17 +60,29 @@ function parseAmountCents(amountStr: string): number {
 }
 
 /**
- * Format an EVO network token response for output.
+ * Format an EVO token response for output.
  *
  * EVO minting is **synchronous ACTIVE with NO URL** — there is no browser step
  * (cardholder authentication was already enforced at Drop-in card binding), so
  * this deliberately emits neither `payment_url` nor `checkout_url`. It surfaces
  * the token id + status (+ brand when present) only.
+ *
+ * The `Type` row names the credential the token actually carries, because the
+ * two EVO rails settle differently and are otherwise indistinguishable in this
+ * output: a network token is charged as `type=networkToken`, a gateway token as
+ * `type=token`. Printing "Network Token" for both is what made an earlier
+ * investigation read a gateway-token charge as a network-token one.
+ *
+ * The request's `credential` is a sound basis for this label even though it is
+ * an intent rather than an observed fact: the platform rejects an unrecognised
+ * value with INVALID_REQUEST instead of silently falling back to the default
+ * rail, so reaching this render path at all means the declared rail is the one
+ * that was taken.
  */
-function formatEvoActiveToken(data: Record<string, unknown>): string {
+function formatEvoActiveToken(data: Record<string, unknown>, credential?: string): string {
   const lines: [string, string][] = [
     ['Payment Token ID', String(data.id || '')],
-    ['Type', 'Network Token'],
+    ['Type', credential === 'gateway_token' ? 'Gateway Token (COF)' : 'Network Token'],
     ['Status', String(data.status || '')],
   ];
   if (data.payment_brand) {
@@ -131,6 +143,10 @@ export function registerEvoCreateCommand(
     .option(
       '--provider-id <id>',
       'Acquiring provider this payment is settled under; forwarded to the request body as provider_id (optional). Omit it to settle on your default store. A value that has not been configured for you is rejected with PROVIDER_NOT_CONFIGURED (409).',
+    )
+    .option(
+      '--credential <kind>',
+      "Which credential the token carries: 'network_token' (default) mints a cryptogram-bearing network token, charged as type=networkToken and silent; 'gateway_token' skips minting and carries the card's EVO gateway (COF) token, charged as type=token. Use gateway_token when the card has no network token (a frictionless binding yields none) or when that rail is wanted explicitly.",
     )
     .option(
       '--idempotency-key <key>',
@@ -210,6 +226,11 @@ export function registerEvoCreateCommand(
     // 落到默认门店。取值不 trim、不折叠大小写、不校验格式——合法性的唯一判据是平台的映射表。
     // 与上面 --member / --external-transaction-id 的写法不同是刻意的，不要「顺手统一」。
     const providerId = opts.providerId as string | undefined;
+    // 凭证形态（EVO 轨）。与 --provider-id 同样用 present 判断而非真值判断：拼错的取值
+    // 必须原样上送，由平台以 INVALID_REQUEST fail-closed。若在这里折叠成 undefined，
+    // 平台会按默认的 network_token 铸币，调用方却以为拿到了网关令牌形态 —— 直到扣款时
+    // 才发现走的是 NT 轨，而那时钱已经动了。不 trim、不折叠大小写、不校验枚举。
+    const credential = opts.credential as string | undefined;
 
     let idempotencyKey = opts.idempotencyKey as string | undefined;
     if (!idempotencyKey) {
@@ -234,6 +255,7 @@ export function registerEvoCreateCommand(
       ...(member ? { member_id: member } : {}),
       ...(externalTransactionId ? { external_transaction_id: externalTransactionId } : {}),
       ...(providerId !== undefined ? { provider_id: providerId } : {}),
+      ...(credential !== undefined ? { credential } : {}),
     };
 
     // Exactly one POST /payment-tokens/create; `--idempotency-key` forwarded
@@ -266,16 +288,20 @@ export function registerEvoCreateCommand(
     if (tokenStatus !== 'ACTIVE') {
       throw new CliError(
         'RESOURCE_STATE_INVALID',
-        `EVO network token creation did not return an ACTIVE token (status="${tokenStatus || 'unknown'}"). EVO minting is synchronous ACTIVE; a non-ACTIVE status means minting did not succeed.`,
+        `EVO token creation did not return an ACTIVE token (status="${tokenStatus || 'unknown'}"). EVO minting is synchronous ACTIVE; a non-ACTIVE status means minting did not succeed.`,
       );
     }
 
-    notify(format, 'success', 'EVO network token created');
+    notify(
+      format,
+      'success',
+      credential === 'gateway_token' ? 'EVO gateway token created' : 'EVO network token created',
+    );
 
     const configManager = new ConfigManager();
     const commandResult: CommandResult<Record<string, unknown>> = {
       data: tokenData,
-      text: () => formatEvoActiveToken(tokenData),
+      text: () => formatEvoActiveToken(tokenData, credential),
     };
 
     await renderWithContext(commandResult, { format }, configManager);
