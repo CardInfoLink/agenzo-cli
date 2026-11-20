@@ -232,7 +232,7 @@ export function registerOrdersPayBatchCommand(parent: Command, deps: { apiClient
     )
     .option(
       '--payment-method-id <id>',
-      '[轨 B] EVO bound-card id to settle the aggregate total (one 3DS challenge)',
+      '[轨 B] Bound-card id to settle the aggregate total (one 3DS challenge)',
     )
     .option(
       '--direct-card-charge',
@@ -306,7 +306,7 @@ export function registerOrdersPayBatchCommand(parent: Command, deps: { apiClient
         message:
           `Settle ${orderIds.length} order(s) in one aggregate payment? `
           + 'This moves money — a single charge covers the authoritative total of all listed orders '
-          + '(banks/EVO see one transaction).',
+          + '(the bank and the acquiring gateway see one transaction).',
         default: false,
       });
       if (!confirmed) {

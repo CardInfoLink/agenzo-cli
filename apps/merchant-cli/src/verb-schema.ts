@@ -227,7 +227,7 @@ export const bookSchema: VerbSchema = {
     'payment-token-id': {
       type: 'string',
       required: false,
-      description: 'DEPRECATED — use `ride-elife create-order` + `pay-order` for network-token direct charge. A single-step book carrying a network token hits Charge_Service strict order↔token binding and is rejected server-side with a retriable=false guidance error. Kept only for backward compatibility; monthly_settlement / EVO / no-credential booking still work via book',
+      description: 'DEPRECATED — use `ride-elife create-order` + `pay-order` for network-token direct charge. A single-step book carrying a network token hits Charge_Service strict order↔token binding and is rejected server-side with a retriable=false guidance error. Kept only for backward compatibility; monthly_settlement / bound-card direct charge / no-credential booking still work via book',
     },
     member: MEMBER_FLAG_SCHEMA,
     'passenger-name': { type: 'string', required: true, description: 'Passenger full name' },
@@ -369,7 +369,7 @@ export const ridePayOrderSchema: VerbSchema = {
   noun: NOUN,
   verb: 'pay-order',
   description:
-    'Settle a locked ride order created by create-order. Charging happens in this step (create-order only locks the fare and moves no money). Provide EXACTLY ONE of --payment-token-id (network-token direct charge — the main path; charge(order_id=order_ref) triggers strict order↔token binding) or --payment-method-id (EVO bound-card fallback); both missing or both present is rejected as PARAM_INVALID before any request. The amount/currency are NOT accepted here — the platform settles at the order-locked authoritative amount and the token minted amount. On success the order becomes status=PAID / payment_status=SETTLED',
+    'Settle a locked ride order created by create-order. Charging happens in this step (create-order only locks the fare and moves no money). Provide EXACTLY ONE of --payment-token-id (network-token direct charge — the main path; charge(order_id=order_ref) triggers strict order↔token binding) or --payment-method-id (bound-card fallback); both missing or both present is rejected as PARAM_INVALID before any request. The amount/currency are NOT accepted here — the platform settles at the order-locked authoritative amount and the token minted amount. On success the order becomes status=PAID / payment_status=SETTLED',
   flags: {
     'order-id': {
       type: 'string',
@@ -386,13 +386,13 @@ export const ridePayOrderSchema: VerbSchema = {
       type: 'string',
       required: 'conditional',
       description:
-        'Bound-card id to charge via EVO preauth+capture (fallback path). Exactly one of --payment-token-id / --payment-method-id is required (mutually exclusive)',
+        'Bound-card id to charge via preauth+capture (fallback path). Exactly one of --payment-token-id / --payment-method-id is required (mutually exclusive)',
     },
     'authorized-merchant-trans-id': {
       type: 'string',
       required: false,
       description:
-        'Resume a 3DS challenge: merchant trans id of an already-authorised EVO preauth returned by a prior AUTHENTICATION_REQUIRED response',
+        'Resume a 3DS challenge: merchant trans id of an already-authorised bound-card preauth returned by a prior AUTHENTICATION_REQUIRED response',
     },
     'direct-card-charge': {
       type: 'bool',
@@ -406,13 +406,13 @@ export const ridePayOrderSchema: VerbSchema = {
       required: false,
       default: false,
       description:
-        'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless. Ignored on the EVO preauth path and for UnionPay/Visa.',
+        'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, Visa / Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless. Ignored on the bound-card preauth path and for UnionPay/Visa.',
     },
     'return-url': {
       type: 'string',
       required: false,
       description:
-        'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.',
+        'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the default return URL configured on the platform.',
     },
     'authorized-charge-no': {
       type: 'string',
@@ -1028,12 +1028,12 @@ export const hotelCreateOrderSchema: VerbSchema = {
     'payment-method-id': {
       type: 'string',
       required: false,
-      description: 'Optional bound-card id (pay_per_call / EVO path). When set, the platform settles this order by pre-authorizing + capturing on that specific bound card; omit to let billing_mode decide.',
+      description: 'Optional bound-card id (pay_per_call / bound-card direct-charge path). When set, the platform settles this order by pre-authorizing + capturing on that specific bound card; omit to let billing_mode decide.',
     },
     'payment-token-id': {
       type: 'string',
       required: false,
-      description: 'UPI Agent Pay only: payment token id from an already-completed UnionPay network-token capture (funds already charged). When set, the platform skips EVO preauth/capture and only locks the order.',
+      description: 'UPI Agent Pay only: payment token id from an already-completed UnionPay network-token capture (funds already charged). When set, the platform skips preauth/capture and only locks the order.',
     },
     'idempotency-key': {
       type: 'string',
@@ -1069,18 +1069,18 @@ export const hotelPayOrderSchema: VerbSchema = {
   noun: HOTEL_NOUN,
   verb: 'pay-order',
   description:
-    'Settle an existing AWAITING_PAYMENT order created by create-order. Charging happens in this step — platform create-order only locks inventory/price and moves no money (lock-then-pay). Optional payment credentials (--payment-method-id / --payment-token-id / --authorized-merchant-trans-id) are forwarded to the pay body; omit them to let the platform settle by billing_mode (monthly_settlement deducts credit; pay_per_call selects the developer default card / EVO preauth). Token wins over method id server-side. On EVO cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; resume by re-calling pay-order with --authorized-merchant-trans-id. On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
+    'Settle an existing AWAITING_PAYMENT order created by create-order. Charging happens in this step — platform create-order only locks inventory/price and moves no money (lock-then-pay). Optional payment credentials (--payment-method-id / --payment-token-id / --authorized-merchant-trans-id) are forwarded to the pay body; omit them to let the platform settle by billing_mode (monthly_settlement deducts credit; pay_per_call selects the developer default card / bound-card preauth). Token wins over method id server-side. On cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; resume by re-calling pay-order with --authorized-merchant-trans-id. On success the order becomes PAID. Supports --watch to poll on PAYMENT_NOT_COMPLETED until PAID',
   flags: {
     'order-id': { type: 'string', required: true, description: 'Order to settle (create-order.response.order_id).' },
     'payment-method-id': {
       type: 'string',
       required: false,
-      description: 'Optional bound-card id to charge (pay_per_call / EVO preauth). Ignored for monthly_settlement and when payment-token-id is set.',
+      description: 'Optional bound-card id to charge (pay_per_call preauth). Ignored for monthly_settlement and when payment-token-id is set.',
     },
     'payment-token-id': {
       type: 'string',
       required: false,
-      description: 'Optional network-token id (UnionPay/Visa). When set the platform settles via network-token direct charge instead of EVO preauth+capture. Wins over payment-method-id.',
+      description: 'Optional network-token id (UnionPay/Visa). When set the platform settles via network-token direct charge instead of bound-card preauth+capture. Wins over payment-method-id.',
     },
     'authorized-merchant-trans-id': {
       type: 'string',
@@ -1097,12 +1097,12 @@ export const hotelPayOrderSchema: VerbSchema = {
       type: 'bool',
       required: false,
       default: false,
-      description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless. Ignored on the EVO preauth path and for UnionPay/Visa.',
+      description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, Visa / Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless. Ignored on the bound-card preauth path and for UnionPay/Visa.',
     },
     'return-url': {
       type: 'string',
       required: false,
-      description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.',
+      description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the default return URL configured on the platform.',
     },
     'authorized-charge-no': {
       type: 'string',
@@ -1747,7 +1747,7 @@ export const ordersPayBatchSchema: VerbSchema = {
   noun: ORDERS_NOUN,
   verb: 'pay-batch',
   description:
-    'Settle a batch of orders (may mix ride/hotel/flight — hho_/ffo_/rio_) in ONE aggregate payment via a single payment credential. Physical landing point of the logical write tool orders__aggregate__pay-batch, invoked by the trip-aggregate pay-orders write verb through UniversalGateway (executed only after the single confirmation gate; never exposed to the LLM). Amounts are NOT passed here — the platform sums each order\'s locked authoritative price. Provide the aggregate total via one rail: --payment-token-id (轨A: network-token minted for the aggregate total, external_transaction_id bound to this payment_group — one UnionPay/Visa passkey) OR --payment-method-id (轨B: EVO bound card — one 3DS challenge); both may be omitted (monthly_settlement / platform default card). On EVO cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; finish it out-of-band, then an idempotent replay settles. On success the batch becomes settled / partially_settled (upstream-confirmation-failed orders are refunded). Supports --watch to poll until a terminal batch status.',
+    'Settle a batch of orders (may mix ride/hotel/flight — hho_/ffo_/rio_) in ONE aggregate payment via a single payment credential. Physical landing point of the logical write tool orders__aggregate__pay-batch, invoked by the trip-aggregate pay-orders write verb through UniversalGateway (executed only after the single confirmation gate; never exposed to the LLM). Amounts are NOT passed here — the platform sums each order\'s locked authoritative price. Provide the aggregate total via one rail: --payment-token-id (轨A: network-token minted for the aggregate total, external_transaction_id bound to this payment_group — one UnionPay/Visa passkey) OR --payment-method-id (轨B: bound card — one 3DS challenge); both may be omitted (monthly_settlement / platform default card). On cardholder authentication the response is AUTHENTICATION_REQUIRED with a three_ds_url + merchant_trans_id; finish it out-of-band, then an idempotent replay settles. On success the batch becomes settled / partially_settled (upstream-confirmation-failed orders are refunded). Supports --watch to poll until a terminal batch status.',
   flags: {
     'order-ids': {
       type: 'string',
@@ -1765,7 +1765,7 @@ export const ordersPayBatchSchema: VerbSchema = {
       type: 'string',
       required: false,
       description:
-        '[轨B] EVO bound-card id to settle the aggregate total via one 3DS challenge (explicit/fallback rail). Mutually exclusive with --payment-token-id.',
+        '[轨B] Bound-card id to settle the aggregate total via one 3DS challenge (explicit/fallback rail). Mutually exclusive with --payment-token-id.',
     },
     'direct-card-charge': {
       type: 'bool',
@@ -1825,7 +1825,7 @@ export const ordersPayBatchSchema: VerbSchema = {
         refunded_amount: { type: 'float', description: 'Amount refunded when upstream confirmation failed for this order.' },
       },
     },
-    three_ds_url: { type: 'string', description: '[AUTHENTICATION_REQUIRED only] EVO 3DS challenge URL — complete out-of-band, then replay to settle.' },
+    three_ds_url: { type: 'string', description: '[AUTHENTICATION_REQUIRED only] 3DS challenge URL — complete out-of-band, then replay to settle.' },
     merchant_trans_id: { type: 'string', description: '[AUTHENTICATION_REQUIRED only] merchant trans id of the batch preauth.' },
     amount: { type: 'float', description: '[AUTHENTICATION_REQUIRED only] challenge amount = aggregate total.' },
   },
@@ -1833,14 +1833,14 @@ export const ordersPayBatchSchema: VerbSchema = {
     command:
       'agenzo-merchant-cli orders pay-batch --order-ids hho_01K...,ffo_01K...,rio_01K... --payment-token-id ntk_01J2ABC --idempotency-key trip-pay-1',
     output_summary:
-      'Settles all listed orders in one charge (banks/EVO see one transaction). Returns {payment_group_id, status, total_amount, currency, orders[]}. Use --watch to poll until settled / partially_settled / failed; upstream-confirmation-failed orders are refunded.',
+      'Settles all listed orders in one charge (the bank and the acquiring gateway see one transaction). Returns {payment_group_id, status, total_amount, currency, orders[]}. Use --watch to poll until settled / partially_settled / failed; upstream-confirmation-failed orders are refunded.',
   },
   error_recovery: {
     PARAM_INVALID: 'Fix --order-ids (a non-empty comma-separated list or JSON array of order ids) and ensure --idempotency-key is present, then retry.',
     ORDER_NOT_PAYABLE: 'One of the order_ids is not in AWAITING_PAYMENT (the error names the specific order_id). Remove/replace it and retry with a NEW idempotency-key.',
     CURRENCY_MISMATCH: 'The batch mixes currencies — orders in one pay-batch must share a single currency. Split by currency and settle each group separately.',
     TOKEN_ORDER_MISMATCH: 'The token external_transaction_id is not bound to this payment_group. Mint a token for the aggregate total bound to THIS payment_group_id and retry; no funds moved.',
-    AUTHENTICATION_REQUIRED: 'EVO requires cardholder 3DS: open three_ds_url, finish authentication, then replay pay-batch with the SAME idempotency-key (or use --watch to poll automatically).',
+    AUTHENTICATION_REQUIRED: 'The acquiring gateway requires cardholder 3DS: open three_ds_url, finish authentication, then replay pay-batch with the SAME idempotency-key (or use --watch to poll automatically).',
   },
 };
 
@@ -2036,10 +2036,10 @@ export const flightPayOrderSchema = flightSchema(
   {
     'order-no': { type: 'string', required: true, description: 'Our order reference from create-order.' },
     'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id to charge (pay_per_call only; omit to use the default card).' },
-    'payment-token-id': { type: 'string', required: false, description: 'Optional network-token id; settles via direct charge instead of EVO preauth.' },
-    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume an EVO-card 3DS challenge with an already-authorised preauth trans id.' },
-    authenticate: { type: 'bool', required: false, default: false, description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless.' },
-    'return-url': { type: 'string', required: false, description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.' },
+    'payment-token-id': { type: 'string', required: false, description: 'Optional network-token id; settles via direct charge instead of the bound-card preauth.' },
+    'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a bound-card 3DS challenge with an already-authorised preauth trans id.' },
+    authenticate: { type: 'bool', required: false, default: false, description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, Visa / Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless.' },
+    'return-url': { type: 'string', required: false, description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the default return URL configured on the platform.' },
     'authorized-charge-no': { type: 'string', required: false, description: 'Resume a network-token 3DS challenge: charge_no from a prior AUTHENTICATION_REQUIRED response (settled via resume_token), then triggers ticketing on success.' },
     'direct-card-charge': { type: 'bool', required: false, default: false, description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the bound-card direct-charge fallback rail. Set true ONLY when the user explicitly chose the bound-card direct charge; forwarded to the pay body as direct_card_charge=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
@@ -2157,7 +2157,7 @@ export const flightChangePaySchema = flightSchema(
     'order-no': { type: 'string', required: true, description: 'Original order reference (ownership check).' },
     amount: { type: 'float', required: true, description: 'Change fee total (change-detail price_total, decimal units).' },
     currency: { type: 'string', required: false, default: 'USD', description: 'ISO 4217 currency code.' },
-    'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id (EVO path).' },
+    'payment-method-id': { type: 'string', required: false, description: 'Optional bound-card id (direct-charge path).' },
     'payment-token-id': { type: 'string', required: false, description: 'Optional UPI network-token id (unionpay charge path).' },
     'authorized-merchant-trans-id': { type: 'string', required: false, description: 'Resume a 3DS challenge with the merchant trans id of the already-authorised preauth; the platform reuses and captures it instead of authorizing again.' },
     'idempotency-key': { type: 'string', required: true, description: 'Idempotency-Key header.' },

@@ -124,19 +124,19 @@ export function registerHotelPayOrderCommand(parent: Command, deps: { apiClient:
     .description('Settle an existing hotel order (path decided by billing_mode: monthly_settlement or pay_per_call)')
     .option('--api-key <key>', 'API Key for authentication (X-Api-Key)')
     .option('--order-id <id>', 'Order ID to pay (from create-order response)')
-    .option('--payment-method-id <id>', 'Optional bound-card id to charge (pay_per_call / EVO preauth)')
+    .option('--payment-method-id <id>', 'Optional bound-card id to charge (pay_per_call preauth)')
     .option('--payment-token-id <id>', 'Optional network-token id (unionpay/visa charge path)')
     .option(
       '--authorized-merchant-trans-id <id>',
-      'Resume an EVO-card 3DS challenge: merchant trans id of an already-authorised preauth',
+      'Resume a bound-card 3DS challenge: merchant trans id of an already-authorised preauth',
     )
     .option(
       '--authenticate',
-      'Opt-in to require cardholder 3DS on the network-token direct charge (--payment-token-id, EVO/Mastercard). When a step-up is needed the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume with --authorized-charge-no. Default off = frictionless.',
+      'Opt-in to require cardholder 3DS on the network-token direct charge (--payment-token-id, Visa / Mastercard). When a step-up is needed the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume with --authorized-charge-no. Default off = frictionless.',
     )
     .option(
       '--return-url <url>',
-      'Optional 3DS/passkey return URL for the network-token authenticate path (falls back to the platform EVO_3DS_RETURN_URL)',
+      'Optional 3DS/passkey return URL for the network-token authenticate path (falls back to the default return URL configured on the platform)',
     )
     .option(
       '--authorized-charge-no <no>',

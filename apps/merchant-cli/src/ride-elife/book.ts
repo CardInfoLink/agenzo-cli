@@ -143,11 +143,11 @@ export function registerBookCommand(parent: Command, deps: { apiClient: ApiClien
       'DEPRECATED — use `ride-elife create-order` + `pay-order` for network-token direct charge. ' +
         'A single-step book carrying a network token hits Charge_Service strict order↔token ' +
         'binding and is rejected server-side with a retriable=false guidance error. Kept only for ' +
-        'backward compatibility; monthly_settlement / EVO / no-credential booking still work via book.',
+        'backward compatibility; monthly_settlement / bound-card direct charge / no-credential booking still work via book.',
     )
     .option(
       '--authorized-merchant-trans-id <id>',
-      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
+      'Merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
         'When set, the server reuses that authorization instead of creating a new one, ' +
         'avoiding a second hold on the card (pay_per_call mode only).',
     )

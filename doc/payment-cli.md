@@ -91,7 +91,7 @@ retry with the **same** `--idempotency-key` to check the outcome safely (it will
 | Field | Type | Notes |
 |---|---|---|
 | `charge_no` | string | Platform charge identifier |
-| `payment_brand` | string | 实际使用的支付轨（`evo` / `unionpay` / `visa`）—— 这是内部轨值，不是卡品牌 |
+| `payment_brand` | string | The payment rail actually used (`evo` / `unionpay` / `visa`) — an internal rail value, not the card brand |
 | `amount_cents` | integer | Principal, in **cents** |
 | `fee_cents` | integer | Fee, in **cents** |
 | `total_cents` | integer | `amount_cents + fee_cents`, in **cents** |

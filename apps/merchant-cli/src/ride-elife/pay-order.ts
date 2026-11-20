@@ -51,7 +51,7 @@ function assertExactlyOneCredential(
     throw new CliError(
       'PARAM_INVALID',
       'Invalid payment credential options: provide exactly one of --payment-token-id ' +
-        '(network-token direct charge) or --payment-method-id (EVO bound card). Neither was given.',
+        '(network-token direct charge) or --payment-method-id (bound card). Neither was given.',
     );
   }
   if (hasToken && hasMethod) {
@@ -155,20 +155,20 @@ export function registerRidePayOrderCommand(
     )
     .option(
       '--payment-method-id <id>',
-      'Bound-card id to charge via EVO preauth+capture (fallback path). Exactly one of ' +
+      'Bound-card id to charge via preauth+capture (fallback path). Exactly one of ' +
         '--payment-token-id / --payment-method-id is required.',
     )
     .option(
       '--authorized-merchant-trans-id <id>',
-      'Resume an EVO-card 3DS challenge: merchant trans id of an already-authorised preauth',
+      'Resume a bound-card 3DS challenge: merchant trans id of an already-authorised preauth',
     )
     .option(
       '--authenticate',
-      'Opt-in to require cardholder 3DS on the network-token direct charge (--payment-token-id, EVO/Mastercard). When a step-up is needed the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume with --authorized-charge-no. Default off = frictionless.',
+      'Opt-in to require cardholder 3DS on the network-token direct charge (--payment-token-id, Visa / Mastercard). When a step-up is needed the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume with --authorized-charge-no. Default off = frictionless.',
     )
     .option(
       '--return-url <url>',
-      'Optional 3DS/passkey return URL for the network-token authenticate path (falls back to the platform EVO_3DS_RETURN_URL)',
+      'Optional 3DS/passkey return URL for the network-token authenticate path (falls back to the default return URL configured on the platform)',
     )
     .option(
       '--authorized-charge-no <no>',
