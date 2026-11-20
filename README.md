@@ -18,9 +18,9 @@
 | `payment-cli` | `@agenzo/payment-cli` | [![npm](https://img.shields.io/npm/v/@agenzo/payment-cli.svg)](https://www.npmjs.com/package/@agenzo/payment-cli) | `agenzo-payment-cli` | API key | Implemented |
 
 - **admin-cli** — control plane: `auth` / `config` / `orgs` / `developers` / `keys` / `accounts`.
-- **token-cli** — `payment-methods` (add payment method: Evo 3DS or UnionPay enrollment) and `payment-tokens` (VCN / Network Token / X402).
+- **token-cli** — `payment-methods` (add payment method: hosted card binding or UnionPay enrollment) and `payment-tokens` (VCN / Network Token / X402).
 - **merchant-cli** — merchant fulfillment: `services` (discover capabilities), `ride-elife` (ride-hailing), and `hotel-redaug` (international hotel booking via Redaug).
-- **payment-cli** — `payments` (capture a previously created payment token via Evo or UnionPay).
+- **payment-cli** — `payments` (capture a previously created payment token: card or UnionPay).
 
 ## Conventions
 
@@ -57,7 +57,7 @@
 | `payment-tokens` | `create` / `list` / `get` / `revoke` |
 
 **Payment brands** (selected via `--payment-brand` on `payment-methods add`):
-- `evo` (default): Evo 3DS card binding — user verifies via email/browser.
+- omitted (default): the hosted binding page, which supports Visa + Mastercard — the page detects the card brand and runs the matching rail; the user verifies via passkey or 3DS.
 - `unionpay`: UnionPay enrollment — user authenticates via passkey on a UnionPay-hosted page.
 
 ### merchant-cli (runtime plane / API key)
@@ -78,7 +78,7 @@
 |---|---|
 | `payments` | `capture` |
 
-`payments capture` charges a previously created payment token (from `agenzo-token-cli payment-tokens create`). Amount / currency / fee are fixed at token creation time — this verb only submits the charge. Supports `--payment-brand evo` (default) and `--payment-brand unionpay`.
+`payments capture` charges a previously created payment token (from `agenzo-token-cli payment-tokens create`). Amount / currency / fee are fixed at token creation time — this verb only submits the charge. `--payment-brand` is an override only — `mastercard`, `unionpay` or `visa`; it may be omitted, and the platform then decides from the token record.
 
 ## Authentication
 
