@@ -394,12 +394,12 @@ export const ridePayOrderSchema: VerbSchema = {
       description:
         'Resume a 3DS challenge: merchant trans id of an already-authorised EVO preauth returned by a prior AUTHENTICATION_REQUIRED response',
     },
-    'evo-explicit': {
+    'direct-card-charge': {
       type: 'bool',
       required: false,
       default: false,
       description:
-        '[方案 B/R16] Explicit opt-in to settle this pay_per_call ride via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
+        '[方案 B/R16] Explicit opt-in to settle this pay_per_call ride via the bound-card direct-charge fallback rail. Set true ONLY when the user explicitly chose the bound-card direct charge; forwarded to the pay body as direct_card_charge=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
     },
     authenticate: {
       type: 'bool',
@@ -1087,11 +1087,11 @@ export const hotelPayOrderSchema: VerbSchema = {
       required: false,
       description: 'Resume a 3DS challenge: merchant trans id of an already-authorised preauth returned by a prior AUTHENTICATION_REQUIRED response. Reuses that authorization instead of creating a new one (pay_per_call only).',
     },
-    'evo-explicit': {
+    'direct-card-charge': {
       type: 'bool',
       required: false,
       default: false,
-      description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
+      description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the bound-card direct-charge fallback rail. Set true ONLY when the user explicitly chose the bound-card direct charge; forwarded to the pay body as direct_card_charge=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side. Ignored for monthly_settlement and on the payment-token-id direct-charge path.',
     },
     authenticate: {
       type: 'bool',
@@ -1767,12 +1767,12 @@ export const ordersPayBatchSchema: VerbSchema = {
       description:
         '[轨B] EVO bound-card id to settle the aggregate total via one 3DS challenge (explicit/fallback rail). Mutually exclusive with --payment-token-id.',
     },
-    'evo-explicit': {
+    'direct-card-charge': {
       type: 'bool',
       required: false,
       default: false,
       description:
-        '[轨B 硬门槛] Explicit opt-in to settle via the EVO bound-card rail. Set true ONLY when the user explicitly chose EVO; forwarded to the body as evo_explicit=true. Omit on the payment-token-id direct-charge path.',
+        '[轨B 硬门槛] Explicit opt-in to settle via the bound-card direct-charge rail. Set true ONLY when the user explicitly chose the bound-card direct charge; forwarded to the body as direct_card_charge=true. Omit on the payment-token-id direct-charge path.',
     },
     'payment-group-id': {
       type: 'string',
@@ -2041,7 +2041,7 @@ export const flightPayOrderSchema = flightSchema(
     authenticate: { type: 'bool', required: false, default: false, description: 'Opt-in to require cardholder 3DS on the network-token direct charge (payment-token-id, EVO/Mastercard). On step-up the response is AUTHENTICATION_REQUIRED with three_ds_url + charge_no; resume via authorized-charge-no. Default off = frictionless.' },
     'return-url': { type: 'string', required: false, description: 'Optional 3DS/passkey return URL for the network-token authenticate path; falls back to the platform EVO_3DS_RETURN_URL.' },
     'authorized-charge-no': { type: 'string', required: false, description: 'Resume a network-token 3DS challenge: charge_no from a prior AUTHENTICATION_REQUIRED response (settled via resume_token), then triggers ticketing on success.' },
-    'evo-explicit': { type: 'bool', required: false, default: false, description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the EVO bound-card fallback rail. Set true ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.' },
+    'direct-card-charge': { type: 'bool', required: false, default: false, description: '[方案 B/R16] Explicit opt-in to settle this pay_per_call order via the bound-card direct-charge fallback rail. Set true ONLY when the user explicitly chose the bound-card direct charge; forwarded to the pay body as direct_card_charge=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.' },
     'idempotency-key': { type: 'string', required: true, description: 'Forwarded verbatim as the Idempotency-Key header.' },
     ...PRICE_ANNOTATION_FLAGS,
   },

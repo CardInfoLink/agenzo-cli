@@ -14,8 +14,8 @@ import type { CommandResult } from '@agenzo/cli-core';
 
 type PayDeps = { apiClient: ApiClient };
 
-/** Brands the platform /pay accepts (mirrors platform `app.core.payment_brand`). */
-const PAYMENT_BRANDS: readonly string[] = ['evo', 'unionpay', 'visa'];
+/** Brands the platform /pay accepts (mirrors platform `PaymentBrand`，对外品牌三值). */
+const PAYMENT_BRANDS: readonly string[] = ['mastercard', 'unionpay', 'visa'];
 
 /** Server ChargeResult payload (amounts in integer cents). */
 interface ChargeResult {
@@ -49,7 +49,8 @@ function formatCents(cents: number | undefined): string {
  *
  * Amount / currency / fee are taken from the token (set when it was created),
  * so this verb does NOT accept --amount / --currency. Branch is chosen by
- * `--payment-brand` (evo default | unionpay | visa). Requires `--idempotency-key`
+ * `--payment-brand` (mastercard | unionpay | visa; omit it and the platform
+ * decides from the token record). Requires `--idempotency-key`
  * (never auto-generated). API key and Idempotency-Key are sent as headers.
  *
  * Registered under the `payments` command group (see index.ts) so the full
@@ -71,18 +72,18 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     )
     .option(
       '--payment-brand <brand>',
-      'Payment brand override (optional; auto-detected from token). "evo", "unionpay" or "visa".',
+      'Payment brand override: "mastercard", "unionpay" or "visa". May be omitted — the platform then decides from the token record.',
     )
     .option('--description <text>', 'Optional payment description')
     .option(
       '--authenticate',
-      'Require cardholder passkey/3DS on this charge (EVO/Mastercard network token only). ' +
+      'Require cardholder passkey/3DS on this charge (Visa / Mastercard network token only). ' +
         'When the gateway needs authentication the response returns pay_status=requires_action ' +
         '+ three_ds_url; open it, complete the passkey, then run `payments capture-resume`.',
     )
     .option(
       '--return-url <url>',
-      'Return URL for the passkey/3DS redirect (used with --authenticate; server falls back to its configured EVO 3DS return URL).',
+      'Return URL for the passkey/3DS redirect (used with --authenticate; server falls back to its configured default return URL).',
     )
     .option(
       '--cardholder-phone <phone>',
@@ -116,12 +117,12 @@ export function registerPayCommand(parent: Command, deps: PayDeps): void {
     const paymentBrand = opts.paymentBrand
       ? String(opts.paymentBrand).toLowerCase()
       : undefined;
-    // 与平台 ChargeRequest.payment_brand 的取值保持一致（evo / unionpay / visa）；
-    // 编排器的 visa-charge 会传 visa，漏掉它会让 Visa 令牌扣款在 CLI 这一层就被拒。
+    // 取值与平台 ChargeRequest.payment_brand 的**对外品牌**三值一致；编排侧自 2026-11 起
+    // 不再下发该 flag（平台以令牌记录为权威），本校验只服务人工直调。
     if (paymentBrand && !PAYMENT_BRANDS.includes(paymentBrand)) {
       throw new CliError(
         'PARAM_INVALID',
-        `Unknown --payment-brand "${opts.paymentBrand}". Expected "evo", "unionpay" or "visa".`,
+        `Unknown --payment-brand "${opts.paymentBrand}". Expected "mastercard", "unionpay" or "visa".`,
       );
     }
 

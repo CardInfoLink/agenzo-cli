@@ -191,14 +191,14 @@ export function isBatchTerminal(record: unknown): boolean {
  * `orders pay-batch` —— 行程聚合支付：以**一份支付凭证**对一批订单（`order_ids[]`，
  * 可混合 `hho_`/`ffo_`/`rio_` 三域）一次结算合计总额。调用 `POST /orders/pay-batch`，
  * `Idempotency-Key` 走 header，body 为
- * `{order_ids[], payment_token_id?, payment_method_id?, evo_explicit?, payment_group_id?, member_id?}`。
+ * `{order_ids[], payment_token_id?, payment_method_id?, direct_card_charge?, payment_group_id?, member_id?}`。
  *
  * - `--order-ids`（必填）：有序订单列表（逗号分隔或 JSON 数组）。金额取各订单锁单落库的
  *   权威价、由后端求和，**调用方不传各订单金额**。
  * - `--payment-token-id`（可选，轨 A）：以合计总额created、`external_transaction_id` 绑定到
  *   本次 payment_group 的网络令牌（银联/Visa 一次 passkey）。
  * - `--payment-method-id`（可选，轨 B）：EVO 绑卡（一次 3DS）。
- * - `--evo-explicit`（可选，轨 B 硬门槛）：仅在用户显式选择 EVO 时置位，透传 `evo_explicit=true`。
+ * - `--direct-card-charge`（可选，轨 B 硬门槛）：仅在用户显式选择直刷绑卡时置位，透传 `direct_card_charge=true`。
  * - `--payment-group-id`（可选）：调用方预生成的组号；缺省由后端生成。
  * - `--member`（可选）：归因的终端用户 member id。
  * - `--idempotency-key`（必填）：原样作为 `Idempotency-Key` header 转发；相同键 + 有序
@@ -235,8 +235,8 @@ export function registerOrdersPayBatchCommand(parent: Command, deps: { apiClient
       '[轨 B] EVO bound-card id to settle the aggregate total (one 3DS challenge)',
     )
     .option(
-      '--evo-explicit',
-      '[轨 B 硬门槛] Explicit opt-in to settle via the EVO bound-card rail. Set ONLY when the user explicitly chose EVO; forwarded to the body as evo_explicit=true.',
+      '--direct-card-charge',
+      '[轨 B 硬门槛] Explicit opt-in to settle via the bound-card direct-charge rail. Set ONLY when the user explicitly chose the bound-card direct charge; forwarded to the body as direct_card_charge=true.',
     )
     .option(
       '--payment-group-id <id>',
@@ -286,12 +286,12 @@ export function registerOrdersPayBatchCommand(parent: Command, deps: { apiClient
     const watchInterval = resolveSeconds(opts.watchInterval as string, DEFAULT_PAY_BATCH_WATCH_INTERVAL_SECONDS);
     const watchTimeout = resolveSeconds(opts.watchTimeout as string, DEFAULT_PAY_BATCH_WATCH_TIMEOUT_SECONDS);
 
-    // Body 构造（薄透传）：order_ids 必带；凭证 / evo_explicit / group / member 仅在提供时带上。
+    // Body 构造（薄透传）：order_ids 必带；凭证 / direct_card_charge / group / member 仅在提供时带上。
     const body: Record<string, unknown> = { order_ids: orderIds };
     if (opts.paymentTokenId !== undefined) body.payment_token_id = opts.paymentTokenId as string;
     if (opts.paymentMethodId !== undefined) body.payment_method_id = opts.paymentMethodId as string;
-    // 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省不发（后端默认 false）。
-    if (opts.evoExplicit) body.evo_explicit = true;
+    // 显式直刷绑卡选择信号：仅在置位时透传 direct_card_charge=true；缺省不发（后端默认 false）。
+    if (opts.directCardCharge) body.direct_card_charge = true;
     if (opts.paymentGroupId !== undefined) body.payment_group_id = opts.paymentGroupId as string;
     // 归因标签：仅在显式传了非空 --member 时写入，缺省保持无归属。
     const member = memberIdOf(opts);

@@ -256,7 +256,7 @@ describe('hotel-redaug pay-order (default path)', () => {
     expect(body).not.toHaveProperty('payment_method_id');
   });
 
-  it('forwards --evo-explicit as evo_explicit=true alongside --payment-method-id (方案 B/R16 EVO opt-in)', async () => {
+  it('forwards --direct-card-charge as direct_card_charge=true alongside --payment-method-id (方案 B/R16 直刷绑卡 opt-in)', async () => {
     const api = mockApiClient({ '/hotel/ord_evo1/pay': PAY_ORDER_SUCCESS_RESP });
     const program = hotelProgram(api);
     captureStdout();
@@ -266,7 +266,7 @@ describe('hotel-redaug pay-order (default path)', () => {
       ...BASE, 'pay-order', '--api-key', 'k',
       '--order-id', 'ord_evo1',
       '--payment-method-id', 'df45384264ec457a87559e2098273983',
-      '--evo-explicit',
+      '--direct-card-charge',
       '--idempotency-key', 'pay-evo-1',
       '--yes', '--format', 'json',
     ]);
@@ -274,10 +274,10 @@ describe('hotel-redaug pay-order (default path)', () => {
     const [path, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
     expect(path).toBe('/hotel/ord_evo1/pay');
     expect(body.payment_method_id).toBe('df45384264ec457a87559e2098273983');
-    expect(body.evo_explicit).toBe(true);
+    expect(body.direct_card_charge).toBe(true);
   });
 
-  it('omits evo_explicit when --evo-explicit is absent (platform defaults false)', async () => {
+  it('omits direct_card_charge when --direct-card-charge is absent (platform defaults false)', async () => {
     const api = mockApiClient({ '/hotel/ord_noevo1/pay': PAY_ORDER_SUCCESS_RESP });
     const program = hotelProgram(api);
     captureStdout();
@@ -292,7 +292,7 @@ describe('hotel-redaug pay-order (default path)', () => {
     ]);
 
     const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
-    expect(body).not.toHaveProperty('evo_explicit');
+    expect(body).not.toHaveProperty('direct_card_charge');
   });
 });
 

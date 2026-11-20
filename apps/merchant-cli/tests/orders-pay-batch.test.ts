@@ -265,7 +265,7 @@ describe('orders pay-batch —— 单发成功', () => {
     expect(body.payment_token_id).toBe('ntk_1');
     // 未提供的可选字段一律不出现。
     expect(body).not.toHaveProperty('payment_method_id');
-    expect(body).not.toHaveProperty('evo_explicit');
+    expect(body).not.toHaveProperty('direct_card_charge');
     expect(body).not.toHaveProperty('payment_group_id');
     expect(body).not.toHaveProperty('member_id');
     // 调用方不传各订单金额（合计由后端按权威价求和）。
@@ -309,7 +309,7 @@ describe('orders pay-batch —— 单发成功', () => {
     expect(body.order_ids).toEqual(['ffo_9', 'hho_8', 'rio_7']);
   });
 
-  it('轨 B：--payment-method-id + --evo-explicit → body 携 payment_method_id 与 evo_explicit=true', async () => {
+  it('轨 B：--payment-method-id + --direct-card-charge → body 携 payment_method_id 与 direct_card_charge=true', async () => {
     const api = mockApiClient({ '/orders/pay-batch': SETTLED_RESP });
     const program = ordersProgram(api);
     captureStdout();
@@ -317,18 +317,18 @@ describe('orders pay-batch —— 单发成功', () => {
 
     await program.parseAsync(args([
       '--payment-method-id', 'pm_evo_1',
-      '--evo-explicit',
+      '--direct-card-charge',
       '--idempotency-key', 'trip-pay-evo',
       '--yes', '--format', 'json',
     ]));
 
     const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
     expect(body.payment_method_id).toBe('pm_evo_1');
-    expect(body.evo_explicit).toBe(true);
+    expect(body.direct_card_charge).toBe(true);
     expect(body).not.toHaveProperty('payment_token_id');
   });
 
-  it('未传 --evo-explicit 时 body 不含 evo_explicit（后端默认 false）', async () => {
+  it('未传 --direct-card-charge 时 body 不含 direct_card_charge（后端默认 false）', async () => {
     const api = mockApiClient({ '/orders/pay-batch': SETTLED_RESP });
     const program = ordersProgram(api);
     captureStdout();
@@ -341,7 +341,7 @@ describe('orders pay-batch —— 单发成功', () => {
     ]));
 
     const [, , body] = api.post.mock.calls[0] as [string, unknown, Record<string, any>];
-    expect(body).not.toHaveProperty('evo_explicit');
+    expect(body).not.toHaveProperty('direct_card_charge');
   });
 
   it('--payment-group-id 与 --member 仅在提供时进 body', async () => {
@@ -453,7 +453,7 @@ describe('orders pay-batch —— 3DS 挑战体', () => {
     await program.parseAsync([
       ...BASE, 'pay-batch', '--api-key', 'k',
       '--order-ids', 'hho_1,ffo_2',
-      '--payment-method-id', 'pm_evo_1', '--evo-explicit',
+      '--payment-method-id', 'pm_evo_1', '--direct-card-charge',
       '--idempotency-key', 'trip-3ds', '--yes', '--format', 'json',
     ]);
 

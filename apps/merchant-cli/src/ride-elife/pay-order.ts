@@ -175,8 +175,8 @@ export function registerRidePayOrderCommand(
       'Resume a network-token 3DS challenge: charge_no returned by a prior AUTHENTICATION_REQUIRED response (settled via ChargeService.resume_token). When set, the exactly-one-credential rule is relaxed (this is a continuation, not a fresh charge).',
     )
     .option(
-      '--evo-explicit',
-      '[方案 B/R16] Explicit opt-in to settle this pay_per_call ride via the EVO bound-card fallback rail. Set ONLY when the user explicitly chose EVO; forwarded to the pay body as evo_explicit=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.',
+      '--direct-card-charge',
+      '[方案 B/R16] Explicit opt-in to settle this pay_per_call ride via the bound-card direct-charge fallback rail. Set ONLY when the user explicitly chose the bound-card direct charge; forwarded to the pay body as direct_card_charge=true. Without it, a pay_per_call settlement lacking --payment-token-id is hard-gated server-side.',
     )
     .option(
       '--idempotency-key <key>',
@@ -231,8 +231,8 @@ export function registerRidePayOrderCommand(
     if (opts.authenticate) body.authenticate = true;
     if (opts.returnUrl !== undefined) body.return_url = opts.returnUrl as string;
     if (authorizedChargeNo !== undefined) body.authorized_charge_no = authorizedChargeNo;
-    // 方案 B/R16 显式 EVO 选择信号：仅在置位时透传 evo_explicit=true；缺省则不发（平台默认 false）。
-    if (opts.evoExplicit) body.evo_explicit = true;
+    // 方案 B/R16 显式直刷绑卡选择信号：仅在置位时透传 direct_card_charge=true；缺省则不发（平台默认 false）。
+    if (opts.directCardCharge) body.direct_card_charge = true;
     // 价格批注（原价 / 优惠，纯记录）：落订单 auth_snapshot + 统一流水并在订单详情回显，
     // 不进网关报文、不参与「实扣额 == 锁单权威价」那道核验（金额仍不由调用方决定，R2.6）。
     applyPriceAnnotation(body, opts);
