@@ -166,8 +166,8 @@ Payment credential flags (both optional, omit to let the platform decide by `bil
 
 | Flag | Effect |
 |---|---|
-| `--payment-method-id` | Settle this order on that specific bound card (pay_per_call / EVO preauth + capture) |
-| `--payment-token-id` | **UnionPay pre-charged path.** A payment token id from an already-completed UPI network-token capture: the platform skips EVO preauth/capture and only locks the order + records the credential (funds already charged) |
+| `--payment-method-id` | Settle this order on that specific bound card (pay_per_call / bound-card preauth + capture) |
+| `--payment-token-id` | **UnionPay pre-charged path.** A payment token id from an already-completed UPI network-token capture: the platform skips preauth/capture and only locks the order + records the credential (funds already charged) |
 
 ### pay-order
 
@@ -264,10 +264,10 @@ Key rules:
 | Flag | Effect |
 |---|---|
 | *(neither)* | Platform picks the path from the developer's `billing_mode` |
-| `--payment-method-id` | Charge that bound card via the platform's EVO integration (pay_per_call) |
-| `--payment-token-id` | **UnionPay pre-charged path** — a UPI network-token id whose capture already completed; the platform skips EVO preauth/capture and records the credential against the order/change |
+| `--payment-method-id` | Charge that bound card via the platform's own acquiring-gateway integration (pay_per_call) |
+| `--payment-token-id` | **UnionPay pre-charged path** — a UPI network-token id whose capture already completed; the platform skips preauth/capture and records the credential against the order/change |
 
-Billing modes otherwise match hotel: `monthly_settlement` deducts from the settlement account on `pay-order`; `pay_per_call` is captured server-side (no EVO parameters pass through the CLI).
+Billing modes otherwise match hotel: `monthly_settlement` deducts from the settlement account on `pay-order`; `pay_per_call` is captured server-side (no acquiring-gateway parameters pass through the CLI).
 
 ### Parameters to ask for (flight-flink)
 
