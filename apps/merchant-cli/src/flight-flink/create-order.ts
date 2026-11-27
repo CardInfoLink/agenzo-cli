@@ -36,7 +36,7 @@ export function registerCreateOrderCommand(parent: Command, deps: Deps): void {
     .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
     .option(
       '--authorized-merchant-trans-id <id>',
-      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
+      'Merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
       'When set, the server reuses that authorization instead of creating a new one, ' +
       'avoiding a second hold on the card (pay_per_call mode only).',
     )

@@ -25,7 +25,7 @@ export function registerChangePayCommand(parent: Command, deps: Deps): void {
     .option('--order-no <id>', 'Original order reference (ownership check)')
     .option('--amount <amount>', 'Change fee total in decimal units (change-detail price_total)')
     .option('--currency <currency>', 'ISO 4217 currency code', 'USD')
-    .option('--payment-method-id <id>', 'Optional bound-card id (EVO path)')
+    .option('--payment-method-id <id>', 'Optional bound-card id (direct-charge path)')
     .option('--payment-token-id <id>', 'Optional UPI network-token id (unionpay charge path)')
     .option(
       '--authorized-merchant-trans-id <id>',

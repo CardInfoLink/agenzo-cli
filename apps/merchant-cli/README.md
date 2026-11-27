@@ -108,7 +108,7 @@ units (e.g. `320.00` = 320.00 yuan). **`create-order` settles payment AND locks 
 path is chosen server-side by the developer's `billing_mode`:
 
 - **monthly_settlement**: the total is deducted from the developer's monthly-settlement account balance.
-- **pay_per_call**: the total is authorized + captured on the developer's bound card via the platform's own EVO integration (server-side; no EVO parameters pass through this CLI).
+- **pay_per_call**: the total is authorized + captured on the developer's bound card via the platform's own acquiring-gateway integration (server-side; no acquiring-gateway parameters pass through this CLI).
 
 `pay-order` takes only `--order-id` and triggers supplier confirmation / ticket issuance — funds were
 already settled in `create-order`, so both billing modes use the same `pay-order` call.

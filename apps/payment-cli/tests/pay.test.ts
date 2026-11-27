@@ -103,7 +103,7 @@ describe('capture', () => {
         'node', 'cli', 'capture',
         '--api-key', 'sk_key',
         '--payment-token-id', 'ptk_abc',
-        '--payment-brand', 'mastercard',
+        '--payment-brand', 'evo',
         '--idempotency-key', 'idem_4',
         '--yes',
       ]),

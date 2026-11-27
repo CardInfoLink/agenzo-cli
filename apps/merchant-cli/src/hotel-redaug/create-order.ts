@@ -319,15 +319,15 @@ export function registerHotelCreateOrderCommand(parent: Command, deps: { apiClie
     )
     .option(
       '--payment-method-id <id>',
-      'Optional bound-card id (pay_per_call / EVO path). When set, the platform settles this order by pre-authorizing + capturing on that specific bound card. Omit to let the platform pick by billing_mode.',
+      'Optional bound-card id (pay_per_call / bound-card direct-charge path). When set, the platform settles this order by pre-authorizing + capturing on that specific bound card. Omit to let the platform pick by billing_mode.',
     )
     .option(
       '--payment-token-id <id>',
-      'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips EVO preauth/capture and only locks the order + records this credential (funds already charged).',
+      'UPI Agent Pay: payment token id from an already-completed UnionPay network-token capture. When set, the platform skips preauth/capture and only locks the order + records this credential (funds already charged).',
     )
     .option(
       '--authorized-merchant-trans-id <id>',
-      'EVO merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
+      'Merchant transaction id of an already-authorised preauth (3DS challenge resume). ' +
       'When set, the server reuses that authorization instead of creating a new one, ' +
       'avoiding a second hold on the card (pay_per_call mode only).',
     )

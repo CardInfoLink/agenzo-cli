@@ -36,7 +36,7 @@ agenzo-payment-cli payments capture \
 |---|---|---|
 | `--api-key` | yes | API Key, sent as the `X-Api-Key` header. If omitted, the CLI prompts for it as a masked password — including under `--yes`. |
 | `--payment-token-id` | yes | The payment token to charge (`ptk_...`). Prompted if omitted; a hard error under `--yes`. |
-| `--payment-brand` | no | Override only — `evo` or `unionpay` (case-insensitive). Omitted from the request body by default so the platform auto-detects the brand from the token record. Any other value is rejected locally as `PARAM_INVALID`. |
+| `--payment-brand` | no | Override only — `mastercard`, `unionpay` or `visa` (case-insensitive). Omitted from the request body by default so the platform decides the brand from the token record. Any other value is rejected locally as `PARAM_INVALID`. |
 | `--description` | no | Free-text description; sent in the body only when provided. |
 | `--provider-id` | no | **Restatement only** of the acquiring provider declared when the token was minted; sent in the body as `provider_id` when provided. It is checked for consistency and never rewrites the token: a value naming a **different provider** than the token's own `provider_id` is rejected with `PROVIDER_MISMATCH` (409), and no value can move a token to another acquiring store. The comparison is **case-insensitive** (restating `REDAUG` against a `redaug` token is consistent). Omit it to use the token's declared value. Forwarded verbatim — the CLI does no trimming and no case folding of its own (the platform does the folding); an empty value counts as *declared but invalid* and is rejected with `PROVIDER_NOT_CONFIGURED` (409), not treated as omitted. |
 | `--idempotency-key` | yes | Unique value per logical charge attempt; forwarded verbatim as the `Idempotency-Key` header (never in the body) and **never auto-generated**. Prompted if omitted; a hard error under `--yes`. Reuse the same value to safely retry the same charge. |
@@ -52,9 +52,9 @@ The two 3DS follow-ups (`payments capture-resume` / `payments charge-card-resume
 either; they read the store from the pending charge record. See
 [token-cli.md](token-cli.md) for where the value comes from and how it is declared at mint time.
 
-**Auto-detection**: The platform reads `payment_brand` from the payment token document.
+**Auto-detection**: The platform reads the payment rail from the payment token document.
 You do NOT need to specify `--payment-brand` — the CLI omits it by default and the server
-routes to the correct payment rail automatically (evo gateway token vs unionpay network token).
+routes to the correct payment rail automatically (gateway token vs network token).
 
 ### Output
 
@@ -91,7 +91,7 @@ retry with the **same** `--idempotency-key` to check the outcome safely (it will
 | Field | Type | Notes |
 |---|---|---|
 | `charge_no` | string | Platform charge identifier |
-| `payment_brand` | string | Brand actually used (`evo` / `unionpay`) |
+| `payment_brand` | string | The payment rail actually used (`evo` / `unionpay` / `visa`) — an internal rail value, not the card brand |
 | `amount_cents` | integer | Principal, in **cents** |
 | `fee_cents` | integer | Fee, in **cents** |
 | `total_cents` | integer | `amount_cents + fee_cents`, in **cents** |
@@ -114,6 +114,6 @@ retry with the **same** `--idempotency-key` to check the outcome safely (it will
 |-------|-------|-----|
 | `TOKEN_NOT_FOUND` (exit 1) | The payment token id doesn't exist, or belongs to a different API key's developer | Verify the token id with `agenzo-token-cli payment-tokens get <id>` |
 | `INVALID_PAYMENT_METHOD` (exit 1) | The token is not active, or is missing the credential needed for the detected brand | Re-check the token status; unionpay tokens must be ACTIVE (cryptogram issued) before they can be charged |
-| `PARAM_INVALID` (exit 1) | `--payment-brand` is not `evo` or `unionpay`, or `--payment-token-id` is missing under `--yes` | Pass a supported brand (or omit it for auto-detection) and always supply `--payment-token-id` in automation |
+| `PARAM_INVALID` (exit 1) | `--payment-brand` is not `mastercard`, `unionpay` or `visa`, or `--payment-token-id` is missing under `--yes` | Pass a supported brand (or omit it for auto-detection) and always supply `--payment-token-id` in automation |
 | Missing `--idempotency-key` under `--yes` (exit 1) | Automation mode requires an explicit idempotency key — the CLI never auto-generates one | Supply a unique `--idempotency-key` per charge attempt |
 | Upstream error (exit 4), `pay_status: "pending"` | The gateway had not reached a terminal state within the bounded poll window | Retry with the same `--idempotency-key`; it is safe and will not double-charge |
